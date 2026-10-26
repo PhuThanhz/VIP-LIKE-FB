@@ -1,5 +1,5 @@
-import React from 'react';
-import { Button, Tooltip, Breadcrumb } from 'antd';
+import React, { useState } from 'react';
+import { Button, Tooltip, Breadcrumb, Avatar } from 'antd';
 import {
   DatabaseOutlined,
   SyncOutlined,
@@ -12,7 +12,10 @@ import {
   HistoryOutlined,
   MenuUnfoldOutlined,
   MenuFoldOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
+import AuthModal, { CurrentUser } from './auth/AuthModal';
+
 
 export interface HeaderDbStatus {
   connected: boolean;
@@ -87,6 +90,17 @@ export const Header: React.FC<HeaderProps> = ({
   onCheckDb,
 }) => {
   const currentTab = TAB_TITLES[activeTabKey] || TAB_TITLES['buff-like'];
+
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('viplike_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
 
   return (
     <header className="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-xl sticky top-0 z-20 px-4 sm:px-6 py-3">
@@ -188,10 +202,39 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="hidden lg:inline">Cài Đặt</span>
             </Button>
           )}
+
+          {/* Auth Login / User Profile Button */}
+          {currentUser ? (
+            <Button
+              onClick={() => setIsAuthModalOpen(true)}
+              className="bg-slate-900 border-cyan-800 hover:border-cyan-500 text-white text-xs rounded-xl h-9 px-2.5 flex items-center gap-2"
+            >
+              <Avatar size={22} icon={<UserOutlined />} className="bg-gradient-to-r from-cyan-500 to-blue-500" />
+              <span className="font-semibold text-cyan-300 hidden md:inline">{currentUser.fullName}</span>
+            </Button>
+          ) : (
+            <Button
+              icon={<UserOutlined className="text-white" />}
+              onClick={() => setIsAuthModalOpen(true)}
+              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl h-9 border-0 shadow-md shadow-cyan-500/20"
+            >
+              <span className="hidden sm:inline">Đăng Nhập</span>
+              <span className="sm:hidden">Login</span>
+            </Button>
+          )}
         </div>
       </div>
+
+      {/* Ant Design Modal Đăng Nhập / Đăng Ký / Kích Hoạt Key */}
+      <AuthModal
+        open={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        currentUser={currentUser}
+        onUserChange={setCurrentUser}
+      />
     </header>
   );
 };
+
 
 export default Header;
