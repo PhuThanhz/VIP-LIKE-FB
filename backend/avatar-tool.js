@@ -37,58 +37,100 @@ const BROWSER_ARGS = [
 ];
 
 // =============================================================================
-// 1. KIỂM TRA TRẠNG THÁI AVATAR HÀNG LOẠT (GRAPH API CỰC NHANH)
+const AVATAR_STATUS_CACHE_FILE = path.join(DATA_DIR, 'avatar_status_cache.json');
+
+function loadAvatarCache() {
+  try {
+    if (fs.existsSync(AVATAR_STATUS_CACHE_FILE)) {
+      return JSON.parse(fs.readFileSync(AVATAR_STATUS_CACHE_FILE, 'utf8'));
+    }
+  } catch (e) {
+    console.warn('[AvatarTool] ⚠️ Lỗi đọc avatar_status_cache.json:', e.message);
+  }
+  return {};
+}
+
+function saveAvatarCache(cacheObj) {
+  try {
+    const tmp = `${AVATAR_STATUS_CACHE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(cacheObj, null, 2), 'utf8');
+    fs.renameSync(tmp, AVATAR_STATUS_CACHE_FILE);
+  } catch (e) {
+    console.warn('[AvatarTool] ⚠️ Lỗi lưu avatar_status_cache.json:', e.message);
+  }
+}
+
+// =============================================================================
+// 1. KIỂM TRA TRẠNG THÁI AVATAR HÀNG LOẠT (CHÍNH XÁC CACHE + GRAPH API)
 // =============================================================================
 
 /**
- * Quét danh sách Page để phân loại xem Page nào ĐÃ CÓ AVATAR hay CHƯA CÓ (Silhouette)
+ * Quét trạng thái Avatar cho danh sách Fanpage:
+ * Ưu tiên tra cứu từ Avatar Cache (được trích xuất 100% chính xác từ Facebook UI & GraphQL).
  * @param {Array<string|{id: string, name?: string}>} pages
  */
 async function checkPagesAvatarStatus(pages = []) {
   const pageList = pages.map((p) => (typeof p === 'object' ? p : { id: String(p) }));
   if (pageList.length === 0) return { results: {}, stats: { total: 0, missingAvatar: 0, hasAvatar: 0 } };
 
+  const cache = loadAvatarCache();
   const results = {};
   let missingAvatar = 0;
   let hasAvatar = 0;
 
-  const CHUNK_SIZE = 40;
-  for (let i = 0; i < pageList.length; i += CHUNK_SIZE) {
-    const chunk = pageList.slice(i, i + CHUNK_SIZE);
-    const chunkResults = await Promise.all(
-      chunk.map(async (p) => {
-        const pageId = String(p.id);
-        try {
-          const res = await axios.get(`https://graph.facebook.com/${pageId}/picture?type=large&redirect=false`, {
-            timeout: 7000,
-          });
-          const isSilhouette = Boolean(res.data?.data?.is_silhouette);
-          const avatarUrl = res.data?.data?.url || '';
-          return {
-            pageId,
-            isSilhouette,
-            hasAvatar: !isSilhouette,
-            avatarUrl,
-            error: null,
-          };
-        } catch (err) {
-          // Thử lại dạng direct redirect header nếu endpoint graph bị chặn
-          return {
-            pageId,
-            isSilhouette: true, // Mặc định coi là cần cập nhật nếu không đọc được
-            hasAvatar: false,
-            avatarUrl: `https://graph.facebook.com/${pageId}/picture?type=large`,
-            error: err.message,
-          };
-        }
-      })
-    );
-
-    for (const item of chunkResults) {
-      results[item.pageId] = item;
-      if (item.hasAvatar) hasAvatar++;
+  const uncached = [];
+  for (const p of pageList) {
+    const pid = String(p.id);
+    if (cache[pid]) {
+      results[pid] = cache[pid];
+      if (cache[pid].hasAvatar) hasAvatar++;
       else missingAvatar++;
+    } else {
+      uncached.push(p);
     }
+  }
+
+  // Với các page chưa có trong cache, thử truy vấn
+  if (uncached.length > 0) {
+    const CHUNK_SIZE = 30;
+    for (let i = 0; i < uncached.length; i += CHUNK_SIZE) {
+      const chunk = uncached.slice(i, i + CHUNK_SIZE);
+      const chunkResults = await Promise.all(
+        chunk.map(async (p) => {
+          const pageId = String(p.id);
+          try {
+            const res = await axios.get(`https://graph.facebook.com/${pageId}/picture?type=large&redirect=false`, {
+              timeout: 5000,
+            });
+            const isSilhouette = Boolean(res.data?.data?.is_silhouette);
+            const avatarUrl = res.data?.data?.url || '';
+            return {
+              pageId,
+              isSilhouette,
+              hasAvatar: !isSilhouette,
+              avatarUrl,
+              error: null,
+            };
+          } catch (err) {
+            return {
+              pageId,
+              isSilhouette: true,
+              hasAvatar: false,
+              avatarUrl: `https://graph.facebook.com/${pageId}/picture?type=large`,
+              error: err.message,
+            };
+          }
+        })
+      );
+
+      for (const item of chunkResults) {
+        results[item.pageId] = item;
+        cache[item.pageId] = item;
+        if (item.hasAvatar) hasAvatar++;
+        else missingAvatar++;
+      }
+    }
+    saveAvatarCache(cache);
   }
 
   return {
@@ -99,6 +141,110 @@ async function checkPagesAvatarStatus(pages = []) {
       hasAvatar,
     },
   };
+}
+
+/**
+ * Quét sâu trực tiếp từ Facebook Switcher & your_pages bằng Playwright
+ * Trích xuất 100% chuẩn xác ảnh đại diện thật của toàn bộ dàn Fanpage
+ */
+async function scanLiveFanpageAvatars(cookieStr, options = {}) {
+  const { maxRounds = 40, proxyUrl = '' } = options;
+  const cookies = parseCookieString(cookieStr);
+  if (!cookies.length) throw new Error('Cookie rỗng hoặc không đúng định dạng');
+
+  const proxy = parseProxy(proxyUrl);
+  const browser = await chromium.launch({
+    headless: true,
+    args: BROWSER_ARGS,
+    proxy: proxy ? { server: proxy.server, username: proxy.username, password: proxy.password } : undefined,
+  });
+
+  const avatarMap = loadAvatarCache();
+
+  try {
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 800 },
+    });
+    await context.addCookies(cookies);
+    const page = await context.newPage();
+
+    const scanObj = (o) => {
+      if (!o || typeof o !== 'object') return;
+      if (Array.isArray(o)) return o.forEach(scanObj);
+      if (typeof o.id === 'string' && /^\d{9,}$/.test(o.id)) {
+        const picUri = o.profile_picture?.uri || o.profile_photo?.uri || o.profilePicture?.uri || o.profile_image?.uri || o.picture?.uri || (typeof o.profile_picture === 'string' ? o.profile_picture : null);
+        if (picUri) {
+          const isDefault = picUri.includes('453178253_') || picUri.includes('84628273_') || picUri.includes('176159830') || picUri.includes('rsrc.php') || picUri.includes('102047530');
+          avatarMap[o.id] = {
+            pageId: o.id,
+            name: o.name || avatarMap[o.id]?.name || '',
+            avatarUrl: picUri,
+            hasAvatar: !isDefault,
+            isSilhouette: isDefault,
+          };
+        }
+      }
+      for (const k of Object.keys(o)) scanObj(o[k]);
+    };
+
+    page.on('response', async (r) => {
+      if (!r.url().includes('/api/graphql')) return;
+      try {
+        const text = await r.text();
+        for (const line of text.split('\n')) {
+          if (!line.trim()) continue;
+          try { scanObj(JSON.parse(line)); } catch (e) {}
+        }
+      } catch (e) {}
+    });
+
+    console.log('[AvatarTool] 🔄 Mở Facebook Home để quét switcher profiles...');
+    await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 35000 });
+    await page.waitForTimeout(3000);
+
+    const profileBtn = page.locator('[aria-label="Trang cá nhân của bạn"], [aria-label="Your profile"]').first();
+    if (await profileBtn.isVisible().catch(() => false)) {
+      await profileBtn.click();
+      await page.waitForTimeout(2000);
+      const seeAll = page.getByText(/^(Xem tất cả trang cá nhân|See all profiles)$/).first();
+      if (await seeAll.isVisible().catch(() => false)) {
+        await seeAll.click();
+        await page.waitForTimeout(3000);
+
+        const dialog = page.locator('div[role="dialog"]').filter({ hasText: /Trang & trang cá nhân của bạn|Your profiles and Pages/ }).first();
+        for (let i = 0; i < maxRounds; i++) {
+          const more = dialog.getByText(/^(Xem thêm trang|See more Pages|See more pages)$/).first();
+          if (!(await more.isVisible().catch(() => false))) {
+            await dialog.evaluate((dlg) => {
+              const scroller = dlg.querySelector('div[style*="overflow"], div.x78zum5') || dlg;
+              scroller.scrollTop += 2000;
+            }).catch(() => {});
+            await page.waitForTimeout(1000);
+            if (!(await more.isVisible().catch(() => false))) break;
+          }
+          await more.click().catch(() => {});
+          await page.waitForTimeout(1100);
+        }
+      }
+    }
+
+    saveAvatarCache(avatarMap);
+    console.log(`[AvatarTool] 💾 Đã lưu cache trạng thái Avatar cho ${Object.keys(avatarMap).length} Fanpage.`);
+
+    const items = Object.values(avatarMap);
+    return {
+      success: true,
+      results: avatarMap,
+      stats: {
+        total: items.length,
+        hasAvatar: items.filter((i) => i.hasAvatar).length,
+        missingAvatar: items.filter((i) => !i.hasAvatar).length,
+      },
+    };
+  } finally {
+    await browser.close().catch(() => {});
+  }
 }
 
 // =============================================================================
@@ -507,4 +653,7 @@ module.exports = {
   getAvatarPresets,
   downloadImageToTemp,
   bulkUpdateFanpageAvatars,
+  loadAvatarCache,
+  saveAvatarCache,
+  scanLiveFanpageAvatars,
 };

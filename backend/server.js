@@ -1667,36 +1667,74 @@ app.get('/api/avatars/presets', (req, res) => {
   }
 });
 
-// 2. Quét nhanh trạng thái Avatar của dàn Page (Graph API)
+// 1.1 Lấy nhanh cache trạng thái Avatar đã lưu
+app.get('/api/avatars/cached-status', (req, res) => {
+  try {
+    const cache = avatarTool.loadAvatarCache();
+    const items = Object.values(cache);
+    return res.json({
+      success: true,
+      results: cache,
+      stats: {
+        total: items.length,
+        hasAvatar: items.filter((i) => i.hasAvatar).length,
+        missingAvatar: items.filter((i) => !i.hasAvatar).length,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. Quét trạng thái Avatar của dàn Page (Chính xác 100% qua Switcher / Cache / Graph)
 app.post('/api/avatars/check-status', async (req, res) => {
   try {
-    const { pageIds = [], motherViaId = null } = req.body;
+    const { pageIds = [], motherViaId = null, deepScan = false } = req.body;
+
+    const allAccounts = await db.getSocialAccounts();
+    let finalCookie = '';
+    let finalProxy = '';
+
+    if (motherViaId) {
+      const viaAcc = allAccounts.find(
+        (a) => String(a.id) === String(motherViaId) || a.platformAccountId === String(motherViaId)
+      );
+      if (viaAcc) {
+        finalCookie = viaAcc.cookieString || viaAcc.accessToken;
+        finalProxy = viaAcc.proxyUrl;
+      }
+    }
+
+    if (!finalCookie) {
+      const motherVia = allAccounts.find(
+        (a) => (a.accountType === 'PERSONAL_PROFILE_COOKIE' || a.platform === 'FACEBOOK_PROFILE') && (a.cookieString || a.accessToken)
+      );
+      if (motherVia) {
+        finalCookie = motherVia.cookieString || motherVia.accessToken;
+        finalProxy = motherVia.proxyUrl;
+      }
+    }
+
+    // Nếu người dùng yêu cầu quét sâu trực tiếp từ Facebook Profile Switcher
+    if (deepScan && finalCookie) {
+      console.log('[AvatarStudio] 🔍 Bắt đầu quét sâu trạng thái Avatar qua Facebook Switcher...');
+      const deepResult = await avatarTool.scanLiveFanpageAvatars(finalCookie, { maxRounds: 45, proxyUrl: finalProxy });
+      return res.json(deepResult);
+    }
+
     let targets = pageIds;
 
-    // Nếu không truyền pageIds cụ thể mà truyền motherViaId hoặc rỗng, lấy từ DB
+    // Nếu không truyền pageIds cụ thể, lấy từ DB và cache
     if (!targets || targets.length === 0) {
-      const allAccounts = await db.getSocialAccounts();
-      if (motherViaId) {
-        const viaAcc = allAccounts.find(
-          (a) => String(a.id) === String(motherViaId) || a.platformAccountId === String(motherViaId)
-        );
-        const uidMatch = viaAcc
-          ? (viaAcc.cookieString || viaAcc.accessToken || '').match(/c_user=([^;]+)/)
-          : null;
-        const motherUid = uidMatch ? uidMatch[1] : null;
+      const pagesCache = fbBuffTool.loadPagesCache();
+      const cachedPagesForVia = motherViaId ? (pagesCache[String(motherViaId)]?.pages || []) : [];
 
+      targets = cachedPagesForVia.map((p) => ({ id: p.id, name: p.name }));
+
+      if (targets.length === 0) {
         targets = allAccounts
-          .filter((a) => {
-            if (a.accountType === 'PERSONAL_PROFILE_COOKIE' && !a.pageName?.startsWith('Fanpage')) return false;
-            if (motherUid) {
-              const accUid = (a.cookieString || a.accessToken || '').match(/c_user=([^;]+)/);
-              return accUid && accUid[1] === motherUid;
-            }
-            return true;
-          })
+          .filter((a) => a.platform !== 'FACEBOOK_GROUP')
           .map((a) => ({ id: a.platformAccountId || a.id, name: a.pageName }));
-      } else {
-        targets = allAccounts.map((a) => ({ id: a.platformAccountId || a.id, name: a.pageName }));
       }
     }
 

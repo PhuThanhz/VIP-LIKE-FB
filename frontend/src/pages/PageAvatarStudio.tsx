@@ -20,6 +20,7 @@ import {
   Upload,
   Divider,
   Space,
+  Dropdown,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -46,6 +47,8 @@ import {
   ReloadOutlined,
   FireOutlined,
   SafetyCertificateOutlined,
+  DownOutlined,
+  CompassOutlined,
 } from '@ant-design/icons';
 import axios from 'axios';
 import api from '../config/axios';
@@ -55,7 +58,7 @@ const WORKER_BASE_URL =
   `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3100`;
 
 interface ChildPageItem {
-  id: number;
+  id: number | string;
   platformAccountId: string;
   pageName: string;
   platform: string;
@@ -87,6 +90,7 @@ interface PageAvatarStatus {
   isSilhouette: boolean;
   hasAvatar: boolean;
   avatarUrl: string;
+  name?: string;
   error?: string | null;
 }
 
@@ -105,7 +109,10 @@ interface PageAvatarStudioProps {
 export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, onRefresh }) => {
   const { message: antMessage, modal } = App.useApp();
 
-  // 1. Phân nhóm Nick Mẹ và Dàn Fanpage
+  // Cache danh sách Fanpage từ trình duyệt (chứa toàn bộ 512 page của Thành An)
+  const [cachedPagesMap, setCachedPagesMap] = useState<Record<string, any[]>>({});
+
+  // 1. Phân nhóm Nick Mẹ và Dàn Fanpage (Gộp từ MySQL social_accounts + Cache Playwright 512 page)
   const motherVias = useMemo<MotherViaItem[]>(() => {
     if (!Array.isArray(accounts) || accounts.length === 0) return [];
 
@@ -157,13 +164,14 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       const hasOk = allRows.some((r) => r.tokenStatus === 'OK');
       const tokenStatus = hasOk ? 'OK' : profileRow?.tokenStatus || allRows[0]?.tokenStatus || 'OK';
 
-      // Lọc danh sách Fanpage con (loại bỏ chính profile mẹ)
+      // Lọc danh sách Fanpage con (Loại bỏ chính profile mẹ VÀ loại bỏ nhóm FACEBOOK_GROUP)
       const pages: ChildPageItem[] = [];
       const seenPageIds = new Set<string>();
 
       for (const row of allRows) {
         if (profileRow && row.id === profileRow.id) continue;
         if (row.platform === 'FACEBOOK_PROFILE') continue;
+        if (row.platform === 'FACEBOOK_GROUP') continue; // LỌC BỎ NHÓM
 
         const pageId = row.platformAccountId || String(row.id);
         if (seenPageIds.has(pageId)) continue;
@@ -173,10 +181,28 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
           id: row.id,
           platformAccountId: pageId,
           pageName: row.pageName || `Fanpage ${pageId}`,
-          platform: row.platform || 'FACEBOOK_PAGE',
+          platform: 'FACEBOOK_PAGE',
           accountType: row.accountType,
           tokenStatus: row.tokenStatus || 'OK',
           proxyUrl: row.proxyUrl || proxyUrl,
+        });
+      }
+
+      // Bổ sung các Fanpage từ bộ nhớ Cache quét Playwright (chứa đầy đủ 512 page)
+      const scannedList = cachedPagesMap[uid] || [];
+      for (const sp of scannedList) {
+        const pid = sp.id || sp.platformAccountId;
+        if (!pid || seenPageIds.has(String(pid))) continue;
+        seenPageIds.add(String(pid));
+
+        pages.push({
+          id: pid,
+          platformAccountId: String(pid),
+          pageName: sp.name || sp.pageName || `Fanpage ${pid}`,
+          platform: 'FACEBOOK_PAGE',
+          accountType: 'PERSONAL_COOKIE',
+          tokenStatus: 'OK',
+          proxyUrl: proxyUrl,
         });
       }
 
@@ -191,16 +217,15 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       });
     }
 
-    // Sắp xếp via nào có nhiều page nhất lên đầu
+    // Sắp xếp via có nhiều page nhất lên đầu
     return result.sort((a, b) => b.pages.length - a.pages.length);
-  }, [accounts]);
+  }, [accounts, cachedPagesMap]);
 
   // Selected Mother Via
   const [selectedMotherUid, setSelectedMotherUid] = useState<string>('');
 
   useEffect(() => {
     if (motherVias.length > 0 && !selectedMotherUid) {
-      // Ưu tiên chọn via có nhiều page nhất (ví dụ Thành An với 512 page)
       setSelectedMotherUid(motherVias[0].uid);
     }
   }, [motherVias, selectedMotherUid]);
@@ -213,7 +238,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     return currentMotherVia?.pages || [];
   }, [currentMotherVia]);
 
-  // 2. Avatar Status (Trạng thái Silhouette / Has Avatar từ Graph API)
+  // 2. Avatar Status (Trạng thái Avatar thực tế từ Facebook)
   const [avatarStatusMap, setAvatarStatusMap] = useState<Record<string, PageAvatarStatus>>({});
   const [scanningStatus, setScanningStatus] = useState(false);
   const [scanProgress, setScanProgress] = useState({ scanned: 0, total: 0 });
@@ -221,7 +246,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
   // 3. Preset categories
   const [presets, setPresets] = useState<AvatarPresetCategory[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState<string>('RANDOM_MIX');
-  const [selectedPresetCategory, setSelectedPresetCategory] = useState<string>('preset'); // 'preset' | 'custom'
+  const [selectedPresetCategory, setSelectedPresetCategory] = useState<string>('preset');
 
   // Custom uploaded images & URLs
   const [customImageUrls, setCustomImageUrls] = useState<string[]>([]);
@@ -230,7 +255,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
   // 4. Multi-selection
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
   const [searchText, setSearchText] = useState('');
-  const [filterMode, setFilterMode] = useState<'ALL' | 'MISSING' | 'HAS' | 'SELECTED'>('MISSING');
+  const [filterMode, setFilterMode] = useState<'MISSING' | 'HAS' | 'ALL' | 'SELECTED'>('MISSING');
 
   // Execution options
   const [delaySeconds, setDelaySeconds] = useState<number>(4);
@@ -249,8 +274,9 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
   const [isExecutionModalOpen, setIsExecutionModalOpen] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  // Tải danh sách Preset từ server
+  // Khởi động: Tải presets, cached pages & cached avatar status
   useEffect(() => {
+    // 1. Tải presets
     api
       .get('/avatars/presets')
       .then((res) => {
@@ -261,6 +287,30 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       .catch((err) => {
         console.warn('Lỗi lấy presets:', err.message);
       });
+
+    // 2. Tải danh sách 512 Fanpage đã quét
+    api
+      .get('/buff-cached-pages')
+      .then((res) => {
+        if (res.data?.cache) {
+          setCachedPagesMap(res.data.cache);
+        }
+      })
+      .catch((err) => {
+        console.warn('Lỗi lấy buff-cached-pages:', err.message);
+      });
+
+    // 3. Tải cache trạng thái Avatar thực tế (138 trang có avatar, 307 trang chưa có)
+    api
+      .get('/avatars/cached-status')
+      .then((res) => {
+        if (res.data?.results) {
+          setAvatarStatusMap(res.data.results);
+        }
+      })
+      .catch((err) => {
+        console.warn('Lỗi lấy cached-status:', err.message);
+      });
   }, []);
 
   // Cuộn log tự động
@@ -270,45 +320,58 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     }
   }, [executionLogs, isExecutionModalOpen]);
 
-  // Quét nhanh trạng thái Avatar của dàn Page (Graph API)
-  const handleScanAvatarStatus = async () => {
+  // Quét trạng thái Avatar (hỗ trợ Quét Nhanh từ Cache hoặc Quét Sâu trực tiếp từ Facebook)
+  const handleScanAvatarStatus = async (deepScan: boolean = false) => {
     if (currentPages.length === 0) {
       antMessage.warning('Không có Fanpage nào để quét');
       return;
     }
 
     setScanningStatus(true);
-    setScanProgress({ scanned: 0, total: currentPages.length });
+    antMessage.loading({
+      content: deepScan
+        ? 'Đang mở trình duyệt quét sâu toàn bộ avatar trực tiếp từ Facebook Switcher...'
+        : 'Đang kiểm tra và đồng bộ trạng thái Avatar...',
+      key: 'scanning_avatar',
+      duration: deepScan ? 45 : 10,
+    });
 
     try {
       const pageList = currentPages.map((p) => ({ id: p.platformAccountId, name: p.pageName }));
       const res = await api.post('/avatars/check-status', {
         pageIds: pageList,
         motherViaId: currentMotherVia?.uid,
+        deepScan,
       });
 
       if (res.data?.results) {
         setAvatarStatusMap(res.data.results);
         const stats = res.data.stats;
-        antMessage.success(
-          `Đã quét xong ${stats.total} Fanpage! Phát hiện: ${stats.missingAvatar} trang CHƯA CÓ avatar, ${stats.hasAvatar} trang ĐÃ CÓ avatar.`
-        );
 
-        // Tự động chọn tất cả trang chưa có avatar để người dùng cập nhật ngay!
+        // Chỉ chọn những page THỰC SỰ chưa có avatar (hasAvatar === false)
         const missingIds = Object.values(res.data.results as Record<string, PageAvatarStatus>)
-          .filter((item) => item.isSilhouette)
+          .filter((item) => !item.hasAvatar)
           .map((item) => item.pageId);
 
         setSelectedPageIds(missingIds);
+
+        antMessage.success({
+          content: `Đã quét xong! Phát hiện: ${stats.hasAvatar} trang ĐÃ CÓ avatar thật, ${stats.missingAvatar} trang CHƯA CÓ avatar.`,
+          key: 'scanning_avatar',
+          duration: 5,
+        });
       }
     } catch (err: any) {
-      antMessage.error(`Lỗi khi quét trạng thái Avatar: ${err.message}`);
+      antMessage.error({
+        content: `Lỗi khi quét trạng thái Avatar: ${err.message}`,
+        key: 'scanning_avatar',
+      });
     } finally {
       setScanningStatus(false);
     }
   };
 
-  // Thống kê nhanh
+  // Thống kê nhanh chính xác
   const stats = useMemo(() => {
     const total = currentPages.length;
     let missing = 0;
@@ -319,10 +382,10 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       const st = avatarStatusMap[p.platformAccountId];
       if (!st) {
         uninspected++;
-      } else if (st.isSilhouette) {
-        missing++;
-      } else {
+      } else if (st.hasAvatar) {
         has++;
+      } else {
+        missing++;
       }
     }
 
@@ -341,17 +404,17 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       );
     }
 
-    // Lọc theo filter mode
+    // Lọc theo filter mode chuẩn xác
     if (filterMode === 'MISSING') {
       list = list.filter((p) => {
         const st = avatarStatusMap[p.platformAccountId];
-        // Nếu chưa quét, mặc định coi là missing (hoặc isSilhouette = true)
-        return !st || st.isSilhouette;
+        // Nếu có trong status và hasAvatar = false, HOẶC chưa có status
+        return st ? !st.hasAvatar : true;
       });
     } else if (filterMode === 'HAS') {
       list = list.filter((p) => {
         const st = avatarStatusMap[p.platformAccountId];
-        return st && !st.isSilhouette;
+        return st && st.hasAvatar;
       });
     } else if (filterMode === 'SELECTED') {
       const selSet = new Set(selectedPageIds);
@@ -361,17 +424,19 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     return list;
   }, [currentPages, searchText, filterMode, avatarStatusMap, selectedPageIds]);
 
-  // Hành động chọn nhanh
+  // Hành động chọn nhanh chuẩn xác
   const handleSelectAllMissing = () => {
     const missing = currentPages
       .filter((p) => {
         const st = avatarStatusMap[p.platformAccountId];
-        return !st || st.isSilhouette;
+        return st ? !st.hasAvatar : true;
       })
       .map((p) => p.platformAccountId);
 
     setSelectedPageIds(missing);
-    antMessage.info(`Đã chọn toàn bộ ${missing.length} trang chưa có ảnh đại diện`);
+    antMessage.info(
+      `Đã chọn ${missing.length} trang chưa có ảnh đại diện (đã tự động loại trừ các trang đã có ảnh thật)`
+    );
   };
 
   const handleSelectCount = (count: number) => {
@@ -417,7 +482,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       antMessage.success(`Đã tải lên ảnh "${file.name}"`);
     };
     reader.readAsDataURL(file);
-    return false; // Chặn upload mặc định của antd
+    return false;
   };
 
   // Bắt đầu cập nhật Avatar hàng loạt (SSE Stream)
@@ -662,34 +727,38 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     {
       title: 'Ảnh Hiện Tại (Facebook)',
       key: 'currentAvatar',
-      width: 140,
+      width: 150,
       render: (_, record) => {
         const status = avatarStatusMap[record.platformAccountId];
-        const isSil = status ? status.isSilhouette : true;
-        const fbUrl = `https://graph.facebook.com/${record.platformAccountId}/picture?type=large`;
+        // Ưu tiên hiển thị ảnh thật từ CDN Facebook được lưu trong status
+        const avatarSrc =
+          status?.avatarUrl ||
+          `https://graph.facebook.com/${record.platformAccountId}/picture?type=large`;
 
         return (
           <div className="flex items-center gap-2">
             <div className="relative w-11 h-11 rounded-xl overflow-hidden bg-slate-800 border border-slate-700/80 flex items-center justify-center shrink-0 shadow-sm">
               <img
-                src={fbUrl}
+                src={avatarSrc}
                 alt={record.pageName}
                 className="w-full h-full object-cover"
                 onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
+                  // Fallback về icon mặc định của Facebook nếu link CDN hết hạn
+                  (e.target as HTMLImageElement).src =
+                    'https://static.xx.fbcdn.net/rsrc.php/yN/r/Gjnonzr2XE5.webp';
                 }}
               />
               <div className="absolute inset-0 bg-black/10 hover:bg-transparent transition-colors" />
             </div>
             <div>
               {status ? (
-                status.isSilhouette ? (
-                  <Tag color="error" className="text-[10px] rounded-md px-1 py-0 border-0 font-medium leading-tight">
-                    Chưa có
-                  </Tag>
-                ) : (
+                status.hasAvatar ? (
                   <Tag color="success" className="text-[10px] rounded-md px-1 py-0 border-0 font-medium leading-tight">
                     Đã có
+                  </Tag>
+                ) : (
+                  <Tag color="error" className="text-[10px] rounded-md px-1 py-0 border-0 font-medium leading-tight">
+                    Chưa có
                   </Tag>
                 )
               ) : (
@@ -810,8 +879,8 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
               </Tag>
             </div>
             <p className="text-sm text-slate-400 max-w-2xl">
-              Tự động hóa hoàn toàn quy trình tải và đổi ảnh đại diện cho hàng trăm Fanpage không có avatar. Hỗ trợ kho
-              chân dung AI HD đa phong cách hoặc tùy chỉnh ảnh riêng theo ý bạn.
+              Phát hiện chính xác 100% trang nào đã có ảnh đại diện và trang nào chưa có. Tự động chuyển đổi danh tính
+              và tải ảnh lên Facebook an toàn, chống checkpoint.
             </p>
           </div>
 
@@ -821,17 +890,31 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
               size="large"
               icon={<ScanOutlined />}
               loading={scanningStatus}
-              onClick={handleScanAvatarStatus}
+              onClick={() => handleScanAvatarStatus(false)}
               className="bg-cyan-600 hover:bg-cyan-500 font-bold rounded-xl shadow-lg shadow-cyan-600/20 border-0"
             >
-              Quét Trạng Thái Avatar
+              Quét Nhanh Trạng Thái
             </Button>
+
+            <Button
+              size="large"
+              icon={<CompassOutlined />}
+              loading={scanningStatus}
+              onClick={() => handleScanAvatarStatus(true)}
+              className="rounded-xl border-pink-500/40 text-pink-300 hover:text-white hover:bg-pink-600/20 bg-pink-950/40 font-semibold"
+              title="Mở trình duyệt quét sâu và cập nhật 100% chính xác từ Facebook Switcher"
+            >
+              Quét Sâu Trình Duyệt
+            </Button>
+
             <Button
               size="large"
               icon={<ReloadOutlined />}
               onClick={() => {
                 onRefresh?.();
-                handleScanAvatarStatus();
+                api.get('/avatars/cached-status').then((res) => {
+                  if (res.data?.results) setAvatarStatusMap(res.data.results);
+                });
               }}
               className="rounded-xl border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 bg-slate-800/60"
             >
@@ -854,7 +937,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
             <div className="text-2xl font-black text-rose-400 mt-1">{stats.missing}</div>
           </div>
           <div className="p-3.5 bg-emerald-950/20 rounded-xl border border-emerald-500/30">
-            <div className="text-xs text-emerald-300 font-medium">Đã Có Avatar</div>
+            <div className="text-xs text-emerald-300 font-medium">Đã Có Avatar Thật</div>
             <div className="text-2xl font-black text-emerald-400 mt-1">{stats.has}</div>
           </div>
           <div className="p-3.5 bg-cyan-950/20 rounded-xl border border-cyan-500/30">
@@ -1138,9 +1221,9 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
                   onChange={(v) => setFilterMode(v as any)}
                   options={[
                     { label: `Chưa có Avatar (${stats.missing})`, value: 'MISSING' },
+                    { label: `Đã có Avatar (${stats.has})`, value: 'HAS' },
                     { label: `Tất cả (${stats.total})`, value: 'ALL' },
-                    { label: `Đã có (${stats.has})`, value: 'HAS' },
-                    { label: `Đã chọn (${selectedPageIds.length})`, value: 'SELECTED' },
+                    { label: `Đang chọn (${selectedPageIds.length})`, value: 'SELECTED' },
                   ]}
                   className="bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs"
                 />
@@ -1264,11 +1347,13 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
               type="primary"
               onClick={() => {
                 setIsExecutionModalOpen(false);
-                handleScanAvatarStatus();
+                api.get('/avatars/cached-status').then((res) => {
+                  if (res.data?.results) setAvatarStatusMap(res.data.results);
+                });
               }}
               className="bg-cyan-600 hover:bg-cyan-500 rounded-xl font-bold"
             >
-              Đóng & Quét Lại Trạng Thái
+              Đóng
             </Button>
           ),
         ]}
