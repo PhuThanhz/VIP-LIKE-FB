@@ -298,7 +298,18 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     >();
 
     for (const acc of accounts) {
+      // Bỏ qua các nền tảng khác như Threads hoặc Group đơn lẻ không có cookie
+      if (acc.platform === 'THREADS') continue;
+      if (acc.platform === 'FACEBOOK_GROUP' && !(acc.cookieString || acc.accessToken)?.includes('c_user=')) {
+        continue;
+      }
+
       const uidFromCookie = extractUidFromCookie(acc.cookieString || acc.accessToken);
+      // Phải có UID từ cookie c_user hoặc là tài khoản FACEBOOK_PROFILE
+      if (!uidFromCookie && acc.platform !== 'FACEBOOK_PROFILE' && acc.accountType !== 'PERSONAL_PROFILE_COOKIE') {
+        continue;
+      }
+
       const uid = uidFromCookie || acc.platformAccountId || `acc_${acc.id}`;
       if (!map.has(uid)) {
         map.set(uid, { allRows: [] });
