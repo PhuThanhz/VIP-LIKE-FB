@@ -548,6 +548,226 @@ async function updateLicenseStatus(id, newStatus, addDays = 0) {
   return { success: true, license: lic };
 }
 
+// =============================================================================
+// LỊCH SỬ TƯƠNG TÁC (BUFF LOGS) - mỗi dòng là một lượt chạy, chi tiết Page lưu JSON
+// Ghi MySQL trước; MySQL lỗi thì giữ trong buff_logs_cache.json (cờ _pending)
+// và tự đẩy lên lại ở lần đọc/ghi kế tiếp khi MySQL hoạt động.
+// =============================================================================
+const BUFF_LOGS_CACHE_FILE = path.join(dataDir, 'buff_logs_cache.json');
+const BUFF_LOGS_CACHE_MAX = 2000;
+let buffLogsTableReady = false;
+
+async function ensureBuffLogsTable(p) {
+  if (buffLogsTableReady) return;
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS buff_logs (
+      id VARCHAR(64) PRIMARY KEY,
+      user_id INT DEFAULT 1,
+      run_type VARCHAR(16) NOT NULL,
+      target_url TEXT NOT NULL,
+      reaction_type VARCHAR(32),
+      engagement_mode VARCHAR(32),
+      account_name VARCHAR(255),
+      total_pages INT DEFAULT 0,
+      success_count INT DEFAULT 0,
+      already_liked_count INT DEFAULT 0,
+      failed_count INT DEFAULT 0,
+      comment_count INT DEFAULT 0,
+      details LONGTEXT,
+      created_at DATETIME(3) NOT NULL,
+      INDEX idx_buff_logs_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  buffLogsTableReady = true;
+}
+
+function loadBuffLogsCache() {
+  try {
+    if (fs.existsSync(BUFF_LOGS_CACHE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(BUFF_LOGS_CACHE_FILE, 'utf8'));
+      if (Array.isArray(data)) return data;
+    }
+  } catch (e) {
+    console.warn('[BuffLogs Cache] ⚠️ Không đọc được buff_logs_cache.json:', e.message);
+  }
+  return [];
+}
+
+function saveBuffLogsCache(logs) {
+  try {
+    const sorted = [...logs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const tmp = `${BUFF_LOGS_CACHE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(sorted.slice(0, BUFF_LOGS_CACHE_MAX)), 'utf8');
+    fs.renameSync(tmp, BUFF_LOGS_CACHE_FILE);
+  } catch (e) {
+    console.warn('[BuffLogs Cache] ⚠️ Không lưu được buff_logs_cache.json:', e.message);
+  }
+}
+
+const toInt = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.trunc(Number(v))) : 0);
+
+/** Chuẩn hoá log từ frontend, trả null nếu thiếu id/targetUrl */
+function normalizeBuffLog(log) {
+  if (!log || typeof log !== 'object') return null;
+  const id = typeof log.id === 'string' ? log.id.slice(0, 64) : '';
+  const targetUrl = typeof log.targetUrl === 'string' ? log.targetUrl : '';
+  if (!id || !targetUrl) return null;
+  const created = new Date(log.createdAt);
+  return {
+    id,
+    createdAt: Number.isNaN(created.getTime()) ? new Date().toISOString() : created.toISOString(),
+    type: log.type === 'BATCH' ? 'BATCH' : 'SINGLE',
+    targetUrl,
+    reactionType: String(log.reactionType || 'LIKE').slice(0, 32),
+    engagementMode: log.engagementMode ? String(log.engagementMode).slice(0, 32) : undefined,
+    accountName: log.accountName ? String(log.accountName).slice(0, 255) : undefined,
+    totalPages: toInt(log.totalPages),
+    successCount: toInt(log.successCount),
+    alreadyLikedCount: toInt(log.alreadyLikedCount),
+    failedCount: toInt(log.failedCount),
+    commentCount: toInt(log.commentCount),
+    details: Array.isArray(log.details) ? log.details : [],
+  };
+}
+
+function rowToBuffLog(row) {
+  let details = row.details;
+  if (typeof details === 'string') {
+    try {
+      details = JSON.parse(details);
+    } catch {
+      details = [];
+    }
+  }
+  return {
+    id: row.id,
+    createdAt: new Date(row.createdAt).toISOString(),
+    type: row.type,
+    targetUrl: row.targetUrl,
+    reactionType: row.reactionType || 'LIKE',
+    engagementMode: row.engagementMode || undefined,
+    accountName: row.accountName || undefined,
+    totalPages: row.totalPages,
+    successCount: row.successCount,
+    alreadyLikedCount: row.alreadyLikedCount,
+    failedCount: row.failedCount,
+    commentCount: row.commentCount,
+    details: Array.isArray(details) ? details : [],
+  };
+}
+
+async function upsertBuffLogsToMysql(p, logs) {
+  if (logs.length === 0) return;
+  await ensureBuffLogsTable(p);
+  const placeholders = logs.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+  const params = logs.flatMap((l) => [
+    l.id,
+    l.type,
+    l.targetUrl,
+    l.reactionType,
+    l.engagementMode || null,
+    l.accountName || null,
+    l.totalPages,
+    l.successCount,
+    l.alreadyLikedCount,
+    l.failedCount,
+    l.commentCount,
+    JSON.stringify(l.details),
+    new Date(l.createdAt),
+  ]);
+  await p.query(
+    `INSERT INTO buff_logs
+      (id, run_type, target_url, reaction_type, engagement_mode, account_name, total_pages,
+       success_count, already_liked_count, failed_count, comment_count, details, created_at)
+     VALUES ${placeholders}
+     ON DUPLICATE KEY UPDATE
+       run_type = VALUES(run_type), target_url = VALUES(target_url), reaction_type = VALUES(reaction_type),
+       engagement_mode = VALUES(engagement_mode), account_name = VALUES(account_name),
+       total_pages = VALUES(total_pages), success_count = VALUES(success_count),
+       already_liked_count = VALUES(already_liked_count), failed_count = VALUES(failed_count),
+       comment_count = VALUES(comment_count), details = VALUES(details)`,
+    params
+  );
+}
+
+/** Đẩy các log đang chờ (lưu lúc MySQL lỗi) lên MySQL */
+async function flushPendingBuffLogs(p) {
+  const cached = loadBuffLogsCache();
+  const pending = cached.filter((l) => l._pending);
+  if (pending.length === 0) return;
+  for (let i = 0; i < pending.length; i += 100) {
+    await upsertBuffLogsToMysql(p, pending.slice(i, i + 100));
+  }
+  saveBuffLogsCache(cached.map(({ _pending, ...l }) => l));
+  console.log(`[BuffLogs] ✅ Đã đồng bộ ${pending.length} log chờ lên MySQL`);
+}
+
+/**
+ * Lấy lịch sử tương tác mới nhất (MySQL, hoặc cache khi MySQL lỗi)
+ */
+async function getBuffLogs(limit = 500) {
+  const safeLimit = Math.min(Math.max(toInt(limit) || 500, 1), BUFF_LOGS_CACHE_MAX);
+  try {
+    const p = getPool();
+    await ensureBuffLogsTable(p);
+    await flushPendingBuffLogs(p);
+    const [rows] = await p.query(
+      `SELECT id, run_type as type, target_url as targetUrl, reaction_type as reactionType,
+        engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages,
+        success_count as successCount, already_liked_count as alreadyLikedCount,
+        failed_count as failedCount, comment_count as commentCount, details, created_at as createdAt
+       FROM buff_logs ORDER BY created_at DESC LIMIT ?`,
+      [safeLimit]
+    );
+    const logs = rows.map(rowToBuffLog);
+    saveBuffLogsCache(logs);
+    return { logs, source: 'mysql' };
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Lỗi đọc buff_logs, dùng cache:', err.message);
+    const logs = loadBuffLogsCache()
+      .slice(0, safeLimit)
+      .map(({ _pending, ...l }) => l);
+    return { logs, source: 'cache' };
+  }
+}
+
+/**
+ * Lưu (thêm/cập nhật) một hoặc nhiều log. Trả về số log hợp lệ đã lưu.
+ */
+async function saveBuffLogs(rawLogs) {
+  const logs = (Array.isArray(rawLogs) ? rawLogs : [rawLogs]).map(normalizeBuffLog).filter(Boolean);
+  if (logs.length === 0) return { saved: 0, source: 'none' };
+
+  let source = 'mysql';
+  try {
+    const p = getPool();
+    for (let i = 0; i < logs.length; i += 100) {
+      await upsertBuffLogsToMysql(p, logs.slice(i, i + 100));
+    }
+    await flushPendingBuffLogs(p);
+  } catch (err) {
+    source = 'cache';
+    console.warn('[MySQL Workbench] ⚠️ Lỗi lưu buff_logs, giữ trong cache chờ đồng bộ:', err.message);
+  }
+
+  const incoming = new Map(logs.map((l) => [l.id, source === 'cache' ? { ...l, _pending: true } : l]));
+  const cached = loadBuffLogsCache().filter((l) => !incoming.has(l.id));
+  saveBuffLogsCache([...incoming.values(), ...cached]);
+
+  return { saved: logs.length, source };
+}
+
+/**
+ * Xoá toàn bộ lịch sử. Bắt buộc MySQL hoạt động để log không "sống lại" khi kết nối lại.
+ */
+async function clearBuffLogs() {
+  const p = getPool();
+  await ensureBuffLogsTable(p);
+  await p.query('DELETE FROM buff_logs');
+  saveBuffLogsCache([]);
+  return { success: true };
+}
+
 module.exports = {
   dbConfig,
   getPool,
@@ -566,5 +786,8 @@ module.exports = {
   updateLicenseStatus,
   loadLicensesCache,
   saveLicensesCache,
+  getBuffLogs,
+  saveBuffLogs,
+  clearBuffLogs,
 };
 

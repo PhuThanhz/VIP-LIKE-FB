@@ -16,6 +16,7 @@ import {
   Segmented,
   Switch,
   Dropdown,
+  Spin,
 } from 'antd';
 import {
   EyeOutlined,
@@ -285,11 +286,12 @@ export interface BuffLogEntry {
   details: AutoBuffResultDetail[];
 }
 
-const BUFF_LOGS_STORAGE_KEY = 'toolzutter:buff-engagement-logs';
+// Lịch sử nay lưu trên MySQL (API /buff-logs); key cũ chỉ còn dùng để chuyển dữ liệu lên một lần
+const LEGACY_BUFF_LOGS_STORAGE_KEY = 'toolzutter:buff-engagement-logs';
 
-const loadBuffLogs = (): BuffLogEntry[] => {
+const readLegacyBuffLogs = (): BuffLogEntry[] => {
   try {
-    const raw = localStorage.getItem(BUFF_LOGS_STORAGE_KEY);
+    const raw = localStorage.getItem(LEGACY_BUFF_LOGS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -297,10 +299,12 @@ const loadBuffLogs = (): BuffLogEntry[] => {
   }
 };
 
-const saveBuffLogs = (logs: BuffLogEntry[]) => {
-  try {
-    localStorage.setItem(BUFF_LOGS_STORAGE_KEY, JSON.stringify(logs.slice(0, 300)));
-  } catch {}
+// Gộp theo id, ưu tiên bản trong `primary`, sắp xếp mới nhất trước
+const mergeBuffLogs = (primary: BuffLogEntry[], secondary: BuffLogEntry[]): BuffLogEntry[] => {
+  const seen = new Set(primary.map((l) => l.id));
+  return [...primary, ...secondary.filter((l) => !seen.has(l.id))].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
 };
 
 export const SEEDING_NICHE_PRESETS: Record<string, { label: string; icon: string; templates: string[] }> = {
@@ -1044,10 +1048,44 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   }, [engagementMode]);
 
   // History & Anti-Duplicate States
-  const [buffLogs, setBuffLogs] = useState<BuffLogEntry[]>(() => loadBuffLogs());
+  const [buffLogs, setBuffLogs] = useState<BuffLogEntry[]>([]);
+  const [buffLogsLoading, setBuffLogsLoading] = useState(true);
+
   useEffect(() => {
-    saveBuffLogs(buffLogs);
-  }, [buffLogs]);
+    let cancelled = false;
+    (async () => {
+      try {
+        // Chuyển lịch sử cũ trong localStorage lên MySQL (ghi đè theo id nên chạy lại không bị trùng)
+        const legacy = readLegacyBuffLogs();
+        if (legacy.length > 0) {
+          await api.post('/buff-logs', { logs: legacy });
+          localStorage.removeItem(LEGACY_BUFF_LOGS_STORAGE_KEY);
+          if (!cancelled) message.success(`Đã chuyển ${legacy.length} lượt lịch sử cũ lên MySQL`);
+        }
+        const res = await api.get('/buff-logs', { params: { limit: 500 } });
+        const fetched: BuffLogEntry[] = Array.isArray(res.data?.logs) ? res.data.logs : [];
+        // Giữ log vừa chạy xong trong lúc đang tải
+        if (!cancelled) setBuffLogs((prev) => mergeBuffLogs(prev, fetched));
+      } catch (err: any) {
+        if (!cancelled) message.error(`Không tải được lịch sử: ${err.response?.data?.error || err.message}`);
+      } finally {
+        if (!cancelled) setBuffLogsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [message]);
+
+  const addBuffLog = useCallback(
+    (log: BuffLogEntry) => {
+      setBuffLogs((prev) => [log, ...prev]);
+      api.post('/buff-logs', { log }).catch((err) => {
+        message.warning(`Chưa lưu được lịch sử lên máy chủ: ${err.response?.data?.error || err.message}`);
+      });
+    },
+    [message]
+  );
 
   // Xuất Báo Cáo Lịch Sử Tương Tác ra file CSV (UTF-8 BOM chuẩn Excel)
   const handleExportLogsToCsv = () => {
@@ -1826,7 +1864,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           accountName: runAccountName,
           details,
         };
-        setBuffLogs((prevLogs) => [newLog, ...prevLogs]);
+        addBuffLog(newLog);
       }
 
       setAutoBuffProgress((prev) => ({
@@ -2109,7 +2147,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           accountName: batchAccountName,
           details: [...orderDetails],
         };
-        setBuffLogs((prevLogs) => [newBatchLog, ...prevLogs]);
+        addBuffLog(newBatchLog);
       }
 
       if (batchWaitSeconds > 0 && i < initialOrders.length - 1 && !batchAbortRef.current) {
@@ -3833,10 +3871,14 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               okText: 'Xoá tất cả',
                               cancelText: 'Huỷ',
                               okButtonProps: { danger: true },
-                              onOk: () => {
-                                setBuffLogs([]);
-                                saveBuffLogs([]);
-                                message.success('Đã xoá toàn bộ lịch sử buff!');
+                              onOk: async () => {
+                                try {
+                                  await api.delete('/buff-logs');
+                                  setBuffLogs([]);
+                                  message.success('Đã xoá toàn bộ lịch sử buff!');
+                                } catch (err: any) {
+                                  message.error(err.response?.data?.error || err.message);
+                                }
                               },
                             });
                           }}
@@ -3851,7 +3893,12 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                 </Card>
 
                 {/* List / Table of Logs */}
-                {buffLogs.length === 0 ? (
+                {buffLogsLoading && buffLogs.length === 0 ? (
+                  <Card className="app-surface text-center py-16">
+                    <Spin />
+                    <div className="text-xs text-slate-400 mt-3">Đang tải lịch sử từ MySQL...</div>
+                  </Card>
+                ) : buffLogs.length === 0 ? (
                   <Card className="app-surface text-center py-16">
                     <div className="text-5xl mb-3"></div>
                     <div className="text-base font-bold text-slate-200">Chưa có lịch sử buff tương tác nào</div>

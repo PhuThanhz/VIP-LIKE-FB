@@ -335,6 +335,43 @@ app.delete('/api/connections/:id', async (req, res) => {
   }
 });
 
+// Lịch sử tương tác (mỗi lượt chạy một bản ghi) lưu trên MySQL Workbench
+app.get('/api/buff-logs', async (req, res) => {
+  try {
+    const result = await db.getBuffLogs(req.query.limit);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Body: { log } cho 1 lượt chạy, hoặc { logs: [...] } khi chuyển dữ liệu cũ lên
+app.post('/api/buff-logs', async (req, res) => {
+  try {
+    const { log, logs } = req.body || {};
+    const input = Array.isArray(logs) ? logs.slice(0, 2000) : log;
+    if (!input) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu log' });
+    }
+    const result = await db.saveBuffLogs(input);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/buff-logs', async (req, res) => {
+  try {
+    await db.clearBuffLogs();
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(503).json({
+      success: false,
+      error: `Không xoá được lịch sử vì MySQL chưa kết nối: ${err.message}`,
+    });
+  }
+});
+
 // =============================================================================
 // 4. API ROUTES - FANPAGE & BUFF INTERACTION
 // =============================================================================

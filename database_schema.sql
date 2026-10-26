@@ -93,6 +93,26 @@ CREATE TABLE IF NOT EXISTS `buff_history` (
   INDEX `idx_history_url_page` (`target_url`(191), `page_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 5b. BẢNG BUFF_LOGS (LỊCH SỬ TỪNG LƯỢT CHẠY - HIỂN THỊ Ở TRANG NHẬT KÝ & LỊCH SỬ)
+-- Backend cũng tự tạo bảng này khi khởi chạy (db.js > ensureBuffLogsTable)
+CREATE TABLE IF NOT EXISTS `buff_logs` (
+  `id` VARCHAR(64) PRIMARY KEY,
+  `user_id` INT DEFAULT 1,
+  `run_type` VARCHAR(16) NOT NULL,
+  `target_url` TEXT NOT NULL,
+  `reaction_type` VARCHAR(32),
+  `engagement_mode` VARCHAR(32),
+  `account_name` VARCHAR(255),
+  `total_pages` INT DEFAULT 0,
+  `success_count` INT DEFAULT 0,
+  `already_liked_count` INT DEFAULT 0,
+  `failed_count` INT DEFAULT 0,
+  `comment_count` INT DEFAULT 0,
+  `details` LONGTEXT,
+  `created_at` DATETIME(3) NOT NULL,
+  INDEX `idx_buff_logs_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 6. BẢNG SOFTWARE_LICENSES (HỆ THỐNG QUẢN LÝ CHO THUÊ TOOL & KHÓA BẢN QUYỀN MÁY)
 CREATE TABLE IF NOT EXISTS `software_licenses` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
