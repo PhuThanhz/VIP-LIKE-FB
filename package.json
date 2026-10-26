@@ -12,7 +12,10 @@
     "build": "npm run build --prefix frontend",
     "tauri": "npm run tauri --prefix frontend",
     "tauri:dev": "npm run tauri:dev --prefix frontend",
-    "tauri:build": "npm run tauri:build --prefix frontend"
+    "tauri:build": "npm run tauri:build --prefix frontend",
+    "spring": "cd backend-spring-boot && mvn spring-boot:run",
+    "spring:jar": "java -jar backend-spring-boot/target/radiant-backend-2.0.0.jar",
+    "spring:build": "cd backend-spring-boot && mvn clean package -DskipTests"
   },
   "keywords": [
     "viplike",
