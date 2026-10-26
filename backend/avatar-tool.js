@@ -392,6 +392,7 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
   let context = null;
   const details = [];
   let updatedCount = 0;
+  const avatarCacheMap = loadAvatarCache();
 
   try {
     context = await chromium.launchPersistentContext(profileDir, {
@@ -591,6 +592,7 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
             scannedAt: new Date().toISOString(),
           };
         }
+        saveAvatarCache(avatarCacheMap);
 
         const detail = {
           pageId,
