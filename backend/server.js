@@ -1479,7 +1479,108 @@ app.post('/api/buff-registry/clear-post', (req, res) => {
   }
 });
 
+// =============================================================================
+// API QUẢN LÝ BẢN QUYỀN & CHO THUÊ PHẦN MỀM (TAURI / SAAS LICENSING)
+// =============================================================================
+
+// 1. Kiểm tra trạng thái bản quyền hiện tại
+app.get('/api/license/status', async (req, res) => {
+  try {
+    const licenses = await db.getLicenses();
+    const active = licenses.find((l) => l.status === 'ACTIVE');
+    if (!active) {
+      return res.json({
+        success: true,
+        activated: false,
+        message: 'Chưa kích hoạt bản quyền hoặc đã hết hạn thuê',
+      });
+    }
+
+    const now = new Date();
+    const expire = new Date(active.expiresAt);
+    const daysRemaining = Math.max(0, Math.ceil((expire.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+    const isExpired = expire < now;
+
+    return res.json({
+      success: true,
+      activated: !isExpired,
+      license: {
+        licenseKey: active.licenseKey,
+        customerName: active.customerName,
+        packageType: active.packageType,
+        maxVias: active.maxVias,
+        expiresAt: active.expiresAt,
+        daysRemaining,
+        isExpired,
+        status: isExpired ? 'EXPIRED' : active.status,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. Kích hoạt mã License mới trên máy khách
+app.post('/api/license/activate', async (req, res) => {
+  try {
+    const { licenseKey, hardwareHwid } = req.body;
+    if (!licenseKey) {
+      return res.status(400).json({ success: false, error: 'Vui lòng cung cấp mã License Key' });
+    }
+    const result = await db.activateLicense({ licenseKey: licenseKey.trim(), hardwareHwid });
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 3. Admin: Danh sách tất cả khách thuê
+app.get('/api/license/admin/list', async (req, res) => {
+  try {
+    const licenses = await db.getLicenses();
+    return res.json({ success: true, licenses });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 4. Admin: Tạo mã thuê mới cho đối tác/khách hàng
+app.post('/api/license/admin/create', async (req, res) => {
+  try {
+    const { customerName, customerContact, packageType, maxVias, days, notes } = req.body;
+    if (!customerName) {
+      return res.status(400).json({ success: false, error: 'Tên khách hàng thuê là bắt buộc' });
+    }
+    const newLicense = await db.createLicense({
+      customerName,
+      customerContact,
+      packageType,
+      maxVias: Number(maxVias) || 50,
+      days: Number(days) || 30,
+      notes,
+    });
+    return res.json({ success: true, license: newLicense });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5. Admin: Cập nhật trạng thái hoặc gia hạn (+30 ngày)
+app.post('/api/license/admin/update-status', async (req, res) => {
+  try {
+    const { id, status, addDays } = req.body;
+    const result = await db.updateLicenseStatus(id, status, Number(addDays) || 0);
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Khởi động server
+
 app.listen(PORT, async () => {
   console.log(`\n================================================================`);
   console.log(`✨ VIPLIKE RADIANT BACKEND ĐANG CHẠY TẠI http://localhost:${PORT}`);

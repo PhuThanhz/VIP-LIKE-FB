@@ -58,6 +58,7 @@ import PasteLinkInput from '../components/common/PasteLinkInput';
 import PostHunterTab from '../components/buff/PostHunterTab';
 import ViaManagementPage from './ViaManagementPage';
 import SystemSettingsPage from './SystemSettingsPage';
+import LicenseManagementPage from './LicenseManagementPage';
 
 const WORKER_BASE_URL =
   import.meta.env.VITE_WORKER_BASE_URL ||
@@ -3911,8 +3912,14 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               />
             ),
           },
+          {
+            key: 'license-management',
+            label: 'Cho Thuê & Bản Quyền',
+            children: <LicenseManagementPage />,
+          },
         ]}
       />
+
 
       {/* Modal Xem Chi Tiết Log Lịch Sử Tương Tác */}
       <Modal

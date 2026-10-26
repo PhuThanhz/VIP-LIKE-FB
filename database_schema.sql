@@ -93,4 +93,29 @@ CREATE TABLE IF NOT EXISTS `buff_history` (
   INDEX `idx_history_url_page` (`target_url`(191), `page_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-SELECT 'Khởi tạo Database autopost_saas cho VIPLIKE RADIANT thành công!' AS result;
+-- 6. BẢNG SOFTWARE_LICENSES (HỆ THỐNG QUẢN LÝ CHO THUÊ TOOL & KHÓA BẢN QUYỀN MÁY)
+CREATE TABLE IF NOT EXISTS `software_licenses` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `license_key` VARCHAR(64) NOT NULL UNIQUE,
+  `customer_name` VARCHAR(128) NOT NULL,
+  `customer_contact` VARCHAR(128) NULL,
+  `hardware_hwid` VARCHAR(128) NULL,
+  `package_type` ENUM('TRIAL_3DAYS', '1_MONTH', '3_MONTHS', '6_MONTHS', '1_YEAR', 'LIFETIME') DEFAULT '1_MONTH',
+  `max_vias` INT DEFAULT 50,
+  `status` ENUM('ACTIVE', 'EXPIRED', 'LOCKED', 'PENDING') DEFAULT 'ACTIVE',
+  `activated_at` TIMESTAMP NULL,
+  `expires_at` TIMESTAMP NOT NULL,
+  `notes` TEXT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_license_key` (`license_key`),
+  INDEX `idx_hardware_hwid` (`hardware_hwid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tạo sẵn 1 Key bản quyền mẫu để bạn dùng thử hoặc demo cho khách:
+INSERT INTO `software_licenses` (`id`, `license_key`, `customer_name`, `customer_contact`, `package_type`, `max_vias`, `status`, `expires_at`, `notes`)
+VALUES (1, 'VIP-PRO-2026-TRIAL-8888', 'Đối Tác Thuê VIPLIKE (Bản quyền mẫu)', '0988888888', '1_MONTH', 100, 'ACTIVE', DATE_ADD(NOW(), INTERVAL 30 DAY), 'Gói thuê 30 ngày kích hoạt mẫu cho máy khách')
+ON DUPLICATE KEY UPDATE `license_key` = `license_key`;
+
+SELECT 'Khởi tạo Database autopost_saas & Bảng Cho Thuê Bản Quyền thành công!' AS result;
+

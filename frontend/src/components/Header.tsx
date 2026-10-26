@@ -69,7 +69,13 @@ const TAB_TITLES: Record<string, { title: string; subtitle: string; icon: React.
     subtitle: 'Bot Telegram báo cáo tức thời, cảnh báo checkpoint và chính sách an toàn dàn nick',
     icon: <SettingOutlined className="text-blue-400 text-base" />,
   },
+  'license-management': {
+    title: 'Hệ Thống Cho Thuê & Bản Quyền Phần Mềm (SaaS)',
+    subtitle: 'Quản lý thời hạn thuê, mã máy HWID, cấp key bản quyền và khóa/mở từ xa',
+    icon: <IdcardOutlined className="text-amber-400 text-base" />,
+  },
 };
+
 
 export const Header: React.FC<HeaderProps> = ({
   activeTabKey,

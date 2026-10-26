@@ -338,6 +338,216 @@ async function deleteSocialAccount(id) {
   return { success: true };
 }
 
+// =============================================================================
+// QUẢN LÝ BẢN QUYỀN & CHO THUÊ TOOL (SOFTWARE LICENSES)
+// =============================================================================
+const LICENSES_CACHE_FILE = path.join(dataDir, 'licenses_cache.json');
+
+function loadLicensesCache() {
+  try {
+    if (fs.existsSync(LICENSES_CACHE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(LICENSES_CACHE_FILE, 'utf8'));
+      if (Array.isArray(data)) return data;
+    }
+  } catch (e) {
+    console.warn('[License Cache] ⚠️ Không đọc được licenses_cache.json:', e.message);
+  }
+  // Khởi tạo key mẫu nếu chưa có
+  return [
+    {
+      id: 1,
+      licenseKey: 'VIP-PRO-2026-TRIAL-8888',
+      customerName: 'Đối Tác Thuê VIPLIKE (Bản quyền mẫu)',
+      customerContact: '0988888888',
+      hardwareHwid: null,
+      packageType: '1_MONTH',
+      maxVias: 100,
+      status: 'ACTIVE',
+      activatedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      notes: 'Gói thuê 30 ngày kích hoạt mẫu cho máy khách',
+      createdAt: new Date().toISOString(),
+    },
+  ];
+}
+
+function saveLicensesCache(licenses) {
+  try {
+    const tmp = `${LICENSES_CACHE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(licenses, null, 2), 'utf8');
+    fs.renameSync(tmp, LICENSES_CACHE_FILE);
+  } catch (e) {
+    console.warn('[License Cache] ⚠️ Không lưu được licenses_cache.json:', e.message);
+  }
+}
+
+async function getLicenses() {
+  try {
+    const p = getPool();
+    const [rows] = await p.execute(`
+      SELECT 
+        id, 
+        license_key as licenseKey, 
+        customer_name as customerName, 
+        customer_contact as customerContact, 
+        hardware_hwid as hardwareHwid, 
+        package_type as packageType, 
+        max_vias as maxVias, 
+        status, 
+        activated_at as activatedAt, 
+        expires_at as expiresAt, 
+        notes, 
+        created_at as createdAt, 
+        updated_at as updatedAt
+      FROM software_licenses 
+      ORDER BY id DESC
+    `);
+    if (Array.isArray(rows) && rows.length > 0) {
+      saveLicensesCache(rows);
+      return rows;
+    }
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Lỗi đọc licenses:', err.message);
+  }
+  return loadLicensesCache();
+}
+
+async function createLicense({
+  licenseKey,
+  customerName,
+  customerContact = '',
+  packageType = '1_MONTH',
+  maxVias = 50,
+  days = 30,
+  notes = '',
+}) {
+  const key = licenseKey || `VIP-${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
+  const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  let newId = Date.now();
+
+  try {
+    const p = getPool();
+    const [res] = await p.execute(
+      `INSERT INTO software_licenses 
+        (license_key, customer_name, customer_contact, package_type, max_vias, status, expires_at, notes, created_at, updated_at) 
+       VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, NOW(), NOW())`,
+      [key, customerName, customerContact, packageType, maxVias, expiresAt, notes]
+    );
+    newId = res.insertId;
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Lỗi tạo license MySQL:', err.message);
+  }
+
+  const newLicense = {
+    id: newId,
+    licenseKey: key,
+    customerName,
+    customerContact,
+    hardwareHwid: null,
+    packageType,
+    maxVias,
+    status: 'ACTIVE',
+    activatedAt: null,
+    expiresAt: expiresAt.toISOString(),
+    notes,
+    createdAt: new Date().toISOString(),
+  };
+
+  const cached = loadLicensesCache();
+  cached.unshift(newLicense);
+  saveLicensesCache(cached);
+
+  return newLicense;
+}
+
+async function activateLicense({ licenseKey, hardwareHwid }) {
+  const cached = loadLicensesCache();
+  const lic = cached.find((l) => l.licenseKey === licenseKey);
+
+  if (!lic) {
+    return { success: false, error: 'Mã License không tồn tại trên hệ thống.' };
+  }
+
+  if (lic.status === 'LOCKED') {
+    return { success: false, error: 'Mã License này đã bị KHÓA. Vui lòng liên hệ Admin.' };
+  }
+
+  const now = new Date();
+  const expireDate = new Date(lic.expiresAt);
+  if (expireDate < now) {
+    return { success: false, error: 'Mã License này đã HẾT HẠN sử dụng.' };
+  }
+
+  // Nếu đã gắn HWID và máy khác cố kích hoạt
+  if (lic.hardwareHwid && hardwareHwid && lic.hardwareHwid !== hardwareHwid) {
+    return {
+      success: false,
+      error: `License này đã được kích hoạt cho thiết bị khác (${lic.hardwareHwid}). Không thể dùng trên máy này.`,
+    };
+  }
+
+  // Gắn HWID và đánh dấu kích hoạt
+  lic.hardwareHwid = hardwareHwid || lic.hardwareHwid;
+  lic.activatedAt = lic.activatedAt || now.toISOString();
+  saveLicensesCache(cached);
+
+  try {
+    const p = getPool();
+    await p.execute(
+      `UPDATE software_licenses SET hardware_hwid = ?, activated_at = COALESCE(activated_at, NOW()), updated_at = NOW() WHERE license_key = ?`,
+      [lic.hardwareHwid, licenseKey]
+    );
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Lỗi kích hoạt license MySQL:', err.message);
+  }
+
+  const daysRemaining = Math.max(0, Math.ceil((expireDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+
+  return {
+    success: true,
+    license: {
+      licenseKey: lic.licenseKey,
+      customerName: lic.customerName,
+      packageType: lic.packageType,
+      maxVias: lic.maxVias,
+      expiresAt: lic.expiresAt,
+      daysRemaining,
+      status: lic.status,
+    },
+  };
+}
+
+async function updateLicenseStatus(id, newStatus, addDays = 0) {
+  const cached = loadLicensesCache();
+  const lic = cached.find((l) => l.id === Number(id) || l.id === id);
+  if (!lic) return { success: false, error: 'Không tìm thấy license' };
+
+  lic.status = newStatus;
+  if (addDays > 0) {
+    const currentExpire = new Date(lic.expiresAt);
+    const base = currentExpire > new Date() ? currentExpire : new Date();
+    lic.expiresAt = new Date(base.getTime() + addDays * 24 * 60 * 60 * 1000).toISOString();
+  }
+  saveLicensesCache(cached);
+
+  try {
+    const p = getPool();
+    if (addDays > 0) {
+      await p.execute(`UPDATE software_licenses SET status = ?, expires_at = ?, updated_at = NOW() WHERE id = ?`, [
+        newStatus,
+        new Date(lic.expiresAt),
+        id,
+      ]);
+    } else {
+      await p.execute(`UPDATE software_licenses SET status = ?, updated_at = NOW() WHERE id = ?`, [newStatus, id]);
+    }
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Lỗi cập nhật license MySQL:', err.message);
+  }
+
+  return { success: true, license: lic };
+}
+
 module.exports = {
   dbConfig,
   getPool,
@@ -350,4 +560,11 @@ module.exports = {
   deleteSocialAccount,
   loadAccountsCache,
   saveAccountsCache,
+  getLicenses,
+  createLicense,
+  activateLicense,
+  updateLicenseStatus,
+  loadLicensesCache,
+  saveLicensesCache,
 };
+

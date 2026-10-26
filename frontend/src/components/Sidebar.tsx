@@ -14,7 +14,9 @@ import {
   MenuUnfoldOutlined,
   DatabaseOutlined,
   SyncOutlined,
+  KeyOutlined,
 } from '@ant-design/icons';
+
 
 const { Sider } = Layout;
 
@@ -130,6 +132,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       key: 'system-settings',
       icon: <SettingOutlined className="text-base text-slate-400" />,
       label: 'Cấu Hình & Telegram',
+    },
+    {
+      key: 'license-management',
+      icon: <KeyOutlined className="text-base text-amber-400" />,
+      label: (
+        <div className="flex items-center justify-between w-full">
+          <span>Cho Thuê & Bản Quyền</span>
+          <Tag color="gold" className="ml-auto text-[10px] font-mono rounded-full px-1.5 py-0 border-0 leading-tight">
+            SaaS
+          </Tag>
+        </div>
+      ),
     },
   ];
 
