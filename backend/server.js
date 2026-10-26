@@ -246,6 +246,21 @@ async function resolveViaProxy(cookieString, explicitProxy = '') {
   return '';
 }
 
+// Kiểm tra sức khỏe và tốc độ Proxy thời gian thực
+app.post('/api/proxy/test', async (req, res) => {
+  const { proxyUrl } = req.body;
+  if (!proxyUrl || typeof proxyUrl !== 'string' || !proxyUrl.trim()) {
+    return res.status(400).json({ success: false, error: 'Vui lòng cung cấp chuỗi Proxy cần kiểm tra' });
+  }
+
+  try {
+    const result = await fbBuffTool.testProxy(proxyUrl.trim(), 8000);
+    return res.json(result);
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // =============================================================================
 // 3. API ROUTES - MYSQL WORKBENCH DATABASE
 // =============================================================================

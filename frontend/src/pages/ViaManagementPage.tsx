@@ -218,6 +218,20 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   const [pageHealthMap, setPageHealthMap] = useState<Record<string, 'LIVE' | 'RESTRICTED' | 'NOT_FOUND'>>({});
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
 
+  // Quản lý kiểm tra sức khỏe Proxy
+  const [testingProxyVias, setTestingProxyVias] = useState<Set<number>>(new Set());
+  const [viaProxyHealthMap, setViaProxyHealthMap] = useState<
+    Record<number, { success: boolean; latencyMs?: number; ip?: string; country?: string; error?: string }>
+  >({});
+  const [isTestingModalProxy, setIsTestingModalProxy] = useState(false);
+  const [modalProxyTestResult, setModalProxyTestResult] = useState<{
+    success: boolean;
+    latencyMs?: number;
+    ip?: string;
+    country?: string;
+    error?: string;
+  } | null>(null);
+
   // Search filter
   const [searchText, setSearchText] = useState('');
 
@@ -455,6 +469,61 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       message.error({ content: 'Lỗi kiểm tra sức khỏe Fanpage: ' + e.message, key: 'healthCheck' });
     } finally {
       setIsCheckingHealth(false);
+    }
+  };
+
+  // Test proxy trong modal thêm / sửa Via
+  const handleTestModalProxy = async () => {
+    const rawProxy = form.getFieldValue('proxyUrl');
+    if (!rawProxy || !rawProxy.trim()) {
+      message.warning('Vui lòng nhập chuỗi Proxy trước khi kiểm tra!');
+      return;
+    }
+    setIsTestingModalProxy(true);
+    setModalProxyTestResult(null);
+    try {
+      const res = await api.post('/proxy/test', { proxyUrl: rawProxy.trim() });
+      setModalProxyTestResult(res.data);
+      if (res.data.success) {
+        message.success(`Proxy LIVE! Ping: ${res.data.latencyMs}ms (IP: ${res.data.ip})`);
+      } else {
+        message.error(res.data.error || 'Proxy không hoạt động');
+      }
+    } catch (e: any) {
+      setModalProxyTestResult({ success: false, error: e.response?.data?.error || e.message });
+      message.error('Không thể kiểm tra Proxy: ' + (e.response?.data?.error || e.message));
+    } finally {
+      setIsTestingModalProxy(false);
+    }
+  };
+
+  // Test proxy của một dòng Via trên bảng
+  const handleTestViaProxy = async (record: MotherViaAccount) => {
+    if (!record.proxyUrl) {
+      message.info(`Via "${record.pageName}" đang dùng Direct IP mạng máy, không có Proxy riêng.`);
+      return;
+    }
+    setTestingProxyVias((prev) => new Set(prev).add(record.id));
+    try {
+      const res = await api.post('/proxy/test', { proxyUrl: record.proxyUrl });
+      setViaProxyHealthMap((prev) => ({ ...prev, [record.id]: res.data }));
+      if (res.data.success) {
+        message.success(`[${record.pageName}] Proxy LIVE! Ping: ${res.data.latencyMs}ms (${res.data.country || 'Global'} - IP: ${res.data.ip})`);
+      } else {
+        message.error(`[${record.pageName}] ${res.data.error || 'Proxy không kết nối được'}`);
+      }
+    } catch (e: any) {
+      setViaProxyHealthMap((prev) => ({
+        ...prev,
+        [record.id]: { success: false, error: e.response?.data?.error || e.message },
+      }));
+      message.error(`[${record.pageName}] Lỗi test: ${e.response?.data?.error || e.message}`);
+    } finally {
+      setTestingProxyVias((prev) => {
+        const next = new Set(prev);
+        next.delete(record.id);
+        return next;
+      });
     }
   };
 
@@ -1029,19 +1098,43 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
               <Col xs={24} sm={12} lg={12}>
                 <Form.Item
                   label={
-                    <span className="text-xs font-semibold text-slate-200">
-                      3. Proxy riêng cho Via này <span className="text-slate-500 font-normal">(Tùy chọn, để trống dùng IP máy)</span>
-                    </span>
+                    <div className="flex items-center justify-between w-full">
+                      <span className="text-xs font-semibold text-slate-200">
+                        3. Proxy riêng cho Via <span className="text-slate-500 font-normal">(Tùy chọn, để trống dùng IP máy)</span>
+                      </span>
+                      <Button
+                        type="link"
+                        size="small"
+                        loading={isTestingModalProxy}
+                        onClick={handleTestModalProxy}
+                        className="text-cyan-400 hover:text-cyan-300 p-0 text-xs font-semibold h-auto"
+                      >
+                        ⚡ Kiểm tra Proxy
+                      </Button>
+                    </div>
                   }
                   name="proxyUrl"
-                  className="mb-3"
+                  className="mb-1"
                 >
                   <Input
-                    placeholder="http://user:pass@ip:port hoặc socks5://... (Nếu có)"
+                    placeholder="ip:port:user:pass hoặc http(s)/socks5://user:pass@ip:port"
                     prefix={<GlobalOutlined className="text-slate-400" />}
                     className="bg-slate-950 border-slate-700/80 text-slate-100 font-mono text-xs rounded-xl h-10 hover:border-cyan-500 focus:border-cyan-500"
                   />
                 </Form.Item>
+                {modalProxyTestResult && (
+                  <div className={`mb-3 text-xs px-2.5 py-1.5 rounded-xl border flex items-center justify-between transition-all ${
+                    modalProxyTestResult.success
+                      ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                      : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
+                  }`}>
+                    {modalProxyTestResult.success ? (
+                      <span>✅ <b>LIVE</b> — IP: <span className="font-mono">{modalProxyTestResult.ip}</span> ({modalProxyTestResult.country || 'Global'}) | Ping: <b>{modalProxyTestResult.latencyMs}ms</b></span>
+                    ) : (
+                      <span>❌ <b>LỖI</b> — {modalProxyTestResult.error}</span>
+                    )}
+                  </div>
+                )}
               </Col>
 
               {/* Cột 4: Chuỗi Cookie Facebook (Bắt buộc) */}
@@ -1382,15 +1475,40 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             {
               title: 'Proxy Riêng',
               key: 'proxyUrl',
-              width: 170,
+              width: 200,
               render: (_: any, record: MotherViaAccount) => {
                 const val = record.proxyUrl;
+                const health = viaProxyHealthMap[record.id];
+                const isTesting = testingProxyVias.has(record.id);
+
                 return val ? (
-                  <Tooltip title={val}>
-                    <Tag color="blue" className="font-mono text-xs rounded-lg px-2 py-0.5 border-0 flex items-center gap-1 max-w-[150px] truncate">
-                      <GlobalOutlined /> {val.replace(/:[^:]+@/, ':***@').slice(0, 16)}...
-                    </Tag>
-                  </Tooltip>
+                  <div className="flex flex-col gap-1 items-start">
+                    <div className="flex items-center gap-1.5">
+                      <Tooltip title={val}>
+                        <Tag color="blue" className="font-mono text-xs rounded-lg px-2 py-0.5 border-0 flex items-center gap-1 max-w-[130px] truncate">
+                          <GlobalOutlined /> {val.replace(/:[^:]+@/, ':***@').slice(0, 14)}...
+                        </Tag>
+                      </Tooltip>
+                      <Tooltip title="Kiểm tra kết nối và độ trễ Proxy này ngay">
+                        <Button
+                          size="small"
+                          type="text"
+                          loading={isTesting}
+                          onClick={() => handleTestViaProxy(record)}
+                          className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-950/40 px-1 py-0 h-6 text-xs rounded font-semibold"
+                        >
+                          ⚡ Test
+                        </Button>
+                      </Tooltip>
+                    </div>
+                    {health && (
+                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                        health.success ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                      }`}>
+                        {health.success ? `● LIVE (${health.latencyMs}ms · ${health.country || 'Global'})` : '● DEAD / LỖI'}
+                      </span>
+                    )}
+                  </div>
                 ) : (
                   <span className="text-slate-500 text-xs italic flex items-center gap-1">
                     <CompassOutlined /> Direct (Mạng máy)

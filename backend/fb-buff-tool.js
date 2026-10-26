@@ -172,31 +172,137 @@ function setCachedPages(uid, pages, viaName = '') {
 function parseProxy(proxyStr) {
   if (!proxyStr || typeof proxyStr !== 'string') return null;
   try {
-    const trimmed = proxyStr.trim();
+    let trimmed = proxyStr.trim().replace(/^['"]|['"]$/g, '');
     if (!trimmed) return null;
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('socks5://')) {
-      const u = new URL(trimmed);
-      const res = { server: `${u.protocol}//${u.hostname}:${u.port}` };
-      if (u.username) res.username = decodeURIComponent(u.username);
-      if (u.password) res.password = decodeURIComponent(u.password);
-      return res;
+
+    let scheme = 'http';
+    if (trimmed.startsWith('socks5://')) {
+      scheme = 'socks5';
+      trimmed = trimmed.substring(9);
+    } else if (trimmed.startsWith('https://')) {
+      scheme = 'https';
+      trimmed = trimmed.substring(8);
+    } else if (trimmed.startsWith('http://')) {
+      scheme = 'http';
+      trimmed = trimmed.substring(7);
     }
+
+    if (trimmed.includes('@')) {
+      const atIdx = trimmed.indexOf('@');
+      const p1 = trimmed.substring(0, atIdx);
+      const p2 = trimmed.substring(atIdx + 1);
+
+      const p2Parts = p2.split(':');
+      const p1Parts = p1.split(':');
+
+      if (p2Parts.length >= 2 && !isNaN(Number(p2Parts[p2Parts.length - 1]))) {
+        // e.g. user:pass@ip:port
+        const user = p1Parts[0] || '';
+        const pass = p1Parts.slice(1).join(':') || '';
+        return {
+          server: `${scheme}://${p2}`,
+          username: decodeURIComponent(user),
+          password: decodeURIComponent(pass),
+        };
+      } else if (p1Parts.length >= 2 && !isNaN(Number(p1Parts[p1Parts.length - 1]))) {
+        // e.g. ip:port@user:pass
+        const user = p2Parts[0] || '';
+        const pass = p2Parts.slice(1).join(':') || '';
+        return {
+          server: `${scheme}://${p1}`,
+          username: decodeURIComponent(user),
+          password: decodeURIComponent(pass),
+        };
+      }
+    }
+
     const parts = trimmed.split(':');
     if (parts.length === 4) {
       return {
-        server: `http://${parts[0]}:${parts[1]}`,
+        server: `${scheme}://${parts[0]}:${parts[1]}`,
         username: parts[2],
         password: parts[3],
       };
     }
     if (parts.length === 2) {
       return {
-        server: `http://${parts[0]}:${parts[1]}`,
+        server: `${scheme}://${parts[0]}:${parts[1]}`,
       };
     }
   } catch (e) {}
   return null;
 }
+
+/**
+ * Kiểm tra kết nối và độ trễ của Proxy qua Playwright request context
+ */
+async function testProxy(proxyStr, timeoutMs = 8000) {
+  const parsed = parseProxy(proxyStr);
+  if (!parsed) {
+    return {
+      success: false,
+      error: 'Định dạng Proxy không hợp lệ. Hỗ trợ: ip:port hoặc ip:port:user:pass hoặc http(s)/socks5://user:pass@ip:port',
+    };
+  }
+
+  const { request } = require('playwright');
+  const startTime = Date.now();
+  let reqContext = null;
+
+  try {
+    reqContext = await request.newContext({
+      proxy: {
+        server: parsed.server,
+        username: parsed.username,
+        password: parsed.password,
+      },
+      timeout: timeoutMs,
+    });
+
+    const res = await reqContext.get('http://ip-api.com/json/', { timeout: timeoutMs });
+    const latencyMs = Date.now() - startTime;
+
+    if (res.ok()) {
+      const data = await res.json().catch(() => ({}));
+      const outboundIp = data.query || 'N/A';
+      const country = data.country || 'N/A';
+      const countryCode = data.countryCode || '';
+      const city = data.city || '';
+      const isp = data.isp || '';
+
+      return {
+        success: true,
+        ip: outboundIp,
+        country,
+        countryCode,
+        city,
+        isp,
+        latencyMs,
+        server: parsed.server,
+        hasAuth: !!(parsed.username && parsed.password),
+        message: `Proxy LIVE (${country}${city ? ' - ' + city : ''}) | Ping: ${latencyMs}ms | IP: ${outboundIp}`,
+      };
+    } else {
+      return {
+        success: false,
+        error: `Proxy trả về mã lỗi HTTP ${res.status()}`,
+        latencyMs,
+      };
+    }
+  } catch (err) {
+    const cleanError = (err.message || '').split('\n')[0].replace(/^apiRequestContext\.\w+:\s*/, '');
+    return {
+      success: false,
+      error: `Kết nối qua Proxy thất bại: ${cleanError}`,
+      latencyMs: Date.now() - startTime,
+    };
+  } finally {
+    if (reqContext) {
+      await reqContext.dispose().catch(() => {});
+    }
+  }
+}
+
 
 const PAGE_USAGE_FILE = path.join(dataDir, 'page_usage.json');
 
@@ -1823,6 +1929,7 @@ module.exports = {
   scanTargetForPosts,
   validateViaSession,
   parseProxy,
+  testProxy,
   recordPageAction,
   getPageUsageToday,
   getDailyPageActionLimit,
