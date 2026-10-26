@@ -1,0 +1,26 @@
+{
+  "name": "viplike-radiant",
+  "version": "1.0.0",
+  "description": "VIPLIKE RADIANT - Hệ thống Phần Mềm Tăng Tương Tác & Buff Like/Comment Facebook Độc Lập",
+  "main": "backend/server.js",
+  "scripts": {
+    "setup": "npm install && npm install --prefix backend && npm install --prefix frontend",
+    "dev": "concurrently -k -n \"BACKEND,FRONTEND\" -c \"cyan,magenta\" \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "start": "concurrently -k -n \"BACKEND,FRONTEND\" -c \"cyan,magenta\" \"npm start --prefix backend\" \"npm run dev --prefix frontend\"",
+    "backend": "npm run dev --prefix backend",
+    "frontend": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend"
+  },
+  "keywords": [
+    "viplike",
+    "facebook",
+    "buff-like",
+    "automation",
+    "playwright"
+  ],
+  "author": "VIPLIKE Radiant Team",
+  "license": "ISC",
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
