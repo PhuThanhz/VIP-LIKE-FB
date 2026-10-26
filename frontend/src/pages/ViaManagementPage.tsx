@@ -1388,7 +1388,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-800/80">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white font-bold text-sm shadow-md shadow-cyan-500/20">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-on-accent font-bold text-sm shadow-md shadow-cyan-500/20">
               1
             </div>
             <div>
@@ -1553,7 +1553,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   htmlType="submit"
                   loading={submitting}
                   icon={<PlusCircleFilled />}
-                  className="bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl px-6 h-10 shadow-lg shadow-cyan-500/20 border-0 flex items-center gap-2"
+                  className="bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-on-accent font-bold text-xs rounded-xl px-6 h-10 shadow-lg shadow-cyan-500/20 border-0 flex items-center gap-2"
                 >
                   Lưu & Thêm Via Ngay
                 </Button>
@@ -1597,7 +1597,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   loading={submitting}
                   onClick={handleAddBulkVias}
                   icon={<UploadOutlined />}
-                  className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl px-5 h-9 border-0"
+                  className="bg-cyan-600 hover:bg-cyan-500 text-on-accent font-bold text-xs rounded-xl px-5 h-9 border-0"
                 >
                   Nạp Tất Cả Via Vào Hệ Thống
                 </Button>
@@ -1700,8 +1700,8 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         }}
         className="dark-drawer"
         styles={{
-          body: { backgroundColor: '#070b13', padding: '16px' },
-          header: { backgroundColor: '#0c1220', borderBottom: '1px solid rgba(255,255,255,0.08)' },
+          body: { backgroundColor: 'var(--bg-primary)', padding: '16px' },
+          header: { backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' },
         }}
       >
         {activeDrawerVia && (

@@ -13,8 +13,11 @@ import {
   MenuUnfoldOutlined,
   MenuFoldOutlined,
   UserOutlined,
+  SunOutlined,
+  MoonOutlined,
 } from '@ant-design/icons';
 import AuthModal, { CurrentUser } from './auth/AuthModal';
+import { useThemeMode } from '../theme/ThemeContext';
 
 
 export interface HeaderDbStatus {
@@ -90,6 +93,7 @@ export const Header: React.FC<HeaderProps> = ({
   onCheckDb,
 }) => {
   const currentTab = TAB_TITLES[activeTabKey] || TAB_TITLES['buff-like'];
+  const { isLight, toggleTheme } = useThemeMode();
 
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() => {
     try {
@@ -203,6 +207,16 @@ export const Header: React.FC<HeaderProps> = ({
             </Button>
           )}
 
+          {/* Light / Dark toggle */}
+          <Tooltip title={isLight ? 'Chuyển sang giao diện Tối' : 'Chuyển sang giao diện Sáng'}>
+            <Button
+              aria-label="Chuyển giao diện Sáng/Tối"
+              icon={isLight ? <MoonOutlined className="text-indigo-500" /> : <SunOutlined className="text-amber-300" />}
+              onClick={toggleTheme}
+              className="bg-slate-900 border-slate-700/80 hover:border-cyan-500/60 rounded-xl h-9 w-9 p-0 flex items-center justify-center"
+            />
+          </Tooltip>
+
           {/* Auth Login / User Profile Button */}
           {currentUser ? (
             <Button
@@ -214,9 +228,9 @@ export const Header: React.FC<HeaderProps> = ({
             </Button>
           ) : (
             <Button
-              icon={<UserOutlined className="text-white" />}
+              icon={<UserOutlined className="text-on-accent" />}
               onClick={() => setIsAuthModalOpen(true)}
-              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold rounded-xl h-9 border-0 shadow-md shadow-cyan-500/20"
+              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-on-accent text-xs font-semibold rounded-xl h-9 border-0 shadow-md shadow-cyan-500/20"
             >
               <span className="hidden sm:inline">Đăng Nhập</span>
               <span className="sm:hidden">Login</span>

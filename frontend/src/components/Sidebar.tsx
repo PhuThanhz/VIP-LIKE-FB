@@ -19,6 +19,8 @@ import {
 } from '@ant-design/icons';
 
 
+import { useThemeMode } from '../theme/ThemeContext';
+
 const { Sider } = Layout;
 
 export interface SidebarStats {
@@ -60,6 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   dbStatus = { connected: false, loading: false },
   onCheckDb,
 }) => {
+  const { isLight } = useThemeMode();
   const menuItems: MenuProps['items'] = [
     {
       key: 'buff-like',
@@ -179,7 +182,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       trigger={null}
       width={260}
       collapsedWidth={76}
-      className="!bg-[#070b13] border-r border-slate-800/80 flex flex-col justify-between select-none z-30 transition-all duration-300"
+      className="!bg-app border-r border-slate-800/80 flex flex-col justify-between select-none z-30 transition-all duration-300"
       style={{
         position: 'sticky',
         top: 0,
@@ -218,7 +221,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Ant Design Navigation Menu */}
         <div className="flex-1 py-3 overflow-y-auto overflow-x-hidden">
           <Menu
-            theme="dark"
+            theme={isLight ? 'light' : 'dark'}
             mode="inline"
             selectedKeys={[activeTabKey]}
             items={menuItems}

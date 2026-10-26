@@ -152,7 +152,7 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
           icon={<CopyOutlined />}
           onClick={handlePasteFromClipboard}
           disabled={disabled}
-          className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl shrink-0 px-4 flex items-center gap-1.5 text-xs sm:text-sm shadow-md shadow-indigo-950/40 border border-blue-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] h-10"
+          className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-on-accent font-bold rounded-xl shrink-0 px-4 flex items-center gap-1.5 text-xs sm:text-sm shadow-md shadow-indigo-950/40 border border-blue-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] h-10"
         >
           <span>Dán link</span>
         </Button>
@@ -163,8 +163,8 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
       {/* MODAL DÁN SIÊU TỐC KHÔNG BỊ CHẶN BỞI HTTP SAFARI */}
       <Modal
         title={
-          <div className="flex items-center gap-2 text-slate-900 font-bold text-sm">
-            <CopyOutlined className="text-blue-600 text-base" />
+          <div className="flex items-center gap-2 text-slate-100 font-bold text-sm">
+            <CopyOutlined className="text-blue-400 text-base" />
             <span>Dán Link Bài Viết</span>
           </div>
         }
@@ -186,7 +186,7 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
         destroyOnHidden
       >
         <div className="space-y-3 py-2">
-          <div className="text-xs text-slate-600">
+          <div className="text-xs text-slate-300">
             Bấm giữ vào ô bên dưới rồi chọn <b>"Dán" (Paste)</b>:
           </div>
           <Input.TextArea
@@ -195,7 +195,7 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
             value={modalText}
             onChange={(e) => setModalText(e.target.value)}
             placeholder="Dán link Facebook, TikTok, Threads vào đây..."
-            className="rounded-xl font-mono text-xs p-3 bg-slate-50"
+            className="rounded-xl font-mono text-xs p-3"
           />
         </div>
       </Modal>

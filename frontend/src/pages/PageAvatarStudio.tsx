@@ -906,13 +906,13 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-16">
       {/* 1. Header Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-[#0f172a] to-pink-950/40 p-6 border border-pink-500/20 shadow-2xl backdrop-blur-xl">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-pink-950/40 p-6 border border-pink-500/20 shadow-2xl backdrop-blur-xl">
         <div className="absolute top-0 right-0 -mt-10 -mr-10 w-72 h-72 bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-transparent rounded-full blur-3xl pointer-events-none" />
 
         <div className="space-y-1.5 relative z-10">
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center shadow-lg shadow-pink-500/30">
-              <PictureOutlined className="text-white text-xl" />
+              <PictureOutlined className="text-on-accent text-xl" />
             </div>
             <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-pink-300 tracking-tight">
               Studio Cập Nhật Avatar Fanpage
@@ -953,7 +953,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
                 className={`p-4 rounded-2xl cursor-pointer transition-all border relative overflow-hidden group ${
                   isSelected
                     ? 'bg-gradient-to-r from-cyan-950/40 via-slate-900 to-pink-950/30 border-cyan-400 ring-2 ring-cyan-500/30 shadow-xl shadow-cyan-500/10'
-                    : 'bg-[#0c1220] border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
+                    : 'bg-surface border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
                 }`}
               >
                 {/* Active checkmark */}
@@ -1025,7 +1025,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       </div>
 
       {/* 3. BƯỚC 2: QUÉT TRẠNG THÁI AVATAR & THỐNG KÊ NHANH */}
-      <div className="p-5 rounded-2xl bg-[#0c1220] border border-slate-800/90 shadow-xl space-y-4">
+      <div className="p-5 rounded-2xl bg-surface border border-slate-800/90 shadow-xl space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2 text-sm font-black text-slate-200 uppercase tracking-wider">
@@ -1090,7 +1090,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Cột Trái: Kho Ảnh & Thực Thi (5 Cols) */}
         <div className="lg:col-span-5 space-y-6">
-          <Card className="!bg-[#0c1220] !border-slate-800/90 rounded-2xl shadow-xl">
+          <Card className="!bg-surface !border-slate-800/90 rounded-2xl shadow-xl">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-bold text-slate-200 flex items-center gap-2">
@@ -1158,7 +1158,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
                             className="aspect-square rounded-lg overflow-hidden bg-slate-800 border border-slate-700/80 group relative hover:border-pink-400 transition-all"
                           >
                             <img src={imgUrl} alt="Preset preview" className="w-full h-full object-cover" />
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-[10px] text-white font-mono">
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-[10px] text-on-accent font-mono">
                               #{i + 1}
                             </div>
                           </div>
@@ -1248,7 +1248,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
           </Card>
 
           {/* Giãn cách & Thực thi */}
-          <Card className="!bg-[#0c1220] !border-slate-800/90 rounded-2xl shadow-xl">
+          <Card className="!bg-surface !border-slate-800/90 rounded-2xl shadow-xl">
             <div className="space-y-4">
               <span className="text-sm font-bold text-slate-200 flex items-center gap-2">
                 <SettingOutlined className="text-amber-400" /> Tốc Độ & Bắt Đầu
@@ -1277,7 +1277,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
                 block
                 disabled={selectedPageIds.length === 0}
                 onClick={handleStartUpdate}
-                className="h-12 bg-gradient-to-r from-pink-500 via-rose-600 to-purple-600 hover:from-pink-400 hover:to-rose-500 text-white font-black text-base rounded-xl shadow-xl shadow-pink-600/25 border-0 tracking-wide"
+                className="h-12 bg-gradient-to-r from-pink-500 via-rose-600 to-purple-600 hover:from-pink-400 hover:to-rose-500 text-on-accent font-black text-base rounded-xl shadow-xl shadow-pink-600/25 border-0 tracking-wide"
               >
                 🚀 BẮT ĐẦU CẬP NHẬT ({selectedPageIds.length} FANPAGE)
               </Button>
@@ -1287,7 +1287,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
 
         {/* Cột Phải: Bảng Danh Sách Fanpage Của Via Đang Chọn (7 Cols) */}
         <div className="lg:col-span-7 space-y-4">
-          <Card className="!bg-[#0c1220] !border-slate-800/90 rounded-2xl shadow-xl">
+          <Card className="!bg-surface !border-slate-800/90 rounded-2xl shadow-xl">
             <div className="space-y-4">
               {/* Header Action Bar */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">

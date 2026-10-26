@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ConfigProvider, App as AntdApp, Layout, theme } from 'antd';
+import type { ThemeConfig } from 'antd';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import Header from './components/Header';
 import Sidebar, { SidebarStats, SidebarDbStatus } from './components/Sidebar';
 import BuffEngagement from './pages/BuffEngagement';
 import api from './config/axios';
+import { ThemeProvider, useThemeMode } from './theme/ThemeContext';
 
 const { Content } = Layout;
 
@@ -122,7 +124,7 @@ const MainDashboard: React.FC = () => {
   }, [accounts]);
 
   return (
-    <Layout className="min-h-screen !bg-[#070b13]">
+    <Layout className="min-h-screen !bg-app">
       {/* Ant Design Sidebar */}
       <Sidebar
         activeTabKey={activeTabKey}
@@ -137,7 +139,7 @@ const MainDashboard: React.FC = () => {
       />
 
       {/* Main App Layout */}
-      <Layout className="!bg-[#070b13] flex flex-col min-h-screen">
+      <Layout className="!bg-app flex flex-col min-h-screen">
         <Header
           activeTabKey={activeTabKey}
           onOpenViaManager={openViaManager}
@@ -171,47 +173,90 @@ const MainDashboard: React.FC = () => {
   );
 };
 
+const DARK_THEME: ThemeConfig = {
+  algorithm: theme.darkAlgorithm,
+  token: {
+    colorPrimary: '#38bdf8',
+    colorBgBase: '#070b13',
+    colorBgContainer: '#0c1220',
+    colorBorder: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    fontFamily: "'Plus Jakarta Sans', sans-serif",
+  },
+  components: {
+    Menu: {
+      itemBg: 'transparent',
+      itemSelectedBg: 'rgba(56, 189, 248, 0.14)',
+      itemSelectedColor: '#38bdf8',
+      itemHoverBg: 'rgba(255, 255, 255, 0.045)',
+      itemHoverColor: '#f8fafc',
+      itemActiveBg: 'transparent',
+      itemMarginInline: 6,
+      itemBorderRadius: 12,
+      darkItemBg: 'transparent',
+      darkItemSelectedBg: 'rgba(56, 189, 248, 0.14)',
+      darkItemSelectedColor: '#38bdf8',
+      darkItemHoverBg: 'rgba(255, 255, 255, 0.045)',
+    },
+    Layout: {
+      siderBg: '#070b13',
+      bodyBg: '#070b13',
+      headerBg: '#070b13',
+    },
+  },
+};
+
+const LIGHT_THEME: ThemeConfig = {
+  algorithm: theme.defaultAlgorithm,
+  token: {
+    colorPrimary: '#2563eb',
+    colorBgBase: '#f5f7fb',
+    colorBgContainer: '#ffffff',
+    colorBgElevated: '#ffffff',
+    colorBorder: '#e2e8f0',
+    colorBorderSecondary: '#eef2f7',
+    colorText: '#0f172a',
+    colorTextSecondary: '#475569',
+    borderRadius: 12,
+    fontFamily: "'Plus Jakarta Sans', sans-serif",
+  },
+  components: {
+    Menu: {
+      itemBg: 'transparent',
+      itemSelectedBg: '#eff6ff',
+      itemSelectedColor: '#2563eb',
+      itemHoverBg: '#f1f5f9',
+      itemHoverColor: '#0f172a',
+      itemActiveBg: 'transparent',
+      itemColor: '#475569',
+      itemMarginInline: 6,
+      itemBorderRadius: 12,
+    },
+    Layout: {
+      siderBg: '#ffffff',
+      bodyBg: '#f5f7fb',
+      headerBg: '#ffffff',
+    },
+  },
+};
+
+const ThemedApp: React.FC = () => {
+  const { isLight } = useThemeMode();
+  return (
+    <ConfigProvider theme={isLight ? LIGHT_THEME : DARK_THEME}>
+      <AntdApp>
+        <MainDashboard />
+      </AntdApp>
+    </ConfigProvider>
+  );
+};
+
 export const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
-      <ConfigProvider
-        theme={{
-          algorithm: theme.darkAlgorithm,
-          token: {
-            colorPrimary: '#38bdf8',
-            colorBgBase: '#070b13',
-            colorBgContainer: '#0c1220',
-            colorBorder: 'rgba(255, 255, 255, 0.08)',
-            borderRadius: 12,
-            fontFamily: "'Plus Jakarta Sans', sans-serif",
-          },
-          components: {
-            Menu: {
-              itemBg: 'transparent',
-              itemSelectedBg: 'rgba(56, 189, 248, 0.14)',
-              itemSelectedColor: '#38bdf8',
-              itemHoverBg: 'rgba(255, 255, 255, 0.045)',
-              itemHoverColor: '#f8fafc',
-              itemActiveBg: 'transparent',
-              itemMarginInline: 6,
-              itemBorderRadius: 12,
-              darkItemBg: 'transparent',
-              darkItemSelectedBg: 'rgba(56, 189, 248, 0.14)',
-              darkItemSelectedColor: '#38bdf8',
-              darkItemHoverBg: 'rgba(255, 255, 255, 0.045)',
-            },
-            Layout: {
-              siderBg: '#070b13',
-              bodyBg: '#070b13',
-              headerBg: '#070b13',
-            },
-          },
-        }}
-      >
-        <AntdApp>
-          <MainDashboard />
-        </AntdApp>
-      </ConfigProvider>
+      <ThemeProvider>
+        <ThemedApp />
+      </ThemeProvider>
     </QueryClientProvider>
   );
 };

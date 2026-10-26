@@ -344,7 +344,7 @@ export const LicenseManagementPage: React.FC = () => {
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* HEADER SECTION */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-[#0d1527] to-slate-900 p-5 rounded-2xl border border-slate-800/80 shadow-xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-surface-2 to-slate-900 p-5 rounded-2xl border border-slate-800/80 shadow-xl">
         <div>
           <div className="flex items-center gap-2 text-cyan-400 font-semibold text-xs tracking-wider uppercase mb-1">
             <CrownOutlined /> Mô Hình Cho Thuê Phần Mềm (Tauri SaaS Licensing)
@@ -391,7 +391,7 @@ export const LicenseManagementPage: React.FC = () => {
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={15}>
           <Card
-            className="bg-[#0b1325]/90 border-slate-800 shadow-xl rounded-2xl h-full"
+            className="bg-card/90 border-slate-800 shadow-xl rounded-2xl h-full"
             title={
               <div className="flex items-center gap-2 text-white">
                 <SafetyCertificateOutlined className="text-emerald-400 text-lg" />
@@ -458,7 +458,7 @@ export const LicenseManagementPage: React.FC = () => {
         {/* Ô KÍCH HOẠT KEY CHO MÁY KHÁCH */}
         <Col xs={24} lg={9}>
           <Card
-            className="bg-[#0b1325]/90 border-slate-800 shadow-xl rounded-2xl h-full flex flex-col justify-between"
+            className="bg-card/90 border-slate-800 shadow-xl rounded-2xl h-full flex flex-col justify-between"
             title={
               <div className="flex items-center gap-2 text-white">
                 <KeyOutlined className="text-cyan-400 text-lg" />
@@ -514,7 +514,7 @@ export const LicenseManagementPage: React.FC = () => {
 
       {/* DANH SÁCH KHÁCH THUÊ DÀNH CHO ADMIN */}
       <Card
-        className="bg-[#0b1325]/90 border-slate-800 shadow-xl rounded-2xl"
+        className="bg-card/90 border-slate-800 shadow-xl rounded-2xl"
         title={
           <div className="flex items-center justify-between w-full">
             <div className="flex items-center gap-2 text-white">

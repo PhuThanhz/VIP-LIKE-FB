@@ -2420,7 +2420,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                             size="small"
                             icon={<SettingOutlined />}
                             onClick={() => handleOpenManagePages(selectedAccountId)}
-                            className="bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-xs h-7 px-2.5 shadow-sm border-none cursor-pointer"
+                            className="bg-blue-600 hover:bg-blue-500 text-on-accent font-bold rounded-lg text-xs h-7 px-2.5 shadow-sm border-none cursor-pointer"
                           >
                             Quản lý Page ({scannedPages.length})
                           </Button>
@@ -2562,7 +2562,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           onClick={() => setActorMode('FANPAGES')}
                           className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                             actorMode === 'FANPAGES'
-                              ? 'bg-blue-600 text-white'
+                              ? 'bg-blue-600 text-on-accent'
                               : 'text-slate-400 hover:text-white hover:bg-slate-900'
                           }`}
                         >
@@ -2576,7 +2576,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           onClick={() => setActorMode('VIAS')}
                           className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                             actorMode === 'VIAS'
-                              ? 'bg-blue-600 text-white'
+                              ? 'bg-blue-600 text-on-accent'
                               : 'text-slate-400 hover:text-white hover:bg-slate-900'
                           }`}
                         >
@@ -2686,7 +2686,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                 >
                                   <div className="flex items-center gap-2 min-w-0">
                                     <div
-                                      className={`w-7 h-7 shrink-0 rounded-lg text-white font-semibold text-[10px] flex items-center justify-center ${
+                                      className={`w-7 h-7 shrink-0 rounded-lg text-on-accent font-semibold text-[10px] flex items-center justify-center ${
                                         actorMode === 'VIAS'
                                           ? 'bg-emerald-600'
                                           : getAvatarGradient(page.name)
@@ -2814,8 +2814,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   onClick={handlePauseBatchBuff}
                                   className={`font-bold h-12 rounded-xl text-xs sm:text-sm ${
                                     isBatchPaused
-                                      ? 'bg-emerald-600 text-white hover:bg-emerald-500 border-none'
-                                      : 'bg-amber-600 text-white hover:bg-amber-500 border-none'
+                                      ? 'bg-emerald-600 text-on-accent hover:bg-emerald-500 border-none'
+                                      : 'bg-amber-600 text-on-accent hover:bg-amber-500 border-none'
                                   }`}
                                 >
                                   {isBatchPaused ? 'Tiếp tục' : 'Tạm dừng'}
@@ -3022,7 +3022,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   icon={<RobotOutlined spin={isAiGeneratingComments} />}
                                   loading={isAiGeneratingComments}
                                   onClick={handleGenerateAiComments}
-                                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs h-7 px-2.5 rounded-lg border-none cursor-pointer"
+                                  className="bg-blue-600 hover:bg-blue-500 text-on-accent font-bold text-xs h-7 px-2.5 rounded-lg border-none cursor-pointer"
                                 >
                                   Tạo bình luận bằng AI
                                 </Button>
@@ -3237,7 +3237,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   >
                                     <div className="flex items-center gap-2 min-w-0 flex-1">
                                       <div
-                                        className={`w-6 h-6 shrink-0 rounded-lg text-white font-semibold text-[9px] flex items-center justify-center ${getAvatarGradient(
+                                        className={`w-6 h-6 shrink-0 rounded-lg text-on-accent font-semibold text-[9px] flex items-center justify-center ${getAvatarGradient(
                                           detail.pageName
                                         )} shadow-sm`}
                                       >
@@ -3943,36 +3943,39 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               </Dropdown>
                             </div>
 
-                            {/* Bottom: List of Fanpages in this log */}
-                            <div>
-                              <div className="text-[11px] font-semibold text-slate-400 mb-1 flex items-center justify-between">
-                                <span>Danh sách {log.details.length} Fanpage đã tham gia lượt buff này:</span>
-                                <Button
-                                  size="small"
-                                  type="link"
-                                  onClick={() => setSelectedLogDetail(log)}
-                                  className="text-[11px] p-0 h-auto text-blue-400 hover:underline"
-                                >
-                                  Xem chi tiết tất cả ({log.details.length} Page)
-                                </Button>
-                              </div>
-                              <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
-                                {log.details.map((d, dIdx) => (
-                                  <span
-                                    key={d.pageId + dIdx}
-                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border ${
-                                      d.status === 'SUCCESS'
-                                        ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-300'
-                                        : d.status === 'ALREADY_LIKED'
-                                        ? 'bg-blue-950/60 border-blue-800/60 text-blue-300'
-                                        : 'bg-rose-950/60 border-rose-800/60 text-rose-300'
-                                    }`}
+                            {/* Bottom: tóm tắt Fanpage, danh sách đầy đủ nằm trong "Chi tiết" */}
+                            {log.details.length > 0 && (() => {
+                              const total = log.details.length;
+                              const okN = log.details.filter((d) => d.status === 'SUCCESS').length;
+                              const likedN = log.details.filter((d) => d.status === 'ALREADY_LIKED').length;
+                              const failN = total - okN - likedN;
+                              const preview = log.details.slice(0, 3).map((d) => d.pageName).join(', ');
+                              return (
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex h-1.5 rounded-full overflow-hidden bg-slate-800">
+                                      <div className="bg-emerald-500" style={{ width: `${(okN / total) * 100}%` }} />
+                                      <div className="bg-blue-500" style={{ width: `${(likedN / total) * 100}%` }} />
+                                      <div className="bg-rose-500" style={{ width: `${(failN / total) * 100}%` }} />
+                                    </div>
+                                    <div className="mt-1.5 text-[11px] text-slate-400 truncate">
+                                      <b className="text-slate-200">{total} Fanpage</b>
+                                      <span className="mx-1.5 text-slate-600">•</span>
+                                      {preview}
+                                      {total > 3 && <span className="text-slate-500"> +{total - 3}</span>}
+                                    </div>
+                                  </div>
+                                  <Button
+                                    size="small"
+                                    icon={<EyeOutlined />}
+                                    onClick={() => setSelectedLogDetail(log)}
+                                    className="shrink-0 rounded-lg text-[11px] bg-slate-900 border-slate-700/80 text-slate-300 hover:text-blue-400"
                                   >
-                                    {d.pageName}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
+                                    Chi tiết
+                                  </Button>
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       })}
@@ -4065,19 +4068,19 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         centered
         destroyOnHidden
         title={
-          <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-            <HistoryOutlined className="text-blue-600 text-lg" />
+          <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
+            <HistoryOutlined className="text-blue-400 text-lg" />
             <div>
-              <div className="font-bold text-base text-slate-800">
+              <div className="font-bold text-base text-slate-100">
                 Chi tiết lịch sử
               </div>
               <div className="text-[11px] text-slate-400 font-normal">
                 Thời gian:{' '}
-                <span className="font-mono text-slate-600">
+                <span className="font-mono text-slate-300">
                   {selectedLogDetail ? new Date(selectedLogDetail.createdAt).toLocaleString('vi-VN') : ''}
                 </span>{' '}
                 • Chế độ:{' '}
-                <span className="font-semibold text-blue-600">
+                <span className="font-semibold text-blue-400">
                   {selectedLogDetail?.type === 'BATCH' ? 'Hàng loạt (Batch)' : 'Đơn lẻ (Single)'}
                 </span>
               </div>
@@ -4088,9 +4091,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         {selectedLogDetail && (
           <div className="py-2 space-y-4 text-xs">
             {/* Target Post Info */}
-            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+            <div className="p-3.5 bg-slate-950/50 border border-slate-800 rounded-xl space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-700">Link bài viết mục tiêu:</span>
+                <span className="font-bold text-slate-200">Link bài viết mục tiêu:</span>
                 <div className="flex items-center gap-2">
                   <Button
                     size="small"
@@ -4115,7 +4118,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                   </Button>
                 </div>
               </div>
-              <div className="font-mono text-blue-600 break-all bg-white p-2 rounded-lg border border-slate-200">
+              <div className="font-mono text-blue-400 break-all bg-slate-900 p-2 rounded-lg border border-slate-800">
                 {selectedLogDetail.targetUrl}
               </div>
               <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -4140,30 +4143,30 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
             {/* Quick Metrics */}
             <div className="grid grid-cols-4 gap-2">
-              <div className="p-2.5 rounded-xl bg-slate-100 border border-slate-200 text-center">
+              <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
                 <div className="text-[10px] text-slate-500 font-bold uppercase">Tổng Page</div>
-                <div className="text-lg font-semibold text-slate-800">{selectedLogDetail.totalPages}</div>
+                <div className="text-lg font-semibold text-slate-100">{selectedLogDetail.totalPages}</div>
               </div>
-              <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-center">
-                <div className="text-[10px] text-emerald-600 font-bold uppercase">Thành công</div>
-                <div className="text-lg font-semibold text-emerald-600">{selectedLogDetail.successCount}</div>
+              <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-center">
+                <div className="text-[10px] text-emerald-400 font-bold uppercase">Thành công</div>
+                <div className="text-lg font-semibold text-emerald-400">{selectedLogDetail.successCount}</div>
               </div>
-              <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-center">
-                <div className="text-[10px] text-blue-600 font-bold uppercase">Đã Like Trước</div>
-                <div className="text-lg font-semibold text-blue-600">{selectedLogDetail.alreadyLikedCount}</div>
+              <div className="p-2.5 rounded-xl bg-blue-950/40 border border-blue-800/60 text-center">
+                <div className="text-[10px] text-blue-400 font-bold uppercase">Đã Like Trước</div>
+                <div className="text-lg font-semibold text-blue-400">{selectedLogDetail.alreadyLikedCount}</div>
               </div>
-              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-center">
-                <div className="text-[10px] text-rose-600 font-bold uppercase">Thất bại / Lỗi</div>
-                <div className="text-lg font-semibold text-rose-600">{selectedLogDetail.failedCount}</div>
+              <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-center">
+                <div className="text-[10px] text-rose-400 font-bold uppercase">Thất bại / Lỗi</div>
+                <div className="text-lg font-semibold text-rose-400">{selectedLogDetail.failedCount}</div>
               </div>
             </div>
 
             {/* Detailed Table of Pages */}
             <div className="space-y-2">
-              <div className="font-bold text-slate-700 flex items-center justify-between">
+              <div className="font-bold text-slate-200 flex items-center justify-between">
                 <span>Chi tiết từng Fanpage ({selectedLogDetail.details.length} Page):</span>
               </div>
-              <div className="max-h-72 overflow-y-auto space-y-1.5 border border-slate-200 rounded-xl p-2 bg-slate-50">
+              <div className="max-h-72 overflow-y-auto space-y-1.5 border border-slate-800 rounded-xl p-2 bg-slate-950/50">
                 {selectedLogDetail.details.map((detail, idx) => {
                   let statusTag = <Tag color="default">Chờ xử lý</Tag>;
                   if (detail.status === 'SUCCESS') {
@@ -4179,14 +4182,14 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                   return (
                     <div
                       key={detail.pageId + idx}
-                      className="p-2 rounded-lg bg-white border border-slate-200 flex items-center justify-between gap-3 text-xs"
+                      className="p-2 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between gap-3 text-xs"
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="font-bold text-slate-400 font-mono text-[10px]">#{idx + 1}</span>
                         <div className="min-w-0">
-                          <div className="font-semibold text-slate-800 truncate">{detail.pageName}</div>
+                          <div className="font-semibold text-slate-100 truncate">{detail.pageName}</div>
                           {detail.commentText && (
-                            <div className="text-[11px] text-blue-600 italic truncate max-w-[320px] font-medium">
+                            <div className="text-[11px] text-blue-400 italic truncate max-w-[320px] font-medium">
                               "{detail.commentText}"
                             </div>
                           )}
@@ -4469,7 +4472,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       <Modal
         title={
           <div className="flex items-center gap-2.5 text-white font-semibold text-base sm:text-lg">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white">
+            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-on-accent">
               <RobotOutlined className="text-base" />
             </div>
             <div>
@@ -4488,12 +4491,12 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         className="dark-modal"
         styles={{
           body: {
-            backgroundColor: '#0f172a',
-            color: '#f8fafc',
+            backgroundColor: 'var(--modal-bg)',
+            color: 'var(--text-strong)',
           },
           header: {
-            backgroundColor: '#0f172a',
-            borderBottom: '1px solid #1e293b',
+            backgroundColor: 'var(--modal-bg)',
+            borderBottom: '1px solid var(--border)',
           },
         }}
       >
@@ -4592,7 +4595,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                   await handleGenerateAiComments();
                   setAiStudioModalOpen(false);
                 }}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs h-9 border-none"
+                className="bg-blue-600 hover:bg-blue-500 text-on-accent font-bold rounded-xl text-xs h-9 border-none"
               >
                 Tạo bằng AI theo link bài
               </Button>
