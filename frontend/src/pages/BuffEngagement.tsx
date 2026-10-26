@@ -2191,7 +2191,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         onChange={(k) => setActiveTabKey(k)}
         renderTabBar={() => null}
         animated={false}
-        destroyInactiveTabPane={false}
+        destroyInactiveTabPane={true}
         tabBarExtraContent={<span className="text-xs text-slate-400">{fbAccounts.length} nick · {scannedPages.length} Page</span>}
         items={[
           {

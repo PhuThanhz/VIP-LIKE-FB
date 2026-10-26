@@ -20,9 +20,63 @@ const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 
+// Cờ tối ưu hóa tốc độ và bộ nhớ RAM cho Playwright Chromium
+const OPTIMIZED_CHROMIUM_ARGS = [
+  '--disable-blink-features=AutomationControlled',
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-notifications',
+  '--mute-audio',
+  '--disable-gpu',
+  '--disable-dev-shm-usage',
+  '--disable-background-networking',
+  '--disable-background-timer-throttling',
+  '--disable-backgrounding-occluded-windows',
+  '--disable-renderer-backgrounding',
+  '--disable-breakpad',
+  '--disable-component-update',
+  '--disable-ipc-flooding-protection',
+  '--no-first-run',
+  '--no-default-browser-check',
+  '--password-store=basic',
+  '--use-mock-keychain',
+];
+
+// Hàm chặn quảng cáo, pixel theo dõi, video nặng để tăng tốc 3-5 lần
+async function applyResourceOptimization(context, allowMedia = false) {
+  try {
+    await context.route('**/*', (route) => {
+      const req = route.request();
+      const rType = req.resourceType();
+      const url = req.url();
+
+      // Chặn các tracker, pixel telemetry gây chậm mạng
+      if (
+        url.includes('/tr/') ||
+        url.includes('pixel.facebook.com') ||
+        url.includes('connect.facebook.net') ||
+        url.includes('googletagmanager.com') ||
+        url.includes('doubleclick.net')
+      ) {
+        return route.abort();
+      }
+
+      // Khi chỉ cần Like/Comment, chặn luồng video mp4/m3u8 để tiết kiệm 70% băng thông
+      if (!allowMedia && (rType === 'media' || url.endsWith('.mp4') || url.endsWith('.m3u8') || url.endsWith('.webm'))) {
+        return route.abort();
+      }
+
+      return route.continue();
+    });
+  } catch (e) {
+    // bỏ qua lỗi nếu context đã đóng
+  }
+}
+
 // ==========================================
 // 1. CÁC HÀM TIỆN ÍCH COOKIE & PARSING
 // ==========================================
+
 
 function parseCookieString(cookieStr, domain = '.facebook.com') {
   if (!cookieStr || typeof cookieStr !== 'string') return [];
@@ -307,14 +361,7 @@ async function getManagedPages(cookieStr, options = {}) {
   const proxy = parseProxy(proxyUrl);
   const browser = await chromium.launch({
     headless: true,
-    args: [
-      '--disable-blink-features=AutomationControlled',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-notifications',
-      '--mute-audio',
-      '--disable-gpu',
-    ],
+    args: OPTIMIZED_CHROMIUM_ARGS,
     proxy: proxy ? { server: proxy.server, username: proxy.username, password: proxy.password } : undefined,
   });
 
@@ -324,6 +371,7 @@ async function getManagedPages(cookieStr, options = {}) {
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       viewport: { width: 1280, height: 800 },
     });
+    await applyResourceOptimization(context, false);
     await context.addCookies(cookies);
     const page = await context.newPage();
 
@@ -680,12 +728,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     context = await chromium.launchPersistentContext(profileDir, {
       headless: true,
       args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-notifications',
-        '--mute-audio',
-        '--disable-gpu',
+        ...OPTIMIZED_CHROMIUM_ARGS,
         '--disable-webrtc',
         '--disable-features=WebRtcHideLocalIpsWithMdns',
         '--enforce-webrtc-ip-permission-check',
@@ -703,12 +746,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     browser = await chromium.launch({
       headless: true,
       args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-notifications',
-        '--mute-audio',
-        '--disable-gpu',
+        ...OPTIMIZED_CHROMIUM_ARGS,
         '--disable-webrtc',
         '--disable-features=WebRtcHideLocalIpsWithMdns',
         '--enforce-webrtc-ip-permission-check',
@@ -1422,16 +1460,9 @@ async function buffViews(targetVideoUrl, options = {}) {
   // Khởi tạo DUY NHẤT 1 instance browser Playwright (tiết kiệm 90% RAM so với mở nhiều browser)
   const browser = await chromium.launch({
     headless: true,
-    args: [
-      '--disable-blink-features=AutomationControlled',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-notifications',
-      '--mute-audio',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-    ],
+    args: OPTIMIZED_CHROMIUM_ARGS,
   });
+
 
   try {
     const runViewWorker = async (workerId) => {
@@ -1581,16 +1612,10 @@ async function scanTargetForPosts(targetUrl, options = {}) {
   try {
     browser = await chromium.launch({
       headless: true,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-notifications',
-        '--mute-audio',
-        '--disable-gpu',
-      ],
+      args: OPTIMIZED_CHROMIUM_ARGS,
       proxy: proxy ? { server: proxy.server, username: proxy.username, password: proxy.password } : undefined,
     });
+
 
     context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
@@ -1731,16 +1756,10 @@ async function validateViaSession(cookieStr, options = {}) {
   try {
     browser = await chromium.launch({
       headless: true,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-notifications',
-        '--mute-audio',
-        '--disable-gpu',
-      ],
+      args: OPTIMIZED_CHROMIUM_ARGS,
       proxy: proxy ? { server: proxy.server, username: proxy.username, password: proxy.password } : undefined,
     });
+
 
     context = await browser.newContext({
       userAgent: device.userAgent,

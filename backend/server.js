@@ -47,51 +47,74 @@ const BUFF_HISTORY_FILE = path.join(DATA_DIR, 'buff_history.json');
 const BUFF_MONITORS_FILE = path.join(DATA_DIR, 'buff_monitors.json');
 
 // =============================================================================
-// 1. DATA HELPERS (QUEUE, HISTORY, MONITORS)
+// 1. DATA HELPERS (QUEUE, HISTORY, MONITORS) - TỐI ƯU IN-MEMORY & DEBOUNCED I/O
 // =============================================================================
 
+let cachedBuffQueue = null;
+let saveQueueTimer = null;
+
 function loadBuffQueue() {
+  if (cachedBuffQueue) return cachedBuffQueue;
   try {
     if (fs.existsSync(BUFF_QUEUE_FILE)) {
       const data = JSON.parse(fs.readFileSync(BUFF_QUEUE_FILE, 'utf-8'));
-      if (Array.isArray(data.items)) return data;
+      if (Array.isArray(data.items)) {
+        cachedBuffQueue = data;
+        return cachedBuffQueue;
+      }
     }
   } catch (e) {
     console.warn('[BuffQueue] ⚠️ Không đọc được queue, khởi tạo lại:', e.message);
   }
-  return { items: [] };
+  cachedBuffQueue = { items: [] };
+  return cachedBuffQueue;
 }
 
 function saveBuffQueue(queueData) {
-  try {
-    const tmp = `${BUFF_QUEUE_FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(queueData, null, 2));
-    fs.renameSync(tmp, BUFF_QUEUE_FILE);
-  } catch (e) {
-    console.warn('[BuffQueue] ⚠️ Lỗi lưu file hàng đợi:', e.message);
-  }
+  cachedBuffQueue = queueData;
+  if (saveQueueTimer) clearTimeout(saveQueueTimer);
+  saveQueueTimer = setTimeout(() => {
+    try {
+      const tmp = `${BUFF_QUEUE_FILE}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(cachedBuffQueue, null, 2));
+      fs.renameSync(tmp, BUFF_QUEUE_FILE);
+    } catch (e) {
+      console.warn('[BuffQueue] ⚠️ Lỗi lưu file hàng đợi:', e.message);
+    }
+  }, 200);
 }
 
+let cachedBuffHistory = null;
+let saveHistoryTimer = null;
+
 function loadBuffHistory() {
+  if (cachedBuffHistory) return cachedBuffHistory;
   try {
     if (fs.existsSync(BUFF_HISTORY_FILE)) {
-      return JSON.parse(fs.readFileSync(BUFF_HISTORY_FILE, 'utf-8'));
+      cachedBuffHistory = JSON.parse(fs.readFileSync(BUFF_HISTORY_FILE, 'utf-8'));
+      return cachedBuffHistory;
     }
   } catch (e) {
     console.warn('[BuffHistory] ⚠️ Không đọc được history:', e.message);
   }
-  return {};
+  cachedBuffHistory = {};
+  return cachedBuffHistory;
 }
 
 function saveBuffHistory(historyData) {
-  try {
-    const tmp = `${BUFF_HISTORY_FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(historyData, null, 2));
-    fs.renameSync(tmp, BUFF_HISTORY_FILE);
-  } catch (e) {
-    console.warn('[BuffHistory] ⚠️ Lỗi lưu file history:', e.message);
-  }
+  cachedBuffHistory = historyData;
+  if (saveHistoryTimer) clearTimeout(saveHistoryTimer);
+  saveHistoryTimer = setTimeout(() => {
+    try {
+      const tmp = `${BUFF_HISTORY_FILE}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(cachedBuffHistory, null, 2));
+      fs.renameSync(tmp, BUFF_HISTORY_FILE);
+    } catch (e) {
+      console.warn('[BuffHistory] ⚠️ Lỗi lưu file history:', e.message);
+    }
+  }, 300);
 }
+
 
 function loadBuffMonitors() {
   try {
