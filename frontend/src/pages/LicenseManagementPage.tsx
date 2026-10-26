@@ -38,8 +38,10 @@ import {
   InfoCircleOutlined,
 } from '@ant-design/icons';
 import api from '../config/axios';
+import { getMachineHwid, isTauri } from '../utils/tauriBridge';
 
 const { Title, Text, Paragraph } = Typography;
+
 
 interface LicenseInfo {
   licenseKey: string;
@@ -76,14 +78,14 @@ export const LicenseManagementPage: React.FC = () => {
   const [licenseInput, setLicenseInput] = useState('');
   const [createForm] = Form.useForm();
 
-  // Tạo Hardware ID giả lập trình duyệt / máy khách
-  const [hardwareHwid] = useState(() => {
-    const saved = localStorage.getItem('viplike_hwid');
-    if (saved) return saved;
-    const newHwid = `MAC-${Math.random().toString(36).substring(2, 8).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
-    localStorage.setItem('viplike_hwid', newHwid);
-    return newHwid;
-  });
+  const [hardwareHwid, setHardwareHwid] = useState<string>('Đang đọc mã máy...');
+  const isDesktop = isTauri();
+
+  useEffect(() => {
+    getMachineHwid().then((hwid) => {
+      setHardwareHwid(hwid);
+    });
+  }, []);
 
   // Tải trạng thái bản quyền hiện tại
   const fetchLicenseStatus = async () => {
@@ -101,6 +103,7 @@ export const LicenseManagementPage: React.FC = () => {
       setLoading(false);
     }
   };
+
 
   // Tải danh sách khách thuê (dành cho Admin)
   const fetchAdminLicenses = async () => {
@@ -345,8 +348,14 @@ export const LicenseManagementPage: React.FC = () => {
         <div>
           <div className="flex items-center gap-2 text-cyan-400 font-semibold text-xs tracking-wider uppercase mb-1">
             <CrownOutlined /> Mô Hình Cho Thuê Phần Mềm (Tauri SaaS Licensing)
+            {isDesktop ? (
+              <Tag color="cyan" className="ml-2 font-mono">🦀 Tauri Rust Native</Tag>
+            ) : (
+              <Tag color="blue" className="ml-2 font-mono">🌐 React JS + Tauri Rust Ready</Tag>
+            )}
           </div>
           <Title level={3} className="!text-white !m-0">
+
             Quản Lý Bản Quyền & Hệ Thống Cho Thuê Tool
           </Title>
           <Text className="text-slate-400 text-sm">
