@@ -2,14 +2,12 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Card,
   Button,
-  Select,
   Tag,
   App,
   Row,
   Col,
   Checkbox,
   Progress,
-  Tabs,
   Modal,
   Input,
   InputNumber,
@@ -20,7 +18,6 @@ import {
   Upload,
   Divider,
   Space,
-  Dropdown,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -34,7 +31,6 @@ import {
   PlayCircleOutlined,
   SearchOutlined,
   UserOutlined,
-  FileImageOutlined,
   ThunderboltFilled,
   SettingOutlined,
   EyeOutlined,
@@ -47,10 +43,10 @@ import {
   ReloadOutlined,
   FireOutlined,
   SafetyCertificateOutlined,
-  DownOutlined,
   CompassOutlined,
+  CrownOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
-import axios from 'axios';
 import api from '../config/axios';
 
 const WORKER_BASE_URL =
@@ -109,10 +105,11 @@ interface PageAvatarStudioProps {
 export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, onRefresh }) => {
   const { message: antMessage, modal } = App.useApp();
 
-  // Cache danh sách Fanpage từ trình duyệt (chứa toàn bộ 512 page của Thành An)
+  // Cache danh sách Fanpage từ trình duyệt (Thành An: 512 page, Huỳnh Thạnh Phú: 25 page)
   const [cachedPagesMap, setCachedPagesMap] = useState<Record<string, any[]>>({});
+  const [scanningViaPages, setScanningViaPages] = useState<boolean>(false);
 
-  // 1. Phân nhóm Nick Mẹ và Dàn Fanpage (Gộp từ MySQL social_accounts + Cache Playwright 512 page)
+  // 1. Phân nhóm Dàn Nick Mẹ (Thành An & Huỳnh Thạnh Phú)
   const motherVias = useMemo<MotherViaItem[]>(() => {
     if (!Array.isArray(accounts) || accounts.length === 0) return [];
 
@@ -164,7 +161,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       const hasOk = allRows.some((r) => r.tokenStatus === 'OK');
       const tokenStatus = hasOk ? 'OK' : profileRow?.tokenStatus || allRows[0]?.tokenStatus || 'OK';
 
-      // Lọc danh sách Fanpage con (Loại bỏ chính profile mẹ VÀ loại bỏ nhóm FACEBOOK_GROUP)
+      // Lọc danh sách Fanpage con (Loại bỏ profile mẹ và các nhóm FACEBOOK_GROUP)
       const pages: ChildPageItem[] = [];
       const seenPageIds = new Set<string>();
 
@@ -188,7 +185,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
         });
       }
 
-      // Bổ sung các Fanpage từ bộ nhớ Cache quét Playwright (chứa đầy đủ 512 page)
+      // Gộp thêm danh sách Fanpage từ bộ nhớ Cache quét Playwright
       const scannedList = cachedPagesMap[uid] || [];
       for (const sp of scannedList) {
         const pid = sp.id || sp.platformAccountId;
@@ -217,11 +214,11 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       });
     }
 
-    // Sắp xếp via có nhiều page nhất lên đầu
+    // Ưu tiên via có nhiều page nhất (Thành An) lên trước
     return result.sort((a, b) => b.pages.length - a.pages.length);
   }, [accounts, cachedPagesMap]);
 
-  // Selected Mother Via
+  // Selected Mother Via (Mặc định chọn Thành An)
   const [selectedMotherUid, setSelectedMotherUid] = useState<string>('');
 
   useEffect(() => {
@@ -234,6 +231,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     return motherVias.find((v) => v.uid === selectedMotherUid) || motherVias[0] || null;
   }, [motherVias, selectedMotherUid]);
 
+  // Danh sách Page thuộc Via đang chọn
   const currentPages = useMemo(() => {
     return currentMotherVia?.pages || [];
   }, [currentMotherVia]);
@@ -241,7 +239,6 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
   // 2. Avatar Status (Trạng thái Avatar thực tế từ Facebook)
   const [avatarStatusMap, setAvatarStatusMap] = useState<Record<string, PageAvatarStatus>>({});
   const [scanningStatus, setScanningStatus] = useState(false);
-  const [scanProgress, setScanProgress] = useState({ scanned: 0, total: 0 });
 
   // 3. Preset categories
   const [presets, setPresets] = useState<AvatarPresetCategory[]>([]);
@@ -276,7 +273,6 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
 
   // Khởi động: Tải presets, cached pages & cached avatar status
   useEffect(() => {
-    // 1. Tải presets
     api
       .get('/avatars/presets')
       .then((res) => {
@@ -284,11 +280,9 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
           setPresets(res.data.categories);
         }
       })
-      .catch((err) => {
-        console.warn('Lỗi lấy presets:', err.message);
-      });
+      .catch(() => {});
 
-    // 2. Tải danh sách 512 Fanpage đã quét
+    // Tải danh sách Fanpage từ cache (512 page của Thành An, 25 page của Huỳnh Thạnh Phú)
     api
       .get('/buff-cached-pages')
       .then((res) => {
@@ -296,11 +290,9 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
           setCachedPagesMap(res.data.cache);
         }
       })
-      .catch((err) => {
-        console.warn('Lỗi lấy buff-cached-pages:', err.message);
-      });
+      .catch(() => {});
 
-    // 3. Tải cache trạng thái Avatar thực tế (138 trang có avatar, 307 trang chưa có)
+    // Tải cache trạng thái Avatar thực tế (138 trang có avatar thật, 307 trang chưa có)
     api
       .get('/avatars/cached-status')
       .then((res) => {
@@ -308,9 +300,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
           setAvatarStatusMap(res.data.results);
         }
       })
-      .catch((err) => {
-        console.warn('Lỗi lấy cached-status:', err.message);
-      });
+      .catch(() => {});
   }, []);
 
   // Cuộn log tự động
@@ -320,7 +310,50 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     }
   }, [executionLogs, isExecutionModalOpen]);
 
-  // Quét trạng thái Avatar (hỗ trợ Quét Nhanh từ Cache hoặc Quét Sâu trực tiếp từ Facebook)
+  // Quét lại toàn bộ Fanpage từ trình duyệt Playwright cho Via đang chọn
+  const handleScanPagesForVia = async (via: MotherViaItem) => {
+    if (!via.cookieString) {
+      antMessage.error('Nick này không có Cookie Facebook để quét!');
+      return;
+    }
+
+    setScanningViaPages(true);
+    antMessage.loading({
+      content: `Đang mở trình duyệt quét toàn bộ Fanpage từ nick [${via.viaName}]...`,
+      key: 'scan_pages_browser',
+      duration: 35,
+    });
+
+    try {
+      const res = await api.post('/buff-get-pages', {
+        cookieString: via.cookieString,
+        forceRefresh: true,
+        viaName: via.viaName,
+        proxyUrl: via.proxyUrl || '',
+      });
+
+      if (res.data?.success && Array.isArray(res.data.pages)) {
+        setCachedPagesMap((prev) => ({
+          ...prev,
+          [via.uid]: res.data.pages,
+        }));
+        antMessage.success({
+          content: `Quét thành công! Đã lấy được ${res.data.pages.length} Fanpage cho nick [${via.viaName}].`,
+          key: 'scan_pages_browser',
+        });
+        onRefresh?.();
+      }
+    } catch (err: any) {
+      antMessage.error({
+        content: `Lỗi quét Fanpage: ${err.message}`,
+        key: 'scan_pages_browser',
+      });
+    } finally {
+      setScanningViaPages(false);
+    }
+  };
+
+  // Quét trạng thái Avatar (Quét Nhanh từ Cache hoặc Quét Sâu trực tiếp từ Facebook)
   const handleScanAvatarStatus = async (deepScan: boolean = false) => {
     if (currentPages.length === 0) {
       antMessage.warning('Không có Fanpage nào để quét');
@@ -330,8 +363,8 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     setScanningStatus(true);
     antMessage.loading({
       content: deepScan
-        ? 'Đang mở trình duyệt quét sâu toàn bộ avatar trực tiếp từ Facebook Switcher...'
-        : 'Đang kiểm tra và đồng bộ trạng thái Avatar...',
+        ? `Đang mở trình duyệt quét sâu avatar cho dàn Page của nick [${currentMotherVia?.viaName}]...`
+        : `Đang kiểm tra và phân loại trạng thái Avatar cho ${currentPages.length} Fanpage...`,
       key: 'scanning_avatar',
       duration: deepScan ? 45 : 10,
     });
@@ -348,10 +381,13 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
         setAvatarStatusMap(res.data.results);
         const stats = res.data.stats;
 
-        // Chỉ chọn những page THỰC SỰ chưa có avatar (hasAvatar === false)
-        const missingIds = Object.values(res.data.results as Record<string, PageAvatarStatus>)
-          .filter((item) => !item.hasAvatar)
-          .map((item) => item.pageId);
+        // Tự động chọn các trang THỰC SỰ chưa có avatar (hasAvatar === false)
+        const missingIds = currentPages
+          .filter((p) => {
+            const st = res.data.results[p.platformAccountId];
+            return st ? !st.hasAvatar : true;
+          })
+          .map((p) => p.platformAccountId);
 
         setSelectedPageIds(missingIds);
 
@@ -371,7 +407,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     }
   };
 
-  // Thống kê nhanh chính xác
+  // Thống kê nhanh theo Via đang chọn
   const stats = useMemo(() => {
     const total = currentPages.length;
     let missing = 0;
@@ -408,7 +444,6 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     if (filterMode === 'MISSING') {
       list = list.filter((p) => {
         const st = avatarStatusMap[p.platformAccountId];
-        // Nếu có trong status và hasAvatar = false, HOẶC chưa có status
         return st ? !st.hasAvatar : true;
       });
     } else if (filterMode === 'HAS') {
@@ -435,7 +470,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
 
     setSelectedPageIds(missing);
     antMessage.info(
-      `Đã chọn ${missing.length} trang chưa có ảnh đại diện (đã tự động loại trừ các trang đã có ảnh thật)`
+      `Đã chọn ${missing.length} trang chưa có ảnh đại diện (đã tự động bỏ qua các trang đã có ảnh thật)`
     );
   };
 
@@ -569,7 +604,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
         id: `init_${Date.now()}`,
         time: new Date().toLocaleTimeString(),
         type: 'INFO',
-        message: `Khởi tạo tiến trình cập nhật Avatar cho ${pagesToUpdate.length} Fanpage...`,
+        message: `Khởi tạo tiến trình cập nhật Avatar cho ${pagesToUpdate.length} Fanpage thuộc nick "${currentMotherVia?.viaName}"...`,
       },
     ]);
 
@@ -690,9 +725,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
                   },
                 ]);
               }
-            } catch (jsonErr) {
-              // Bỏ qua chuỗi không phải json
-            }
+            } catch (jsonErr) {}
           }
         }
       }
@@ -730,7 +763,6 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       width: 150,
       render: (_, record) => {
         const status = avatarStatusMap[record.platformAccountId];
-        // Ưu tiên hiển thị ảnh thật từ CDN Facebook được lưu trong status
         const avatarSrc =
           status?.avatarUrl ||
           `https://graph.facebook.com/${record.platformAccountId}/picture?type=large`;
@@ -743,7 +775,6 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
                 alt={record.pageName}
                 className="w-full h-full object-cover"
                 onError={(e) => {
-                  // Fallback về icon mặc định của Facebook nếu link CDN hết hạn
                   (e.target as HTMLImageElement).src =
                     'https://static.xx.fbcdn.net/rsrc.php/yN/r/Gjnonzr2XE5.webp';
                 }}
@@ -865,26 +896,135 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-[#0f172a] to-pink-950/40 p-6 border border-pink-500/20 shadow-2xl backdrop-blur-xl">
         <div className="absolute top-0 right-0 -mt-10 -mr-10 w-72 h-72 bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-transparent rounded-full blur-3xl pointer-events-none" />
 
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative z-10">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2.5">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center shadow-lg shadow-pink-500/30">
-                <PictureOutlined className="text-white text-xl" />
-              </div>
-              <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-pink-300 tracking-tight">
-                Studio Cập Nhật Avatar Fanpage
-              </h1>
-              <Tag color="magenta" className="rounded-full px-2 py-0.5 text-[10px] font-bold border-0 tracking-wider">
-                PRO 2026
-              </Tag>
+        <div className="space-y-1.5 relative z-10">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center shadow-lg shadow-pink-500/30">
+              <PictureOutlined className="text-white text-xl" />
             </div>
-            <p className="text-sm text-slate-400 max-w-2xl">
-              Phát hiện chính xác 100% trang nào đã có ảnh đại diện và trang nào chưa có. Tự động chuyển đổi danh tính
-              và tải ảnh lên Facebook an toàn, chống checkpoint.
+            <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-pink-300 tracking-tight">
+              Studio Cập Nhật Avatar Fanpage
+            </h1>
+            <Tag color="magenta" className="rounded-full px-2 py-0.5 text-[10px] font-bold border-0 tracking-wider">
+              PRO 2026
+            </Tag>
+          </div>
+          <p className="text-sm text-slate-400 max-w-3xl">
+            Chọn Via chính (Thành An hoặc Huỳnh Thạnh Phú) để nạp toàn bộ dàn Fanpage con. Hệ thống tự động phát hiện
+            chính xác 100% trang nào đã có avatar và trang nào chưa có để bạn đổi ảnh hàng loạt an toàn.
+          </p>
+        </div>
+      </div>
+
+      {/* 2. BƯỚC 1: CHỌN VIA CHÍNH (THÀNH AN HOẶC HUỲNH THẠNH PHÚ) */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm font-black text-slate-200 uppercase tracking-wider">
+            <CrownOutlined className="text-amber-400 text-base" />
+            <span>BƯỚC 1: CHỌN VIA MẸ SỞ HỮU DÀN FANPAGE</span>
+          </div>
+          <span className="text-xs text-slate-400">
+            Bấm chọn để nạp toàn bộ Fanpage của nick đó vào studio
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {motherVias.map((via) => {
+            const isSelected = via.uid === selectedMotherUid;
+            return (
+              <div
+                key={via.uid}
+                onClick={() => {
+                  setSelectedMotherUid(via.uid);
+                  setSelectedPageIds([]);
+                }}
+                className={`p-4 rounded-2xl cursor-pointer transition-all border relative overflow-hidden group ${
+                  isSelected
+                    ? 'bg-gradient-to-r from-cyan-950/40 via-slate-900 to-pink-950/30 border-cyan-400 ring-2 ring-cyan-500/30 shadow-xl shadow-cyan-500/10'
+                    : 'bg-[#0c1220] border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
+                }`}
+              >
+                {/* Active checkmark */}
+                {isSelected && (
+                  <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-cyan-500 text-slate-950 font-bold text-xs shadow-md">
+                    <CheckOutlined /> ĐANG CHỌN
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3.5">
+                  <div className="relative w-14 h-14 rounded-2xl overflow-hidden bg-slate-800 border border-slate-700 shrink-0 shadow-md">
+                    <img
+                      src={`https://graph.facebook.com/${via.uid}/picture?type=large`}
+                      alt={via.viaName}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src =
+                          'https://static.xx.fbcdn.net/rsrc.php/yN/r/Gjnonzr2XE5.webp';
+                      }}
+                    />
+                  </div>
+
+                  <div className="space-y-1 flex-1 pr-24">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base font-black text-white hover:text-cyan-300 transition-colors">
+                        {via.viaName}
+                      </span>
+                      <Tag
+                        color={via.tokenStatus === 'OK' ? 'cyan' : 'error'}
+                        className="rounded-full px-2 text-[10px] font-mono border-0"
+                      >
+                        {via.tokenStatus === 'OK' ? 'Live OK' : 'Checkpoint'}
+                      </Tag>
+                    </div>
+
+                    <div className="text-xs text-slate-400 font-mono flex items-center gap-2">
+                      <span>UID: {via.uid}</span>
+                      <span>•</span>
+                      <span className="text-cyan-400 font-bold">{via.pages.length} Fanpage con</span>
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 truncate max-w-xs">
+                      Proxy: {via.proxyUrl || 'IP Trực tiếp (Không proxy)'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3.5 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                  <span className="text-slate-400">
+                    Đã nạp: <strong className="text-white font-mono">{via.pages.length}</strong> Fanpage vào studio
+                  </span>
+                  <Button
+                    size="small"
+                    icon={<SyncOutlined spin={scanningViaPages} />}
+                    loading={scanningViaPages && isSelected}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleScanPagesForVia(via);
+                    }}
+                    className="rounded-lg text-xs border-slate-700 text-slate-300 hover:text-white bg-slate-800/80"
+                  >
+                    Quét Lại Fanpage
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3. BƯỚC 2: QUÉT TRẠNG THÁI AVATAR & THỐNG KÊ NHANH */}
+      <div className="p-5 rounded-2xl bg-[#0c1220] border border-slate-800/90 shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2 text-sm font-black text-slate-200 uppercase tracking-wider">
+              <ScanOutlined className="text-cyan-400 text-base" />
+              <span>BƯỚC 2: QUÉT & PHÂN LOẠI AVATAR (NICK "{currentMotherVia?.viaName}")</span>
+            </div>
+            <p className="text-xs text-slate-400">
+              Kiểm tra toàn bộ dàn Fanpage để nhận diện chính xác trang nào đã có avatar và trang nào đang thiếu
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <Button
               type="primary"
               size="large"
@@ -902,31 +1042,17 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
               loading={scanningStatus}
               onClick={() => handleScanAvatarStatus(true)}
               className="rounded-xl border-pink-500/40 text-pink-300 hover:text-white hover:bg-pink-600/20 bg-pink-950/40 font-semibold"
-              title="Mở trình duyệt quét sâu và cập nhật 100% chính xác từ Facebook Switcher"
+              title="Mở trình duyệt Playwright quét sâu và cập nhật 100% chính xác từ Facebook Switcher"
             >
               Quét Sâu Trình Duyệt
-            </Button>
-
-            <Button
-              size="large"
-              icon={<ReloadOutlined />}
-              onClick={() => {
-                onRefresh?.();
-                api.get('/avatars/cached-status').then((res) => {
-                  if (res.data?.results) setAvatarStatusMap(res.data.results);
-                });
-              }}
-              className="rounded-xl border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 bg-slate-800/60"
-            >
-              Làm Mới
             </Button>
           </div>
         </div>
 
-        {/* Overview Stats Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 mt-6 pt-5 border-t border-slate-800/80">
-          <div className="p-3.5 bg-slate-900/60 rounded-xl border border-slate-800/70">
-            <div className="text-xs text-slate-400 font-medium">Tổng Fanpage Trong Via</div>
+        {/* 4 Cards Thống Kê Nhanh */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 pt-2">
+          <div className="p-3.5 bg-slate-900/80 rounded-xl border border-slate-800">
+            <div className="text-xs text-slate-400 font-medium">Tổng Fanpage Đang Quản Lý</div>
             <div className="text-2xl font-black text-white mt-1">{stats.total}</div>
           </div>
           <div className="p-3.5 bg-rose-950/20 rounded-xl border border-rose-500/30">
@@ -941,83 +1067,21 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
             <div className="text-2xl font-black text-emerald-400 mt-1">{stats.has}</div>
           </div>
           <div className="p-3.5 bg-cyan-950/20 rounded-xl border border-cyan-500/30">
-            <div className="text-xs text-cyan-300 font-medium">Đang Chọn Cập Nhật</div>
+            <div className="text-xs text-cyan-300 font-medium">Đang Chọn Để Cập Nhật</div>
             <div className="text-2xl font-black text-cyan-400 mt-1">{selectedPageIds.length}</div>
           </div>
         </div>
       </div>
 
-      {/* 2. Controls & Configuration Grid */}
+      {/* 4. BƯỚC 3: CẤU HÌNH KHO ẢNH & DANH SÁCH BẢNG */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Cột Trái: Chọn Nick Mẹ & Kho Nguồn Avatar (5 Cols) */}
+        {/* Cột Trái: Kho Ảnh & Thực Thi (5 Cols) */}
         <div className="lg:col-span-5 space-y-6">
-          {/* Card: Chọn Nick Mẹ */}
           <Card className="!bg-[#0c1220] !border-slate-800/90 rounded-2xl shadow-xl">
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-bold text-slate-200 flex items-center gap-2">
-                  <UserOutlined className="text-cyan-400" /> 1. Nick Mẹ Sở Hữu Dàn Page
-                </span>
-                {currentMotherVia && (
-                  <Tag
-                    color={currentMotherVia.tokenStatus === 'OK' ? 'cyan' : 'error'}
-                    className="rounded-full px-2 text-[10px] font-mono border-0"
-                  >
-                    {currentMotherVia.tokenStatus === 'OK' ? 'Live OK' : 'Checkpoint'}
-                  </Tag>
-                )}
-              </div>
-
-              <Select
-                value={selectedMotherUid}
-                onChange={(uid) => {
-                  setSelectedMotherUid(uid);
-                  setSelectedPageIds([]);
-                }}
-                className="w-full"
-                size="large"
-                options={motherVias.map((v) => ({
-                  value: v.uid,
-                  label: (
-                    <div className="flex items-center justify-between w-full pr-2">
-                      <span className="font-semibold text-slate-200">
-                        {v.viaName} <span className="text-xs text-slate-400 font-normal">({v.uid})</span>
-                      </span>
-                      <Tag color="blue" className="ml-2 font-mono text-[10px] rounded-full border-0">
-                        {v.pages.length} Fanpage
-                      </Tag>
-                    </div>
-                  ),
-                }))}
-              />
-
-              {currentMotherVia && (
-                <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800/80 text-xs text-slate-400 space-y-1.5">
-                  <div className="flex justify-between">
-                    <span>UID Nick Mẹ:</span>
-                    <span className="font-mono text-cyan-400 font-semibold">{currentMotherVia.uid}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Proxy:</span>
-                    <span className="font-mono text-slate-300 truncate max-w-[200px]">
-                      {currentMotherVia.proxyUrl || 'Dùng IP Trực Tiếp (Không proxy)'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Số Fanpage phát hiện:</span>
-                    <span className="font-bold text-white">{currentMotherVia.pages.length} Trang</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </Card>
-
-          {/* Card: Kho Nguồn Ảnh Avatar */}
-          <Card className="!bg-[#0c1220] !border-slate-800/90 rounded-2xl shadow-xl">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-slate-200 flex items-center gap-2">
-                  <PictureOutlined className="text-pink-400" /> 2. Nguồn Ảnh Đại Diện
+                  <PictureOutlined className="text-pink-400" /> BƯỚC 3: Nguồn Ảnh Mới
                 </span>
                 <Segmented
                   value={selectedPresetCategory}
@@ -1091,7 +1155,6 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
                   )}
                 </div>
               ) : (
-                /* Tab Tùy chỉnh (Upload hoặc paste URL) */
                 <div className="space-y-4">
                   <div className="p-3 bg-slate-900/70 rounded-xl border border-slate-800/80">
                     <div className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
@@ -1133,7 +1196,6 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
                     </Button>
                   </div>
 
-                  {/* Danh sách ảnh đã nạp */}
                   {customImageUrls.length > 0 && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-xs text-slate-300">
@@ -1172,11 +1234,11 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
             </div>
           </Card>
 
-          {/* Card: Cài Đặt Giãn Cách & Thực Thi */}
+          {/* Giãn cách & Thực thi */}
           <Card className="!bg-[#0c1220] !border-slate-800/90 rounded-2xl shadow-xl">
             <div className="space-y-4">
               <span className="text-sm font-bold text-slate-200 flex items-center gap-2">
-                <SettingOutlined className="text-amber-400" /> 3. Tốc Độ & Bắt Đầu
+                <SettingOutlined className="text-amber-400" /> Tốc Độ & Bắt Đầu
               </span>
 
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/80 border border-slate-800">
@@ -1210,7 +1272,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
           </Card>
         </div>
 
-        {/* Cột Phải: Bảng Danh Sách Fanpage (7 Cols) */}
+        {/* Cột Phải: Bảng Danh Sách Fanpage Của Via Đang Chọn (7 Cols) */}
         <div className="lg:col-span-7 space-y-4">
           <Card className="!bg-[#0c1220] !border-slate-800/90 rounded-2xl shadow-xl">
             <div className="space-y-4">
@@ -1308,12 +1370,12 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
         </div>
       </div>
 
-      {/* 3. Realtime Execution Progress Modal */}
+      {/* 5. Realtime Execution Progress Modal */}
       <Modal
         title={
           <div className="flex items-center gap-2 text-base font-bold text-white">
             <ThunderboltFilled className="text-pink-500" />
-            <span>Tiến Trình Cập Nhật Avatar Hàng Loạt</span>
+            <span>Tiến Trình Cập Nhật Avatar Fanpage</span>
             {isExecuting && (
               <Tag color="processing" className="ml-2 font-normal text-xs rounded-full border-0 animate-pulse">
                 Đang chạy tự động
