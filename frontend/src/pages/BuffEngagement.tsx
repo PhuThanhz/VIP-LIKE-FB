@@ -1030,6 +1030,51 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     saveBuffLogs(buffLogs);
   }, [buffLogs]);
 
+  // Xuất Báo Cáo Lịch Sử Tương Tác ra file CSV (UTF-8 BOM chuẩn Excel)
+  const handleExportLogsToCsv = () => {
+    if (buffLogs.length === 0) {
+      message.warning('Chưa có lịch sử buff nào để xuất báo cáo!');
+      return;
+    }
+    const headers = [
+      'Thời Gian',
+      'Loại Chiến Dịch',
+      'Link Bài Viết',
+      'Tài Khoản / Via',
+      'Cảm Xúc',
+      'Tổng Số Page',
+      'Thành Công',
+      'Đã Like Trước',
+      'Thất Bại',
+      'Chi Tiết Dàn Page',
+    ];
+    const rows = buffLogs.map((log) => {
+      const time = new Date(log.createdAt).toLocaleString('vi-VN');
+      const type = log.type === 'BATCH' ? 'Hàng Loạt' : 'Đơn Lẻ';
+      const url = `"${(log.targetUrl || '').replace(/"/g, '""')}"`;
+      const acc = `"${(log.accountName || '').replace(/"/g, '""')}"`;
+      const reaction = log.reactionType || 'LIKE';
+      const total = log.totalPages || log.details.length;
+      const success = log.successCount || 0;
+      const already = log.alreadyLikedCount || 0;
+      const failed = log.failedCount || 0;
+      const pageNames = `"${log.details.map((d) => `${d.pageName} [${d.status}]`).join('; ').replace(/"/g, '""')}"`;
+      return [time, type, url, acc, reaction, total, success, already, failed, pageNames].join(',');
+    });
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Bao_Cao_Buff_Tuong_Tac_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    message.success(`Đã xuất báo cáo ${buffLogs.length} chiến dịch ra file CSV thành công!`);
+  };
+
 
 
   // Đồng bộ mở modal Cài đặt từ Sidebar
@@ -1511,6 +1556,16 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     const q = pageSearchQuery.toLowerCase().trim();
     return scannedPages.filter((p) => p.name.toLowerCase().includes(q) || p.id.includes(q));
   }, [scannedPages, pageSearchQuery]);
+
+  // Chọn nhanh ngẫu nhiên N Fanpage từ dàn Page
+  const handleSelectRandomPages = (count: number) => {
+    if (scannedPages.length === 0) return;
+    const targetCount = Math.min(count, scannedPages.length);
+    const shuffled = [...scannedPages].sort(() => 0.5 - Math.random());
+    const selected = shuffled.slice(0, targetCount).map((p) => p.id);
+    setSelectedPageIds(selected);
+    message.success(`Đã chọn ngẫu nhiên ${selected.length} Fanpage sẵn sàng tương tác!`);
+  };
 
   // Mutation: Scan Fanpages from Cookie (Merges & preserves pages, never drops count)
   const scanPagesMutation = useMutation({
@@ -2557,6 +2612,44 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               <span className="text-xs text-slate-300 font-semibold">Chọn tất cả</span>
                             </Checkbox>
                           </div>
+
+                          {/* Thanh công cụ Chọn Nhanh Số Lượng Page (20, 50, 100, 200, All) */}
+                          {scannedPages.length > 5 && (
+                            <div className="flex items-center gap-1.5 flex-wrap p-2 rounded-xl bg-slate-950/70 border border-slate-800/80">
+                              <span className="text-[11px] text-slate-400 font-semibold">Chọn nhanh:</span>
+                              {[20, 50, 100, 200]
+                                .filter((n) => n <= scannedPages.length)
+                                .map((num) => (
+                                  <Button
+                                    key={num}
+                                    size="small"
+                                    onClick={() => handleSelectRandomPages(num)}
+                                    className="bg-slate-900 border-slate-700/80 hover:border-cyan-500 text-slate-200 text-[11px] font-semibold rounded-lg px-2 h-6"
+                                  >
+                                    🎲 {num} Page
+                                  </Button>
+                                ))}
+                              <Button
+                                size="small"
+                                onClick={() => {
+                                  setSelectedPageIds(scannedPages.map((p) => p.id));
+                                  message.success(`Đã chọn toàn bộ ${scannedPages.length} Fanpage!`);
+                                }}
+                                className="bg-cyan-950/80 border-cyan-800 text-cyan-300 text-[11px] font-semibold rounded-lg px-2 h-6"
+                              >
+                                👑 Tất cả ({scannedPages.length})
+                              </Button>
+                              {selectedPageIds.length > 0 && (
+                                <Button
+                                  size="small"
+                                  onClick={() => setSelectedPageIds([])}
+                                  className="bg-slate-900 border-slate-800 text-slate-400 text-[11px] rounded-lg px-2 h-6"
+                                >
+                                  Bỏ chọn
+                                </Button>
+                              )}
+                            </div>
+                          )}
 
                           {/* Ô tìm kiếm Page/Via */}
                           {scannedPages.length > 6 && (
@@ -3702,9 +3795,17 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
                     <div className="flex items-center gap-2">
                       {buffLogs.length > 0 && (
-                        <Button
-                          danger
-                          type="dashed"
+                        <>
+                          <Button
+                            icon={<ExportOutlined />}
+                            onClick={handleExportLogsToCsv}
+                            className="bg-slate-900 border-slate-700 text-slate-200 hover:border-cyan-500 text-xs font-semibold rounded-xl"
+                          >
+                            Xuất Báo Cáo CSV
+                          </Button>
+                          <Button
+                            danger
+                            type="dashed"
                           onClick={() => {
                             modal.confirm({
                               title: 'Xoá toàn bộ lịch sử buff?',
@@ -3723,6 +3824,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                         >
                           Xoá lịch sử
                         </Button>
+                        </>
                       )}
                     </div>
                   </div>

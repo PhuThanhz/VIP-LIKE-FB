@@ -1232,9 +1232,44 @@ async function runHunterScheduler() {
 // Chạy Hunter Scheduler kiểm tra mỗi 30 giây
 setInterval(runHunterScheduler, 30000);
 
-// =============================================================================
-// 7. API ROUTES - VIA HEALTH MONITOR & OVERVIEW (MYSQL WORKBENCH)
-// =============================================================================
+// Kiểm tra sức khỏe nhanh cho danh sách Fanpage (Public / Restricted / Live)
+app.post('/api/buff-check-pages-health', async (req, res) => {
+  try {
+    const axios = require('axios');
+    const { pageIds = [] } = req.body;
+    if (!Array.isArray(pageIds) || pageIds.length === 0) {
+      return res.json({ success: true, results: {} });
+    }
+    const targetIds = pageIds.slice(0, 150);
+    const results = {};
+
+    await runWithConcurrency(targetIds, 8, async (id) => {
+      try {
+        const testUrl = `https://mbasic.facebook.com/${id}`;
+        const resp = await axios.get(testUrl, {
+          timeout: 6000,
+          validateStatus: (s) => s < 500,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+          },
+        });
+        if (resp.status === 404 || resp.data?.includes('Trang không tìm thấy') || resp.data?.includes('Page Not Found')) {
+          results[id] = 'NOT_FOUND';
+        } else if (resp.data?.includes('bị hạn chế') || resp.data?.includes('Restricted')) {
+          results[id] = 'RESTRICTED';
+        } else {
+          results[id] = 'LIVE';
+        }
+      } catch (e) {
+        results[id] = 'LIVE';
+      }
+    });
+
+    return res.json({ success: true, results });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // Kiểm tra sức khỏe dàn Via và CẬP NHẬT TRỰC TIẾP vào MySQL Workbench (social_accounts)
 app.post('/api/buff-vias/health-check', async (req, res) => {

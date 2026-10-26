@@ -214,6 +214,10 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   const [manualAddText, setManualAddText] = useState('');
   const [isAddingManualToDrawer, setIsAddingManualToDrawer] = useState(false);
 
+  // Quản lý kiểm tra sức khỏe Fanpage
+  const [pageHealthMap, setPageHealthMap] = useState<Record<string, 'LIVE' | 'RESTRICTED' | 'NOT_FOUND'>>({});
+  const [isCheckingHealth, setIsCheckingHealth] = useState(false);
+
   // Search filter
   const [searchText, setSearchText] = useState('');
 
@@ -422,6 +426,37 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       return b.totalUniquePagesCount - a.totalUniquePagesCount;
     });
   }, [accounts, cachedPagesMap]);
+
+  // Kiểm tra sức khỏe hàng loạt Fanpage con (Live / Restricted / Lỗi)
+  const handleCheckPagesHealth = async (pages: FanpageItem[]) => {
+    if (!pages || pages.length === 0) {
+      message.warning('Chưa có Fanpage nào để kiểm tra sức khỏe!');
+      return;
+    }
+    const pageIds = pages.map((p) => p.id);
+    setIsCheckingHealth(true);
+    message.loading({
+      content: `Đang kiểm tra kết nối & sức khỏe ${pageIds.length} Fanpage...`,
+      key: 'healthCheck',
+      duration: 25,
+    });
+    try {
+      const res = await api.post('/buff-check-pages-health', { pageIds });
+      if (res.data?.success && res.data.results) {
+        setPageHealthMap((prev) => ({ ...prev, ...res.data.results }));
+        const liveCount = Object.values(res.data.results).filter((v) => v === 'LIVE').length;
+        message.success({
+          content: `Kiểm tra xong! ${liveCount}/${pageIds.length} Fanpage đang Hoạt Động Tốt (LIVE)!`,
+          key: 'healthCheck',
+          duration: 4,
+        });
+      }
+    } catch (e: any) {
+      message.error({ content: 'Lỗi kiểm tra sức khỏe Fanpage: ' + e.message, key: 'healthCheck' });
+    } finally {
+      setIsCheckingHealth(false);
+    }
+  };
 
   // Quét toàn bộ Fanpage từ Cookie của Via bằng Playwright
   const handleScanPagesForVia = async (via: MotherViaAccount) => {
@@ -1523,14 +1558,26 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                 allowClear
               />
 
-              <Button
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={() => setIsAddingManualToDrawer(!isAddingManualToDrawer)}
-                className="bg-slate-800 border-slate-700 text-slate-200 text-xs rounded-lg"
-              >
-                {isAddingManualToDrawer ? 'Đóng ô dán' : '+ Dán thêm Page'}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="small"
+                  icon={<SafetyCertificateOutlined className="text-emerald-400" />}
+                  loading={isCheckingHealth}
+                  onClick={() => handleCheckPagesHealth(currentScannedPages)}
+                  className="bg-slate-900 border-slate-700 hover:border-emerald-500 text-slate-200 text-xs rounded-lg"
+                >
+                  Kiểm tra sức khỏe ({currentScannedPages.length})
+                </Button>
+
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => setIsAddingManualToDrawer(!isAddingManualToDrawer)}
+                  className="bg-slate-800 border-slate-700 text-slate-200 text-xs rounded-lg"
+                >
+                  {isAddingManualToDrawer ? 'Đóng ô dán' : '+ Dán thêm Page'}
+                </Button>
+              </div>
             </div>
 
             {/* Form dán thêm Page thủ công */}
@@ -1608,8 +1655,26 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                                 className="shrink-0 bg-cyan-950 border border-cyan-800/60 text-cyan-400"
                               />
                               <div className="min-w-0">
-                                <div className="font-semibold text-slate-200 text-xs truncate">
-                                  {page.name || `Fanpage ${page.id}`}
+                                <div className="font-semibold text-slate-200 text-xs truncate flex items-center gap-2">
+                                  <span>{page.name || `Fanpage ${page.id}`}</span>
+                                  {pageHealthMap[page.id] && (
+                                    <Tag
+                                      color={
+                                        pageHealthMap[page.id] === 'LIVE'
+                                          ? 'success'
+                                          : pageHealthMap[page.id] === 'RESTRICTED'
+                                          ? 'warning'
+                                          : 'error'
+                                      }
+                                      className="text-[9px] font-semibold border-0 rounded px-1.5 py-0 leading-tight"
+                                    >
+                                      {pageHealthMap[page.id] === 'LIVE'
+                                        ? '● LIVE'
+                                        : pageHealthMap[page.id] === 'RESTRICTED'
+                                        ? '● BỊ HẠN CHẾ'
+                                        : '● CHECK LỖI'}
+                                    </Tag>
+                                  )}
                                 </div>
                                 <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
                                   <span>ID: {page.id}</span>
