@@ -504,85 +504,93 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
         ]);
         await tab.waitForTimeout(1000);
 
-        // 3. Vào trang tường chính của Page
-        await tab.goto(`https://www.facebook.com/profile.php?id=${pageId}`, {
-          waitUntil: 'domcontentloaded',
-          timeout: 25000,
-        }).catch(() => {});
-        await tab.waitForTimeout(3000);
+        // 3. Đóng mọi popup chào mừng ("Chào mừng bạn đến với Trang mới!", "Dùng Trang", v.v.)
+        const dungTrangBtn = tab.locator('div[role="button"]:has-text("Dùng Trang"), div[role="button"]:has-text("Use Page"), div[role="button"]:has-text("Bắt đầu khám phá"), div[aria-label="Đóng"], div[aria-label="Close"]').first();
+        if ((await dungTrangBtn.count().catch(() => 0)) > 0 && (await dungTrangBtn.isVisible().catch(() => false))) {
+          await dungTrangBtn.click({ force: true }).catch(() => {});
+          await tab.waitForTimeout(1500);
+        }
+        await tab.keyboard.press('Escape').catch(() => {});
+        await tab.waitForTimeout(1000);
 
-        // 4. Tìm và kích hoạt nút Đổi ảnh đại diện (Camera button)
-        const avatarCameraSelectors = [
-          'div[aria-label="Cập nhật ảnh đại diện"]',
-          'div[aria-label="Update profile picture"]',
-          'div[aria-label="Chọn ảnh đại diện"]',
-          'div[aria-label*="ảnh đại diện"]',
-          'div[aria-label*="Profile picture"]',
-          'div[role="button"]:has(svg path[d*="19.5"])',
-        ];
-
-        let cameraBtn = null;
-        for (const sel of avatarCameraSelectors) {
-          const loc = tab.locator(sel).first();
-          if ((await loc.count().catch(() => 0)) > 0 && (await loc.isVisible().catch(() => false))) {
-            cameraBtn = loc;
-            break;
-          }
+        // 4. Tìm và kích hoạt nút Đổi ảnh đại diện (Camera button / Hành động với ảnh đại diện)
+        const cameraLoc = tab.locator('div[aria-label*="ảnh đại diện"], div[aria-label*="Hành động với ảnh đại diện"], div[aria-label*="Cập nhật ảnh đại diện"], div[aria-label*="Profile picture" i]').first();
+        if ((await cameraLoc.count().catch(() => 0)) === 0 || !(await cameraLoc.isVisible().catch(() => false))) {
+          throw new Error('Không tìm thấy nút Camera đại diện trên Fanpage');
         }
 
-        // Tải ảnh qua fileChooser hoặc input[type="file"]
-        let uploadSuccess = false;
+        console.log(`[AvatarStudio] 📸 Đã tìm thấy nút đại diện, kích hoạt menu cho Page "${pageName}"...`);
+        await cameraLoc.click({ force: true });
+        await tab.waitForTimeout(2000);
 
-        const fileInput = tab.locator('input[type="file"][accept*="image"]').first();
-        if ((await fileInput.count().catch(() => 0)) > 0) {
-          await fileInput.setInputFiles(localTempFile);
-          uploadSuccess = true;
-        } else if (cameraBtn) {
+        // 5. Trong popup menu, chọn "Chọn ảnh đại diện"
+        const chooseAvatarMenuItem = tab.locator('div[role="menuitem"]:has-text("Chọn ảnh đại diện"), div[role="menuitem"]:has-text("Choose profile picture"), div[role="menuitem"]:has-text("Tải ảnh lên"), div[role="menuitem"]').first();
+        if ((await chooseAvatarMenuItem.count().catch(() => 0)) > 0 && (await chooseAvatarMenuItem.isVisible().catch(() => false))) {
+          await chooseAvatarMenuItem.click({ force: true }).catch(() => {});
+          await tab.waitForTimeout(2500);
+        }
+
+        // 6. Trong hộp thoại "Chọn ảnh đại diện", bấm "+ Tải ảnh lên" và nạp file qua filechooser
+        let uploadSuccess = false;
+        const uploadBtn = tab.locator('div[role="dialog"] div[role="button"]:has-text("Tải ảnh lên"), div[role="dialog"] div[role="button"]:has-text("Upload photo"), div[role="dialog"] button:has-text("Tải ảnh lên")').first();
+
+        if ((await uploadBtn.count().catch(() => 0)) > 0 && (await uploadBtn.isVisible().catch(() => false))) {
           const [fileChooser] = await Promise.all([
-            tab.waitForEvent('filechooser', { timeout: 7000 }).catch(() => null),
-            cameraBtn.click({ force: true }).catch(() => {}),
+            tab.waitForEvent('filechooser', { timeout: 12000 }).catch(() => null),
+            uploadBtn.click({ force: true }).catch(() => {}),
           ]);
 
           if (fileChooser) {
             await fileChooser.setFiles(localTempFile);
             uploadSuccess = true;
-          } else {
-            // Thử click vào nút "Tải ảnh lên" trong menu popup nếu có
-            await tab.waitForTimeout(1500);
-            const uploadMenuBtn = tab.locator('div[role="menuitem"]:has-text("Tải ảnh lên"), div[role="menuitem"]:has-text("Upload photo")').first();
-            if (await uploadMenuBtn.isVisible().catch(() => false)) {
-              const [menuChooser] = await Promise.all([
-                tab.waitForEvent('filechooser', { timeout: 7000 }).catch(() => null),
-                uploadMenuBtn.click().catch(() => {}),
-              ]);
-              if (menuChooser) {
-                await menuChooser.setFiles(localTempFile);
-                uploadSuccess = true;
-              }
-            }
+            console.log(`[AvatarStudio] 📤 Đã nạp file ảnh thành công cho Page "${pageName}"`);
           }
         }
 
         if (!uploadSuccess) {
-          throw new Error('Không tìm thấy nút tải ảnh đại diện của Facebook');
+          // Thử input file trực tiếp trong dialog
+          const dialogFileInput = tab.locator('div[role="dialog"] input[type="file"]').first();
+          if ((await dialogFileInput.count().catch(() => 0)) > 0) {
+            await dialogFileInput.setInputFiles(localTempFile);
+            uploadSuccess = true;
+          }
         }
 
-        // 5. Đợi modal xem trước & Bấm "Lưu" (Save)
-        await tab.waitForTimeout(3500);
-        const saveBtn = tab.locator('div[role="dialog"] div[role="button"]:has-text("Lưu"), div[role="dialog"] div[role="button"]:has-text("Save")').first();
+        if (!uploadSuccess) {
+          throw new Error('Không thể mở hộp thoại chọn tệp của Facebook');
+        }
+
+        // 7. Đợi modal xem trước & Bấm "Lưu" (Save)
+        await tab.waitForTimeout(4000);
+        const saveBtn = tab.locator('div[role="dialog"] div[role="button"]:has-text("Lưu"), div[role="dialog"] button:has-text("Lưu"), div[role="dialog"] div[role="button"]:has-text("Save")').first();
         if (await saveBtn.isVisible().catch(() => false)) {
           await saveBtn.click({ force: true });
           console.log(`[AvatarStudio] 💾 Đã bấm "Lưu" ảnh đại diện cho Page "${pageName}"...`);
           // Đợi modal lưu đóng
           await tab.waitForSelector('div[role="dialog"] div[role="button"]:has-text("Lưu")', {
             state: 'hidden',
-            timeout: 20000,
+            timeout: 25000,
           }).catch(() => {});
-          await tab.waitForTimeout(2000);
+          await tab.waitForTimeout(3000);
         }
 
         console.log(`[AvatarStudio] ✅ Cập nhật Avatar THÀNH CÔNG cho Page: "${pageName}" (ID: ${pageId})`);
         updatedCount++;
+
+        // Cập nhật lại cache trạng thái avatar ngay lập tức
+        if (avatarCacheMap[pageId]) {
+          avatarCacheMap[pageId].hasAvatar = true;
+          avatarCacheMap[pageId].isSilhouette = false;
+        } else {
+          avatarCacheMap[pageId] = {
+            pageId,
+            pageName,
+            hasAvatar: true,
+            isSilhouette: false,
+            avatarUrl: chosenImageUrl,
+            scannedAt: new Date().toISOString(),
+          };
+        }
 
         const detail = {
           pageId,
