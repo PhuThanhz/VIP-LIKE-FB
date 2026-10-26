@@ -57,6 +57,7 @@ import PasteLinkInput from '../components/common/PasteLinkInput';
 
 import PostHunterTab from '../components/buff/PostHunterTab';
 import ViaManagementPage from './ViaManagementPage';
+import PageAvatarStudio from './PageAvatarStudio';
 import SystemSettingsPage from './SystemSettingsPage';
 import LicenseManagementPage from './LicenseManagementPage';
 
@@ -3994,6 +3995,18 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                 dbStatus={props.dbStatus}
                 onCheckDb={props.onCheckDb}
                 onNavigateToBuff={() => setActiveTabKey('buff-like')}
+              />
+            ),
+          },
+          {
+            key: 'avatar-studio',
+            label: 'Cập Nhật Avatar Page',
+            children: (
+              <PageAvatarStudio
+                accounts={accounts as any[]}
+                onRefresh={() => {
+                  refetchAccounts();
+                }}
               />
             ),
           },

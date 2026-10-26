@@ -28,6 +28,7 @@ const {
   clearPostInteractions,
 } = require('./page-post-registry');
 const { generateSeedingComments } = require('./ai-seeding');
+const avatarTool = require('./avatar-tool');
 
 const app = express();
 const PORT = process.env.PORT || 3100;
@@ -1650,6 +1651,200 @@ app.post('/api/license/admin/update-status', async (req, res) => {
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// =============================================================================
+// API CẬP NHẬT AVATAR CHO DÀN FANPAGE (PAGE AVATAR STUDIO)
+// =============================================================================
+
+// 1. Lấy danh sách Preset kho ảnh đại diện mẫu
+app.get('/api/avatars/presets', (req, res) => {
+  try {
+    const presets = avatarTool.getAvatarPresets();
+    return res.json({ success: true, ...presets });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2. Quét nhanh trạng thái Avatar của dàn Page (Graph API)
+app.post('/api/avatars/check-status', async (req, res) => {
+  try {
+    const { pageIds = [], motherViaId = null } = req.body;
+    let targets = pageIds;
+
+    // Nếu không truyền pageIds cụ thể mà truyền motherViaId hoặc rỗng, lấy từ DB
+    if (!targets || targets.length === 0) {
+      const allAccounts = await db.getSocialAccounts();
+      if (motherViaId) {
+        const viaAcc = allAccounts.find(
+          (a) => String(a.id) === String(motherViaId) || a.platformAccountId === String(motherViaId)
+        );
+        const uidMatch = viaAcc
+          ? (viaAcc.cookieString || viaAcc.accessToken || '').match(/c_user=([^;]+)/)
+          : null;
+        const motherUid = uidMatch ? uidMatch[1] : null;
+
+        targets = allAccounts
+          .filter((a) => {
+            if (a.accountType === 'PERSONAL_PROFILE_COOKIE' && !a.pageName?.startsWith('Fanpage')) return false;
+            if (motherUid) {
+              const accUid = (a.cookieString || a.accessToken || '').match(/c_user=([^;]+)/);
+              return accUid && accUid[1] === motherUid;
+            }
+            return true;
+          })
+          .map((a) => ({ id: a.platformAccountId || a.id, name: a.pageName }));
+      } else {
+        targets = allAccounts.map((a) => ({ id: a.platformAccountId || a.id, name: a.pageName }));
+      }
+    }
+
+    const checkResult = await avatarTool.checkPagesAvatarStatus(targets);
+    return res.json({ success: true, ...checkResult });
+  } catch (err) {
+    console.error('[API /avatars/check-status] ❌ Lỗi:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Biến quản lý tác vụ cập nhật avatar đang chạy để có thể dừng (stop)
+let activeAvatarUpdateCancel = null;
+
+app.post('/api/avatars/stop', (req, res) => {
+  if (activeAvatarUpdateCancel) {
+    activeAvatarUpdateCancel();
+    activeAvatarUpdateCancel = null;
+    return res.json({ success: true, message: 'Đã gửi lệnh dừng cập nhật Avatar' });
+  }
+  return res.json({ success: true, message: 'Không có tác vụ nào đang chạy' });
+});
+
+// 3. Cập nhật Avatar hàng loạt với Realtime Progress qua Server-Sent Events (SSE)
+app.post('/api/avatars/update-stream', async (req, res) => {
+  const {
+    motherViaId,
+    cookieString: providedCookie,
+    pages = [],
+    presetCategory = 'RANDOM_MIX',
+    customImages = [],
+    delaySeconds = 4,
+    proxyUrl: providedProxy,
+  } = req.body;
+
+  // Thiết lập SSE Headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const sendEvent = (eventData) => {
+    res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+  };
+
+  let isCancelled = false;
+  activeAvatarUpdateCancel = () => {
+    isCancelled = true;
+    sendEvent({ type: 'STOPPED', message: 'Tác vụ đã được người dùng bấm dừng.' });
+  };
+
+  req.on('close', () => {
+    isCancelled = true;
+    activeAvatarUpdateCancel = null;
+  });
+
+  try {
+    let finalCookie = providedCookie;
+    let finalProxy = providedProxy;
+
+    // Tìm cookie từ nick Mẹ trong DB nếu không truyền trực tiếp
+    if (!finalCookie && motherViaId) {
+      const allAccounts = await db.getSocialAccounts();
+      const viaAcc = allAccounts.find(
+        (a) => String(a.id) === String(motherViaId) || a.platformAccountId === String(motherViaId)
+      );
+      if (viaAcc) {
+        finalCookie = viaAcc.cookieString || viaAcc.accessToken;
+        if (!finalProxy) finalProxy = viaAcc.proxyUrl;
+      }
+    }
+
+    if (!finalCookie) {
+      sendEvent({ type: 'ERROR', error: 'Không tìm thấy Cookie của tài khoản Mẹ để thao tác!' });
+      return res.end();
+    }
+
+    sendEvent({
+      type: 'INIT',
+      total: pages.length,
+      message: `Bắt đầu cập nhật Avatar cho ${pages.length} trang Facebook...`,
+    });
+
+    const result = await avatarTool.bulkUpdateFanpageAvatars(
+      finalCookie,
+      pages,
+      {
+        presetCategory,
+        customImages,
+        delaySeconds: Number(delaySeconds) || 4,
+        proxyUrl: finalProxy || '',
+        shouldStop: () => isCancelled,
+      },
+      (progressEvt) => {
+        sendEvent(progressEvt);
+      }
+    );
+
+    sendEvent({
+      type: 'DONE',
+      success: true,
+      total: result.total,
+      updatedCount: result.updatedCount,
+      details: result.details,
+    });
+  } catch (err) {
+    console.error('[API /avatars/update-stream] ❌ Lỗi:', err.message);
+    sendEvent({ type: 'ERROR', error: err.message });
+  } finally {
+    activeAvatarUpdateCancel = null;
+    res.end();
+  }
+});
+
+// 4. API upload ảnh đại diện tùy chỉnh (Base64)
+app.post('/api/avatars/upload-custom', (req, res) => {
+  try {
+    const { base64Data } = req.body;
+    if (!base64Data) {
+      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu ảnh base64' });
+    }
+    const cleanBase64 = base64Data.replace(/^data:image\/\w+;base64,/, '');
+    const extMatch = base64Data.match(/^data:image\/(\w+);base64,/);
+    const ext = extMatch ? extMatch[1] : 'jpg';
+    const safeName = `custom_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
+    const targetPath = path.join(DATA_DIR, 'custom_avatars', safeName);
+
+    fs.writeFileSync(targetPath, Buffer.from(cleanBase64, 'base64'));
+    return res.json({
+      success: true,
+      filename: safeName,
+      filePath: targetPath,
+      url: `/api/avatars/custom-image/${safeName}`,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5. Phục vụ ảnh custom đã tải lên
+app.get('/api/avatars/custom-image/:filename', (req, res) => {
+  const filePath = path.join(DATA_DIR, 'custom_avatars', path.basename(req.params.filename));
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
+  }
+  return res.status(404).send('Không tìm thấy ảnh');
 });
 
 // Khởi động server

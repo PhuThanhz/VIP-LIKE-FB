@@ -15,6 +15,7 @@ import {
   DatabaseOutlined,
   SyncOutlined,
   KeyOutlined,
+  PictureOutlined,
 } from '@ant-design/icons';
 
 
@@ -125,6 +126,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {stats.accountsCount} nick
             </Tag>
           )}
+        </div>
+      ),
+    },
+    {
+      key: 'avatar-studio',
+      icon: <PictureOutlined className="text-base text-pink-400" />,
+      label: (
+        <div className="flex items-center justify-between w-full">
+          <span>Cập Nhật Avatar Page</span>
+          <Tag color="magenta" className="ml-auto text-[10px] font-mono rounded-full px-1.5 py-0 border-0 leading-tight">
+            MỚI
+          </Tag>
         </div>
       ),
     },
