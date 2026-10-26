@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback, type ReactNode } from 'react';
 import {
   Card,
   Input,
@@ -210,6 +210,24 @@ function summarizeBuffDetails(details: AutoBuffResultDetail[]) {
     failed: details.filter((d) => d.status === 'ERROR' || d.status === 'NO_BUTTON').length,
     comments: details.filter((d) => d.commentStatus === 'SUCCESS').length,
   };
+}
+
+// Đếm lại từ details để log cũ (lưu thiếu SKIPPED/UNVERIFIED) vẫn hiển thị đúng
+function getLogCounts(log: BuffLogEntry) {
+  if (!log.details?.length) {
+    return {
+      total: log.totalPages || 0,
+      success: log.successCount || 0,
+      alreadyLiked: log.alreadyLikedCount || 0,
+      unverified: 0,
+      failed: log.failedCount || 0,
+      skipped: 0,
+      comments: log.commentCount || 0,
+    };
+  }
+  const c = summarizeBuffDetails(log.details);
+  const total = log.details.length;
+  return { ...c, total, skipped: total - c.success - c.alreadyLiked - c.unverified - c.failed };
 }
 
 export interface BuffMonitor {
@@ -1055,10 +1073,11 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       const url = `"${(log.targetUrl || '').replace(/"/g, '""')}"`;
       const acc = `"${(log.accountName || '').replace(/"/g, '""')}"`;
       const reaction = log.reactionType || 'LIKE';
-      const total = log.totalPages || log.details.length;
-      const success = log.successCount || 0;
-      const already = log.alreadyLikedCount || 0;
-      const failed = log.failedCount || 0;
+      const counts = getLogCounts(log);
+      const total = counts.total;
+      const success = counts.success;
+      const already = counts.alreadyLiked;
+      const failed = counts.failed;
       const pageNames = `"${log.details.map((d) => `${d.pageName} [${d.status}]`).join('; ').replace(/"/g, '""')}"`;
       return [time, type, url, acc, reaction, total, success, already, failed, pageNames].join(',');
     });
@@ -3746,7 +3765,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                     <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-center">
                       <div className="text-[11px] font-bold text-emerald-400 uppercase">Like thành công</div>
                       <div className="text-2xl font-semibold text-emerald-300 mt-1">
-                        {buffLogs.reduce((acc, l) => acc + (l.successCount || 0), 0)}
+                        {buffLogs.reduce((acc, l) => acc + getLogCounts(l).success, 0)}
                       </div>
                     </div>
                   </Col>
@@ -3754,7 +3773,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                     <div className="p-3.5 rounded-xl bg-blue-950/30 border border-blue-500/30 text-center">
                       <div className="text-[11px] font-bold text-blue-400 uppercase">Đã like trước đó</div>
                       <div className="text-2xl font-semibold text-blue-300 mt-1">
-                        {buffLogs.reduce((acc, l) => acc + (l.alreadyLikedCount || 0), 0)}
+                        {buffLogs.reduce((acc, l) => acc + getLogCounts(l).alreadyLiked, 0)}
                       </div>
                     </div>
                   </Col>
@@ -3762,7 +3781,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                     <div className="p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/30 text-center">
                       <div className="text-[11px] font-bold text-rose-400 uppercase">Lỗi / Thất Bại</div>
                       <div className="text-2xl font-semibold text-rose-300 mt-1">
-                        {buffLogs.reduce((acc, l) => acc + (l.failedCount || 0), 0)}
+                        {buffLogs.reduce((acc, l) => acc + getLogCounts(l).failed, 0)}
                       </div>
                     </div>
                   </Col>
@@ -3855,6 +3874,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                       })
                       .map((log) => {
                         const reactionObj = REACTIONS.find((r) => r.key === log.reactionType) || REACTIONS[0];
+                        const counts = getLogCounts(log);
                         const dateFormatted = new Date(log.createdAt).toLocaleString('vi-VN', {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -3889,21 +3909,31 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <Tag color="success" className="m-0 text-[11px] font-bold" icon={<CheckCircleFilled />}>
-                                  {log.successCount} thành công
+                                  {counts.success} thành công
                                 </Tag>
-                                {log.commentCount !== undefined && log.commentCount > 0 && (
+                                {counts.comments > 0 && (
                                   <Tag color="cyan" className="m-0 text-[11px] font-bold" icon={<CommentOutlined />}>
-                                    {log.commentCount} cmt
+                                    {counts.comments} cmt
                                   </Tag>
                                 )}
-                                {log.alreadyLikedCount > 0 && (
+                                {counts.alreadyLiked > 0 && (
                                   <Tag color="blue" className="m-0 text-[11px]" icon={<CheckOutlined />}>
-                                    {log.alreadyLikedCount} đã like trước
+                                    {counts.alreadyLiked} đã like trước
                                   </Tag>
                                 )}
-                                {log.failedCount > 0 && (
+                                {counts.unverified > 0 && (
+                                  <Tag color="gold" className="m-0 text-[11px]">
+                                    {counts.unverified} chưa xác minh
+                                  </Tag>
+                                )}
+                                {counts.failed > 0 && (
                                   <Tag color="error" className="m-0 text-[11px]">
-                                    {log.failedCount} lỗi
+                                    {counts.failed} lỗi
+                                  </Tag>
+                                )}
+                                {counts.skipped > 0 && (
+                                  <Tag className="m-0 text-[11px]">
+                                    {counts.skipped} bỏ qua / dừng
                                   </Tag>
                                 )}
                               </div>
@@ -3945,18 +3975,17 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
                             {/* Bottom: tóm tắt Fanpage, danh sách đầy đủ nằm trong "Chi tiết" */}
                             {log.details.length > 0 && (() => {
-                              const total = log.details.length;
-                              const okN = log.details.filter((d) => d.status === 'SUCCESS').length;
-                              const likedN = log.details.filter((d) => d.status === 'ALREADY_LIKED').length;
-                              const failN = total - okN - likedN;
+                              const { total } = counts;
+                              const pct = (n: number) => `${(n / total) * 100}%`;
                               const preview = log.details.slice(0, 3).map((d) => d.pageName).join(', ');
                               return (
                                 <div className="flex items-center gap-3">
                                   <div className="flex-1 min-w-0">
                                     <div className="flex h-1.5 rounded-full overflow-hidden bg-slate-800">
-                                      <div className="bg-emerald-500" style={{ width: `${(okN / total) * 100}%` }} />
-                                      <div className="bg-blue-500" style={{ width: `${(likedN / total) * 100}%` }} />
-                                      <div className="bg-rose-500" style={{ width: `${(failN / total) * 100}%` }} />
+                                      <div className="bg-emerald-500" style={{ width: pct(counts.success) }} />
+                                      <div className="bg-blue-500" style={{ width: pct(counts.alreadyLiked) }} />
+                                      <div className="bg-amber-500" style={{ width: pct(counts.unverified) }} />
+                                      <div className="bg-rose-500" style={{ width: pct(counts.failed) }} />
                                     </div>
                                     <div className="mt-1.5 text-[11px] text-slate-400 truncate">
                                       <b className="text-slate-200">{total} Fanpage</b>
@@ -4142,24 +4171,36 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             </div>
 
             {/* Quick Metrics */}
+            {(() => {
+              const counts = getLogCounts(selectedLogDetail);
+              return (
             <div className="grid grid-cols-4 gap-2">
               <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
                 <div className="text-[10px] text-slate-500 font-bold uppercase">Tổng Page</div>
-                <div className="text-lg font-semibold text-slate-100">{selectedLogDetail.totalPages}</div>
+                <div className="text-lg font-semibold text-slate-100">{counts.total}</div>
               </div>
               <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-center">
                 <div className="text-[10px] text-emerald-400 font-bold uppercase">Thành công</div>
-                <div className="text-lg font-semibold text-emerald-400">{selectedLogDetail.successCount}</div>
+                <div className="text-lg font-semibold text-emerald-400">{counts.success}</div>
               </div>
               <div className="p-2.5 rounded-xl bg-blue-950/40 border border-blue-800/60 text-center">
                 <div className="text-[10px] text-blue-400 font-bold uppercase">Đã Like Trước</div>
-                <div className="text-lg font-semibold text-blue-400">{selectedLogDetail.alreadyLikedCount}</div>
+                <div className="text-lg font-semibold text-blue-400">{counts.alreadyLiked}</div>
               </div>
               <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-center">
                 <div className="text-[10px] text-rose-400 font-bold uppercase">Thất bại / Lỗi</div>
-                <div className="text-lg font-semibold text-rose-400">{selectedLogDetail.failedCount}</div>
+                <div className="text-lg font-semibold text-rose-400">{counts.failed}</div>
+                {counts.unverified + counts.skipped > 0 && (
+                  <div className="text-[10px] text-slate-400">
+                    {counts.unverified > 0 && `${counts.unverified} chưa xác minh`}
+                    {counts.unverified > 0 && counts.skipped > 0 && ' • '}
+                    {counts.skipped > 0 && `${counts.skipped} bỏ qua / dừng`}
+                  </div>
+                )}
               </div>
             </div>
+              );
+            })()}
 
             {/* Detailed Table of Pages */}
             <div className="space-y-2">
@@ -4168,7 +4209,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               </div>
               <div className="max-h-72 overflow-y-auto space-y-1.5 border border-slate-800 rounded-xl p-2 bg-slate-950/50">
                 {selectedLogDetail.details.map((detail, idx) => {
-                  let statusTag = <Tag color="default">Chờ xử lý</Tag>;
+                  let statusTag: ReactNode;
                   if (detail.status === 'SUCCESS') {
                     statusTag = <Tag color="success" icon={<CheckCircleFilled />}>Thành công</Tag>;
                   } else if (detail.status === 'ALREADY_LIKED') {
@@ -4177,6 +4218,12 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                     statusTag = <Tag color="warning">Không thấy nút Like</Tag>;
                   } else if (detail.status === 'ERROR') {
                     statusTag = <Tag color="error" icon={<CloseCircleFilled />}>Lỗi</Tag>;
+                  } else if (detail.status === 'UNVERIFIED') {
+                    statusTag = <Tag color="gold">Chưa xác minh</Tag>;
+                  } else if (detail.status === 'SKIPPED') {
+                    statusTag = <Tag color="default">Bỏ qua / Đã dừng</Tag>;
+                  } else {
+                    statusTag = <Tag color="default">Chưa chạy</Tag>;
                   }
 
                   return (

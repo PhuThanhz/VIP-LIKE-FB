@@ -110,7 +110,7 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur-xl sticky top-0 z-20 px-4 sm:px-6 py-3">
       <div className="flex items-center justify-between gap-4">
         {/* Left: Collapse toggle + Active Page Title & Breadcrumb */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           <Button
             type="text"
             icon={collapsed ? <MenuUnfoldOutlined className="text-slate-300 text-base" /> : <MenuFoldOutlined className="text-slate-300 text-base" />}
@@ -118,10 +118,10 @@ export const Header: React.FC<HeaderProps> = ({
             className="hover:bg-slate-900 rounded-xl w-9 h-9 flex items-center justify-center p-0 shrink-0"
           />
 
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
+          <div className="min-w-[120px] flex-1">
+            <div className="flex items-center gap-2" title={currentTab.title}>
               <span className="shrink-0">{currentTab.icon}</span>
-              <h2 className="text-sm sm:text-base font-bold text-slate-100 tracking-wide m-0 truncate">
+              <h2 className="text-sm sm:text-base font-bold text-slate-100 tracking-wide m-0 leading-snug line-clamp-2">
                 {currentTab.title}
               </h2>
             </div>
@@ -132,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right Controls: Database status + Via manager + Settings */}
-        <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+        <div className="flex items-center gap-2 xl:gap-3 shrink-0">
           {/* MySQL Status Pill */}
           <Tooltip
             title={
@@ -145,7 +145,7 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <div
               onClick={onCheckDb}
-              className={`cursor-pointer px-3 py-1.5 rounded-xl border text-xs flex items-center gap-2 transition-all shadow-sm ${
+              className={`cursor-pointer px-2.5 2xl:px-3 h-9 rounded-xl border text-xs flex items-center gap-2 transition-all shadow-sm ${
                 dbStatus.connected
                   ? 'bg-emerald-950/30 border-emerald-700/50 text-emerald-300 hover:bg-emerald-950/50'
                   : dbStatus.usingCache
@@ -162,8 +162,8 @@ export const Header: React.FC<HeaderProps> = ({
                     : 'text-rose-400'
                 }
               />
-              <span className="font-semibold hidden md:inline">MySQL:</span>
-              <span className="font-mono font-bold text-[11px]">
+              <span className="font-semibold hidden 2xl:inline">MySQL:</span>
+              <span className="font-mono font-bold text-[11px] hidden lg:inline">
                 {dbStatus.loading ? (
                   <SyncOutlined spin className="text-slate-400" />
                 ) : dbStatus.connected ? (
@@ -187,24 +187,29 @@ export const Header: React.FC<HeaderProps> = ({
           </Tooltip>
 
           {/* Via Management shortcut */}
-          <Button
-            icon={<IdcardOutlined className="text-cyan-400" />}
-            onClick={onOpenViaManager}
-            className="bg-slate-900 border-slate-700/80 hover:border-cyan-500/60 text-slate-200 text-xs font-semibold rounded-xl h-9"
-          >
-            <span className="hidden sm:inline">Quản lý Via & Cookie</span>
-            <span className="sm:hidden">Via</span>
-          </Button>
+          <Tooltip title="Quản lý Via & Cookie">
+            <Button
+              icon={<IdcardOutlined className="text-cyan-400" />}
+              onClick={onOpenViaManager}
+              aria-label="Quản lý Via & Cookie"
+              className="bg-slate-900 border-slate-700/80 hover:border-cyan-500/60 text-slate-200 text-xs font-semibold rounded-xl h-9 px-2.5 2xl:px-3"
+            >
+              <span className="hidden 2xl:inline">Quản lý Via & Cookie</span>
+            </Button>
+          </Tooltip>
 
           {/* System Settings shortcut */}
           {onOpenSettings && (
-            <Button
-              icon={<SettingOutlined className="text-slate-300" />}
-              onClick={onOpenSettings}
-              className="bg-slate-900 border-slate-700/80 hover:border-slate-600 text-slate-300 text-xs rounded-xl h-9 px-3"
-            >
-              <span className="hidden lg:inline">Cài Đặt</span>
-            </Button>
+            <Tooltip title="Cài Đặt">
+              <Button
+                icon={<SettingOutlined className="text-slate-300" />}
+                onClick={onOpenSettings}
+                aria-label="Cài Đặt"
+                className="bg-slate-900 border-slate-700/80 hover:border-slate-600 text-slate-300 text-xs rounded-xl h-9 px-2.5 2xl:px-3"
+              >
+                <span className="hidden 2xl:inline">Cài Đặt</span>
+              </Button>
+            </Tooltip>
           )}
 
           {/* Light / Dark toggle */}
@@ -224,16 +229,16 @@ export const Header: React.FC<HeaderProps> = ({
               className="bg-slate-900 border-cyan-800 hover:border-cyan-500 text-white text-xs rounded-xl h-9 px-2.5 flex items-center gap-2"
             >
               <Avatar size={22} icon={<UserOutlined />} className="bg-gradient-to-r from-cyan-500 to-blue-500" />
-              <span className="font-semibold text-cyan-300 hidden md:inline">{currentUser.fullName}</span>
+              <span className="font-semibold text-cyan-300 hidden xl:inline max-w-[140px] truncate">{currentUser.fullName}</span>
             </Button>
           ) : (
             <Button
               icon={<UserOutlined className="text-on-accent" />}
               onClick={() => setIsAuthModalOpen(true)}
-              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-on-accent text-xs font-semibold rounded-xl h-9 border-0 shadow-md shadow-cyan-500/20"
+              aria-label="Đăng Nhập"
+              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-on-accent text-xs font-semibold rounded-xl h-9 px-2.5 lg:px-3 border-0 shadow-md shadow-cyan-500/20"
             >
-              <span className="hidden sm:inline">Đăng Nhập</span>
-              <span className="sm:hidden">Login</span>
+              <span className="hidden lg:inline">Đăng Nhập</span>
             </Button>
           )}
         </div>
