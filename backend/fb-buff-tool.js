@@ -883,8 +883,9 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     }
     const tab = context.pages().length ? context.pages()[0] : await context.newPage();
 
-    // Chặn tải các file ảnh/video/font nặng để tăng tốc độ tải trang tối đa (giữ CSS & DOM)
-    await tab.route('**/*.{png,jpg,jpeg,gif,webp,mp4,mov,m4v,avi,svg,woff,woff2,ttf,eot,ico}', (route) => route.abort());
+    // Chặn tải các video nền, font nặng và mã tracking để tăng tốc độ tải bài viết tối đa
+    await tab.route('**/*.{mp4,mov,m4v,avi,webm,m3u8,ts,woff,woff2,ttf,eot}', (route) => route.abort());
+    await tab.route('**/*{google-analytics,doubleclick,connect.facebook.net/signals}*', (route) => route.abort());
 
     // Phát hiện sớm popup chặn tính năng / hạn chế của Facebook để bảo vệ Via & BM
     const checkActionBlocked = async () => {
@@ -977,16 +978,14 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       if (isProfileVia) {
         if (!currentIUser) return true;
         console.log(`[FB-Buff] 🔄 Đang chuyển từ Page (i_user: ${currentIUser}) về Nick mẹ UID: ${uid}...`);
-        await tab.goto(`https://www.facebook.com/profile.php?id=${uid}`, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
-        await tab.waitForTimeout(2500);
+        await tab.goto(`https://www.facebook.com/profile.php?id=${uid}`, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
         const switchBtn = tab.locator('div[role="button"]:has-text("Chuyển ngay"), div[role="button"]:has-text("Chuyển"), [aria-label="Chuyển ngay"], [aria-label="Chuyển"]').first();
-        if (await switchBtn.isVisible().catch(() => false)) {
+        if (await switchBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
           await switchBtn.click({ force: true }).catch(() => {});
-          await tab.waitForTimeout(3000);
           const confirmBtn = tab.locator('div[role="dialog"] div[role="button"]:has-text("Chuyển")').first();
-          if (await confirmBtn.isVisible().catch(() => false)) {
+          if (await confirmBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
             await confirmBtn.click({ force: true }).catch(() => {});
-            await tab.waitForTimeout(4000);
+            await tab.waitForSelector('div[role="dialog"] div[role="button"]:has-text("Chuyển")', { state: 'hidden', timeout: 5000 }).catch(() => {});
           }
         }
         await context.clearCookies({ name: 'i_user' }).catch(() => {});
@@ -1000,28 +999,24 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
 
       console.log(`[FB-Buff] 🔄 Đang chuyển sang danh tính Fanpage "${pageInfo.name}" (ID: ${pageInfo.id})...`);
       // Vào trực tiếp trang tường của Page để bấm nút Chuyển
-      await tab.goto(`https://www.facebook.com/profile.php?id=${pageInfo.id}`, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => {});
-      await tab.waitForTimeout(2500);
+      await tab.goto(`https://www.facebook.com/profile.php?id=${pageInfo.id}`, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
 
-      const switchBtn = tab.locator('div[role="button"]:has-text("Chuyển ngay"), div[role="button"]:has-text("Chuyển"), [aria-label="Chuyển ngay"], [aria-label="Chuyển"], div[role="button"]:has-text("Switch now"), div[role="button"]:has-text("Switch")').first();
-      if (await switchBtn.isVisible().catch(() => false)) {
+      const switchBtn = tab.locator('div[role="button"]:has-text("Chuyển ngay"), div[role="button"]:has-text("Chuyển"), [aria-label*="Chuyển sang"], [aria-label="Chuyển ngay"], [aria-label="Chuyển"], div[role="button"]:has-text("Switch now"), div[role="button"]:has-text("Switch")').first();
+      if (await switchBtn.isVisible({ timeout: 2500 }).catch(() => false)) {
         await switchBtn.click({ force: true }).catch(() => {});
-        await tab.waitForTimeout(2500);
-
         const confirmBtn = tab.locator('div[role="dialog"] div[role="button"]:has-text("Chuyển"), div[role="dialog"] div[role="button"]:has-text("Switch")').first();
-        if (await confirmBtn.isVisible().catch(() => false)) {
+        if (await confirmBtn.isVisible({ timeout: 2500 }).catch(() => false)) {
           await confirmBtn.click({ force: true }).catch(() => {});
-          await tab.waitForTimeout(3500);
+          await tab.waitForSelector('div[role="dialog"] div[role="button"]:has-text("Chuyển")', { state: 'hidden', timeout: 5000 }).catch(() => {});
         }
       } else {
         // Fallback qua switch URL endpoint
         const switchUrl = `https://www.facebook.com/profile/switch/?target_id=${pageInfo.id}`;
-        await tab.goto(switchUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-        await tab.waitForTimeout(2000);
+        await tab.goto(switchUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
         const switchConfirm = tab.locator('div[role="button"]:has-text("Chuyển"), div[role="button"]:has-text("Switch")').first();
-        if (await switchConfirm.isVisible().catch(() => false)) {
+        if (await switchConfirm.isVisible({ timeout: 2000 }).catch(() => false)) {
           await switchConfirm.click({ force: true }).catch(() => {});
-          await tab.waitForTimeout(3000);
+          await tab.waitForSelector('div[role="button"]:has-text("Chuyển")', { state: 'hidden', timeout: 5000 }).catch(() => {});
         }
       }
 
@@ -1035,7 +1030,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           sameSite: 'Lax',
         },
       ]);
-      await tab.waitForTimeout(800);
+      await tab.waitForTimeout(400);
       return true;
     };
 
@@ -1098,7 +1093,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         if (fastSwitch && isOnPost) {
           // Thử đổi giọng nói / danh tính ngay trên bài viết (tiết kiệm 15s/lần)
           const voiceBtn = tab.locator(
-            '[aria-label*="Giọng nói hiện có"], [aria-label*="chuyển trang cá nhân"], [aria-label*="Voice switcher"], [aria-label*="Tương tác với tư cách"], [aria-label*="Bình chọn giọng nói"]'
+            '[aria-label*="Giọng nói hiện có"], [aria-label*="chuyển trang cá nhân"], [aria-label*="Voice switcher"], [aria-label*="Tương tác với tư cách"], [aria-label*="Bình chọn giọng nói"], [aria-label*="Bình luận dưới tên"], [aria-label*="Bình luận với tư cách"], [aria-label*="Comment as"], div[aria-haspopup="menu"][aria-label*="trang cá nhân"], div[aria-haspopup="menu"][aria-label*="profile" i]'
           ).first();
 
           if ((await voiceBtn.count().catch(() => 0)) > 0 && (await voiceBtn.isVisible().catch(() => false))) {
@@ -1174,7 +1169,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           const postCheckUrl = tab.url();
           if (!postCheckUrl.includes('posts') && !postCheckUrl.includes('share') && !postCheckUrl.includes('permalink') && !postCheckUrl.includes('reel') && !postCheckUrl.includes('watch')) {
             await tab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-            await tab.waitForTimeout(1500);
+            await tab.waitForTimeout(800);
           }
         }
 
