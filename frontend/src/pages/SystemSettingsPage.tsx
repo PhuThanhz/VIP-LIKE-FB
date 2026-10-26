@@ -35,7 +35,7 @@ export interface SystemSettingsPageProps {
   onResumeSystem?: () => void;
 }
 
-export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({
+export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(({
   systemSettings,
   setSystemSettings,
   savingSettings,
@@ -150,7 +150,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({
                   : 'Ví dụ: 7891234567:AAH...'
               }
               value={systemSettings.telegramBotToken}
-              onChange={(e) => setSystemSettings({ ...systemSettings, telegramBotToken: e.target.value })}
+              onChange={(e) => setSystemSettings((prev: any) => ({ ...prev, telegramBotToken: e.target.value }))}
               className="bg-slate-950 border-slate-700/80 text-slate-100 font-mono text-xs rounded-xl h-10 hover:border-blue-500"
             />
             <div className="text-[11px] text-slate-500 mt-1">
@@ -166,7 +166,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({
               <Input
                 placeholder="Ví dụ: 123456789 hoặc -100123456789"
                 value={systemSettings.telegramChatId}
-                onChange={(e) => setSystemSettings({ ...systemSettings, telegramChatId: e.target.value })}
+                onChange={(e) => setSystemSettings((prev: any) => ({ ...prev, telegramChatId: e.target.value }))}
                 className="bg-slate-950 border-slate-700/80 text-slate-100 font-mono text-xs rounded-xl h-10 hover:border-blue-500 flex-1"
               />
               <Button
@@ -213,7 +213,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({
             </div>
             <Switch
               checked={systemSettings.notifyOnViaDead !== false}
-              onChange={(checked) => setSystemSettings({ ...systemSettings, notifyOnViaDead: checked })}
+              onChange={(checked) => setSystemSettings((prev: any) => ({ ...prev, notifyOnViaDead: checked }))}
             />
           </div>
 
@@ -228,7 +228,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({
             </div>
             <Switch
               checked={systemSettings.notifyOnHunter !== false}
-              onChange={(checked) => setSystemSettings({ ...systemSettings, notifyOnHunter: checked })}
+              onChange={(checked) => setSystemSettings((prev: any) => ({ ...prev, notifyOnHunter: checked }))}
             />
           </div>
 
@@ -243,7 +243,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({
             </div>
             <Switch
               checked={systemSettings.notifyOnBuffDone !== false}
-              onChange={(checked) => setSystemSettings({ ...systemSettings, notifyOnBuffDone: checked })}
+              onChange={(checked) => setSystemSettings((prev: any) => ({ ...prev, notifyOnBuffDone: checked }))}
             />
           </div>
         </div>
@@ -277,7 +277,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({
             </div>
             <Switch
               checked={Boolean(systemSettings.autoBuffOwnPosts)}
-              onChange={(checked) => setSystemSettings({ ...systemSettings, autoBuffOwnPosts: checked })}
+              onChange={(checked) => setSystemSettings((prev: any) => ({ ...prev, autoBuffOwnPosts: checked }))}
             />
           </div>
 
@@ -288,7 +288,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({
             <Switch
               disabled={!systemSettings.autoBuffOwnPosts}
               checked={systemSettings.autoBuffOwnFanpage !== false}
-              onChange={(checked) => setSystemSettings({ ...systemSettings, autoBuffOwnFanpage: checked })}
+              onChange={(checked) => setSystemSettings((prev: any) => ({ ...prev, autoBuffOwnFanpage: checked }))}
             />
           </div>
 
@@ -299,7 +299,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({
             <Switch
               disabled={!systemSettings.autoBuffOwnPosts}
               checked={systemSettings.autoBuffOwnGroup !== false}
-              onChange={(checked) => setSystemSettings({ ...systemSettings, autoBuffOwnGroup: checked })}
+              onChange={(checked) => setSystemSettings((prev: any) => ({ ...prev, autoBuffOwnGroup: checked }))}
             />
           </div>
         </div>
@@ -319,6 +319,6 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = ({
       </div>
     </div>
   );
-};
+});
 
 export default SystemSettingsPage;

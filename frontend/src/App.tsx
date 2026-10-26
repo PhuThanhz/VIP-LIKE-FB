@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ConfigProvider, App as AntdApp, Layout, theme } from 'antd';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import Header from './components/Header';
@@ -39,40 +39,68 @@ const MainDashboard: React.FC = () => {
     loading: true,
   });
 
-  const checkDb = async () => {
-    try {
-      setDbStatus((prev) => ({ ...prev, loading: true }));
-      const res = await api.get('/db/test');
-      if (res.data?.connected) {
-        setDbStatus({
-          connected: true,
-          usingCache: false,
-          database: res.data.config?.database || 'autopost_saas',
-          loading: false,
-        });
-      } else {
-        setDbStatus({
+  // Chỉ cập nhật state khi trạng thái DB thật sự thay đổi, tránh re-render toàn app mỗi lần poll
+  const applyDbStatus = useCallback((next: SidebarDbStatus) => {
+    setDbStatus((prev) =>
+      prev.connected === next.connected &&
+      prev.loading === next.loading &&
+      prev.usingCache === next.usingCache &&
+      prev.cachedCount === next.cachedCount &&
+      prev.database === next.database &&
+      prev.error === next.error
+        ? prev
+        : next
+    );
+  }, []);
+
+  const fetchDbStatus = useCallback(
+    async (silent: boolean) => {
+      try {
+        if (!silent) setDbStatus((prev) => ({ ...prev, loading: true }));
+        const res = await api.get('/db/test');
+        if (res.data?.connected) {
+          applyDbStatus({
+            connected: true,
+            usingCache: false,
+            database: res.data.config?.database || 'autopost_saas',
+            loading: false,
+          });
+        } else {
+          applyDbStatus({
+            connected: false,
+            usingCache: Boolean(res.data?.usingCache),
+            cachedCount: res.data?.cachedCount || 0,
+            loading: false,
+            error: res.data?.error || 'Không kết nối được',
+          });
+        }
+      } catch (err: any) {
+        applyDbStatus({
           connected: false,
-          usingCache: Boolean(res.data?.usingCache),
-          cachedCount: res.data?.cachedCount || 0,
           loading: false,
-          error: res.data?.error || 'Không kết nối được',
+          error: err.response?.data?.error || err.message,
         });
       }
-    } catch (err: any) {
-      setDbStatus({
-        connected: false,
-        loading: false,
-        error: err.response?.data?.error || err.message,
-      });
-    }
-  };
+    },
+    [applyDbStatus]
+  );
+
+  // Bấm nút kiểm tra thủ công: hiện loading
+  const checkDb = useCallback(() => {
+    fetchDbStatus(false);
+  }, [fetchDbStatus]);
 
   useEffect(() => {
-    checkDb();
-    const interval = setInterval(checkDb, 30000);
+    fetchDbStatus(false);
+    // Poll nền: không bật loading để không làm cả cây re-render khi DB không đổi
+    const interval = setInterval(() => fetchDbStatus(true), 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchDbStatus]);
+
+  const handleSelectTab = useCallback((key: string) => setActiveTabKey(key), []);
+  const handleToggleCollapse = useCallback(() => setCollapsed((prev) => !prev), []);
+  const openViaManager = useCallback(() => setActiveTabKey('via-management'), []);
+  const openSettings = useCallback(() => setActiveTabKey('system-settings'), []);
 
   const {
     data: accounts = [],
@@ -98,11 +126,11 @@ const MainDashboard: React.FC = () => {
       {/* Ant Design Sidebar */}
       <Sidebar
         activeTabKey={activeTabKey}
-        onSelectTab={(key) => setActiveTabKey(key)}
+        onSelectTab={handleSelectTab}
         collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed(!collapsed)}
-        onOpenViaManager={() => setActiveTabKey('via-management')}
-        onOpenSettings={() => setActiveTabKey('system-settings')}
+        onToggleCollapse={handleToggleCollapse}
+        onOpenViaManager={openViaManager}
+        onOpenSettings={openSettings}
         stats={stats}
         dbStatus={dbStatus}
         onCheckDb={checkDb}
@@ -112,10 +140,10 @@ const MainDashboard: React.FC = () => {
       <Layout className="!bg-[#070b13] flex flex-col min-h-screen">
         <Header
           activeTabKey={activeTabKey}
-          onOpenViaManager={() => setActiveTabKey('via-management')}
-          onOpenSettings={() => setActiveTabKey('system-settings')}
+          onOpenViaManager={openViaManager}
+          onOpenSettings={openSettings}
           collapsed={collapsed}
-          onToggleCollapse={() => setCollapsed(!collapsed)}
+          onToggleCollapse={handleToggleCollapse}
           dbStatus={dbStatus}
           onCheckDb={checkDb}
         />

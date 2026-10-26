@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import {
   Table,
   Button,
@@ -44,6 +44,7 @@ import {
   TeamOutlined,
   FileTextOutlined,
 } from '@ant-design/icons';
+import type { ColumnsType } from 'antd/es/table';
 import api from '../config/axios';
 
 const { Text } = Typography;
@@ -184,6 +185,52 @@ function parseFanpagesInput(text: string): FanpageItem[] {
   return results;
 }
 
+const DRAWER_PAGE_STEP = 50;
+const EMPTY_PAGES: FanpageItem[] = [];
+const EMPTY_CHILDREN: ChildAccountItem[] = [];
+
+// Render danh sách dài theo từng lô để Drawer mở nhanh với Via có hàng trăm Page
+function useIncrementalList<T>(items: T[], resetKey: string, step = DRAWER_PAGE_STEP) {
+  const [limit, setLimit] = useState(step);
+  useEffect(() => {
+    setLimit(step);
+  }, [resetKey, step]);
+  const visible = useMemo(() => items.slice(0, limit), [items, limit]);
+  return {
+    visible,
+    remaining: Math.max(0, items.length - limit),
+    showMore: () => setLimit((prev) => prev + step),
+  };
+}
+
+// Ảnh đại diện Facebook tải lười: trình duyệt chỉ tải khi cuộn tới
+function fbAvatarSrc(id?: string) {
+  if (!id || !/^[0-9]+$/.test(id)) return undefined;
+  return (
+    <img
+      src={`https://graph.facebook.com/${id}/picture?type=normal`}
+      loading="lazy"
+      decoding="async"
+      alt=""
+      onError={(e) => {
+        e.currentTarget.style.visibility = 'hidden';
+      }}
+    />
+  );
+}
+
+const ShowMoreButton: React.FC<{ remaining: number; onClick: () => void }> = ({ remaining, onClick }) =>
+  remaining > 0 ? (
+    <Button
+      block
+      size="small"
+      onClick={onClick}
+      className="bg-slate-900 border-slate-700 hover:border-cyan-500 text-cyan-300 text-xs rounded-lg"
+    >
+      Xem thêm ({remaining} còn lại)
+    </Button>
+  ) : null;
+
 export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   accounts = [],
   loading = false,
@@ -234,6 +281,15 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
   // Search filter
   const [searchText, setSearchText] = useState('');
+
+  // Giá trị trễ cho các ô tìm kiếm/nhập liệu: ô input vẫn nhạy, phần lọc nặng chạy ưu tiên thấp
+  const deferredSearchText = useDeferredValue(searchText);
+  const deferredPageQuery = useDeferredValue(pageSearchQuery);
+  const deferredBulkText = useDeferredValue(bulkInputText);
+  const bulkLineCount = useMemo(
+    () => deferredBulkText.split('\n').filter((l) => l.trim()).length,
+    [deferredBulkText]
+  );
 
   // Tự động nhận diện UID từ Link hoặc Cookie đang nhập
   const recognizedUid = useMemo(() => {
@@ -818,8 +874,9 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   };
 
   // Thống kê tổng số Fanpage trên toàn bộ hệ thống
-  const { totalPagesCount, totalDbPagesCount, totalDbGroupsCount } = useMemo(() => {
+  const { totalPagesCount, totalDbPagesCount, totalDbGroupsCount, liveViaCount } = useMemo(() => {
     let pagesSum = 0;
+    let liveSum = 0;
     let dbPagesSum = 0;
     let dbGroupsSum = 0;
 
@@ -827,18 +884,20 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       pagesSum += v.totalUniquePagesCount;
       dbPagesSum += v.dbPages.length;
       dbGroupsSum += v.dbGroups.length;
+      if (v.tokenStatus === 'OK') liveSum++;
     }
 
     return {
       totalPagesCount: pagesSum,
       totalDbPagesCount: dbPagesSum,
       totalDbGroupsCount: dbGroupsSum,
+      liveViaCount: liveSum,
     };
   }, [motherVias]);
 
   // Danh sách Via đã lọc theo tìm kiếm
   const filteredMotherVias = useMemo(() => {
-    const q = searchText.toLowerCase().trim();
+    const q = deferredSearchText.toLowerCase().trim();
     if (!q) return motherVias;
 
     return motherVias.filter((v) => {
@@ -861,7 +920,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       );
       return hasDbMatch;
     });
-  }, [motherVias, searchText]);
+  }, [motherVias, deferredSearchText]);
 
   // Cập nhật selectedMotherVia khi motherVias thay đổi
   const activeDrawerVia = useMemo(() => {
@@ -870,33 +929,341 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   }, [motherVias, selectedMotherVia]);
 
   // Danh sách Fanpage quét của Via đang chọn xem chi tiết trong Drawer
-  const currentScannedPages = activeDrawerVia?.scannedPages || [];
+  const currentScannedPages = activeDrawerVia?.scannedPages ?? EMPTY_PAGES;
   const filteredScannedPages = useMemo(() => {
-    if (!pageSearchQuery.trim()) return currentScannedPages;
-    const q = pageSearchQuery.toLowerCase().trim();
+    if (!deferredPageQuery.trim()) return currentScannedPages;
+    const q = deferredPageQuery.toLowerCase().trim();
     return currentScannedPages.filter(
       (p) => (p.name || '').toLowerCase().includes(q) || p.id.includes(q)
     );
-  }, [currentScannedPages, pageSearchQuery]);
+  }, [currentScannedPages, deferredPageQuery]);
 
   // Danh sách Page / Nhóm DB của Via đang chọn
-  const currentDbPages = activeDrawerVia?.dbPages || [];
-  const currentDbGroups = activeDrawerVia?.dbGroups || [];
+  const currentDbPages = activeDrawerVia?.dbPages ?? EMPTY_CHILDREN;
+  const currentDbGroups = activeDrawerVia?.dbGroups ?? EMPTY_CHILDREN;
   const filteredDbPages = useMemo(() => {
-    if (!pageSearchQuery.trim()) return currentDbPages;
-    const q = pageSearchQuery.toLowerCase().trim();
+    if (!deferredPageQuery.trim()) return currentDbPages;
+    const q = deferredPageQuery.toLowerCase().trim();
     return currentDbPages.filter(
       (p) => (p.pageName || '').toLowerCase().includes(q) || p.platformAccountId.includes(q)
     );
-  }, [currentDbPages, pageSearchQuery]);
+  }, [currentDbPages, deferredPageQuery]);
 
   const filteredDbGroups = useMemo(() => {
-    if (!pageSearchQuery.trim()) return currentDbGroups;
-    const q = pageSearchQuery.toLowerCase().trim();
+    if (!deferredPageQuery.trim()) return currentDbGroups;
+    const q = deferredPageQuery.toLowerCase().trim();
     return currentDbGroups.filter(
       (p) => (p.pageName || '').toLowerCase().includes(q) || p.platformAccountId.includes(q)
     );
-  }, [currentDbGroups, pageSearchQuery]);
+  }, [currentDbGroups, deferredPageQuery]);
+
+  // Hiển thị dần danh sách trong Drawer, reset khi đổi Via / tab / từ khóa
+  const drawerListKey = `${activeDrawerVia?.uid ?? ''}|${drawerActiveTab}|${deferredPageQuery}`;
+  const scannedList = useIncrementalList(filteredScannedPages, drawerListKey);
+  const dbPagesList = useIncrementalList(filteredDbPages, drawerListKey);
+  const dbGroupsList = useIncrementalList(filteredDbGroups, drawerListKey);
+
+  // Danh sách ID để xuất: tính một lần, loại trùng bằng Set thay vì quét lồng nhau
+  const exportLines = useMemo(() => {
+    const all: string[] = [];
+    const scannedIds = new Set<string>();
+    for (const p of currentScannedPages) {
+      scannedIds.add(p.id);
+      all.push(`${p.id} | ${p.name || ''}`);
+    }
+    for (const p of currentDbPages) {
+      if (!scannedIds.has(p.platformAccountId)) {
+        all.push(`${p.platformAccountId} | ${p.pageName || ''}`);
+      }
+    }
+    return all;
+  }, [currentScannedPages, currentDbPages]);
+
+  // Handler mới nhất cho các nút trong bảng, để cột không phải tạo lại mỗi lần render
+  const rowHandlersRef = useRef({ handleScanPagesForVia, handleTestViaProxy, handleTestViaLive, handleDeleteVia });
+  rowHandlersRef.current = { handleScanPagesForVia, handleTestViaProxy, handleTestViaLive, handleDeleteVia };
+
+  const viaColumns = useMemo<ColumnsType<MotherViaAccount>>(
+    () => [
+    {
+      title: 'Tài Khoản Via Mẹ (Profile)',
+      key: 'accountInfo',
+      render: (_: any, record: MotherViaAccount) => {
+        const uid = record.uid;
+        return (
+          <div className="flex items-center gap-3 py-1">
+            <div className="relative">
+              <Avatar
+                src={fbAvatarSrc(uid)}
+                icon={<UserOutlined />}
+                size={44}
+                className="shrink-0 bg-slate-800 border border-slate-700 shadow-sm"
+              />
+              {record.isProfileRow && (
+                <div
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-amber-500/90 text-slate-950 flex items-center justify-center text-[10px] shadow"
+                  title="Tài khoản Via Mẹ (Profile)"
+                >
+                  <CrownOutlined />
+                </div>
+              )}
+            </div>
+
+            <div className="min-w-0">
+              <div className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                <span className="truncate max-w-[180px]">{record.pageName || `Via ${uid}`}</span>
+                {record.isProfileRow ? (
+                  <Tag color="gold" className="text-[10px] font-semibold rounded px-1.5 py-0 border-0 leading-tight">
+                    👑 Via Mẹ
+                  </Tag>
+                ) : (
+                  <Tag color="cyan" className="text-[10px] font-mono rounded px-1.5 py-0 border-0 leading-tight">
+                    Account
+                  </Tag>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-400 font-mono mt-0.5 flex items-center gap-2">
+                <span>UID: <span className="text-cyan-400 font-semibold">{uid}</span></span>
+                <Tooltip title="Sao chép UID">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CopyOutlined className="text-[10px] text-slate-400 hover:text-cyan-300" />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(uid);
+                      message.success(`Đã sao chép UID: ${uid}`);
+                    }}
+                    className="p-0 h-4 w-4"
+                  />
+                </Tooltip>
+              </div>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Link Profile Facebook',
+      key: 'facebookLink',
+      width: 170,
+      render: (_: any, record: MotherViaAccount) => {
+        const uid = record.uid;
+        const fbUrl = `https://www.facebook.com/${uid}`;
+        return (
+          <div className="space-y-1">
+            {uid && /^[0-9]+$/.test(uid) ? (
+              <a
+                href={fbUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 hover:underline font-medium"
+              >
+                <FacebookFilled className="text-sm" /> Mở Profile FB
+              </a>
+            ) : (
+              <span className="text-slate-500 text-xs italic">Không có link</span>
+            )}
+            <div className="text-[11px] text-slate-500">
+              Gốc: #{record.id} ({record.rawAccounts.length} bản ghi DB)
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Dàn Fanpage & Nhóm Trực Thuộc',
+      key: 'pages',
+      render: (_: any, record: MotherViaAccount) => {
+        const uid = record.uid;
+        const isScanning = scanningUids.has(uid);
+        const totalCount = record.totalUniquePagesCount || record.scannedPages.length;
+
+        return (
+          <div className="space-y-2 py-1">
+            {/* Tags đếm số lượng */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <Tag
+                color={record.scannedPages.length > 0 ? 'cyan' : 'default'}
+                className="font-mono text-xs font-bold rounded-lg px-2 py-0.5 border-0 flex items-center gap-1"
+              >
+                <ThunderboltOutlined />
+                <span>{record.scannedPages.length > 0 ? `${record.scannedPages.length} Page Quét` : '0 Page quét'}</span>
+              </Tag>
+
+              {record.dbPages.length > 0 && (
+                <Tag color="purple" className="text-xs rounded-lg px-2 py-0.5 border-0 flex items-center gap-1">
+                  <AppstoreOutlined />
+                  <span>{record.dbPages.length} Page DB</span>
+                </Tag>
+              )}
+
+              {record.dbGroups.length > 0 && (
+                <Tag color="blue" className="text-xs rounded-lg px-2 py-0.5 border-0 flex items-center gap-1">
+                  <TeamOutlined />
+                  <span>{record.dbGroups.length} Nhóm</span>
+                </Tag>
+              )}
+            </div>
+
+            {/* Các nút hành động thao tác với dàn Page của Via này */}
+            <div className="flex items-center gap-2 pt-0.5">
+              <Tooltip title="Mở trình duyệt Playwright quét toàn bộ Fanpage được quản lý bởi nick này">
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={isScanning}
+                  icon={<ThunderboltOutlined />}
+                  onClick={() => rowHandlersRef.current.handleScanPagesForVia(record)}
+                  className="bg-cyan-600 hover:bg-cyan-500 text-xs rounded-lg font-semibold border-0 h-7 px-2.5"
+                >
+                  {isScanning ? 'Đang quét...' : 'Quét Page'}
+                </Button>
+              </Tooltip>
+
+              <Button
+                size="small"
+                icon={<EyeOutlined />}
+                onClick={() => {
+                  setSelectedMotherVia(record);
+                  setIsPageDrawerOpen(true);
+                  setDrawerActiveTab('scanned');
+                }}
+                className="bg-slate-900 border-slate-700 hover:border-cyan-500 text-cyan-300 text-xs rounded-lg font-semibold h-7 px-2.5"
+              >
+                Xem Dàn Page ({totalCount})
+              </Button>
+
+              <Tooltip title="Dán danh sách ID / Link Fanpage thủ công cho riêng Via này">
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setSelectedMotherVia(record);
+                    setIsPageDrawerOpen(true);
+                    setIsAddingManualToDrawer(true);
+                  }}
+                  className="bg-slate-800/80 border-slate-700 text-slate-300 text-xs rounded-lg h-7 px-2"
+                >
+                  + Dán Page
+                </Button>
+              </Tooltip>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Proxy Riêng',
+      key: 'proxyUrl',
+      width: 200,
+      render: (_: any, record: MotherViaAccount) => {
+        const val = record.proxyUrl;
+        const health = viaProxyHealthMap[record.id];
+        const isTesting = testingProxyVias.has(record.id);
+
+        return val ? (
+          <div className="flex flex-col gap-1 items-start">
+            <div className="flex items-center gap-1.5">
+              <Tooltip title={val}>
+                <Tag color="blue" className="font-mono text-xs rounded-lg px-2 py-0.5 border-0 flex items-center gap-1 max-w-[130px] truncate">
+                  <GlobalOutlined /> {val.replace(/:[^:]+@/, ':***@').slice(0, 14)}...
+                </Tag>
+              </Tooltip>
+              <Tooltip title="Kiểm tra kết nối và độ trễ Proxy này ngay">
+                <Button
+                  size="small"
+                  type="text"
+                  loading={isTesting}
+                  onClick={() => rowHandlersRef.current.handleTestViaProxy(record)}
+                  className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-950/40 px-1 py-0 h-6 text-xs rounded font-semibold"
+                >
+                  ⚡ Test
+                </Button>
+              </Tooltip>
+            </div>
+            {health && (
+              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                health.success ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+              }`}>
+                {health.success ? `● LIVE (${health.latencyMs}ms · ${health.country || 'Global'})` : '● DEAD / LỖI'}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-slate-500 text-xs italic flex items-center gap-1">
+            <CompassOutlined /> Direct (Mạng máy)
+          </span>
+        );
+      },
+    },
+    {
+      title: 'Trạng Thái Nick',
+      key: 'tokenStatus',
+      width: 140,
+      render: (_: any, record: MotherViaAccount) => {
+        const isLive = record.tokenStatus === 'OK';
+        const isTesting = testingCookieIds.has(record.id);
+        return (
+          <div className="flex items-center gap-2">
+            {isLive ? (
+              <Badge
+                status="success"
+                text={<span className="text-emerald-400 font-bold text-xs">LIVE</span>}
+              />
+            ) : (
+              <Badge
+                status="error"
+                text={<span className="text-rose-400 font-bold text-xs">{record.tokenStatus || 'CHECKPOINT'}</span>}
+              />
+            )}
+
+            <Tooltip title="Kiểm tra Cookie còn sống hay đã checkpoint">
+              <Button
+                size="small"
+                type="text"
+                loading={isTesting}
+                icon={<SyncOutlined className="text-[11px]" />}
+                onClick={() => rowHandlersRef.current.handleTestViaLive(record)}
+                className="text-slate-400 hover:text-cyan-300 text-[11px] p-0 h-5"
+              >
+                Check
+              </Button>
+            </Tooltip>
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Thao Tác',
+      key: 'actions',
+      align: 'right',
+      width: 100,
+      render: (_: any, record: MotherViaAccount) => {
+        return (
+          <Popconfirm
+            title={`Xóa tài khoản Via [${record.pageName}]?`}
+            description="Tài khoản mẹ và các liên kết dàn Page sẽ bị xóa khỏi hệ thống."
+            onConfirm={() => rowHandlersRef.current.handleDeleteVia(record)}
+            okText="Xóa luôn"
+            cancelText="Hủy"
+            okButtonProps={{ danger: true }}
+          >
+            <Button
+              size="small"
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              className="hover:bg-rose-950/40 rounded-lg text-slate-400 hover:text-rose-400"
+            >
+              Xóa
+            </Button>
+          </Popconfirm>
+        );
+      },
+    },
+    ],
+    [scanningUids, testingCookieIds, testingProxyVias, viaProxyHealthMap]
+  );
 
   return (
     <div className="space-y-6 max-w-[1440px] mx-auto pb-20">
@@ -914,7 +1281,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
               <span className="text-xs font-normal text-slate-400">Via mẹ</span>
             </div>
             <div className="text-[11px] text-emerald-400 mt-1 font-semibold flex items-center gap-1">
-              <CheckCircleFilled /> {motherVias.filter((a) => a.tokenStatus === 'OK').length} Nick Live
+              <CheckCircleFilled /> {liveViaCount} Nick Live
             </div>
           </div>
           <div className="w-11 h-11 rounded-xl bg-sky-950/80 border border-sky-800/60 flex items-center justify-center text-sky-400 text-xl">
@@ -1215,7 +1582,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
             <div className="flex items-center justify-between pt-1">
               <span className="text-[11px] text-slate-500">
-                Đã nhập: {bulkInputText.split('\n').filter((l) => l.trim()).length} dòng nick
+                Đã nhập: {bulkLineCount} dòng nick
               </span>
 
               <div className="flex items-center gap-2">
@@ -1304,284 +1671,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
               </div>
             ),
           }}
-          columns={[
-            {
-              title: 'Tài Khoản Via Mẹ (Profile)',
-              key: 'accountInfo',
-              render: (_: any, record: MotherViaAccount) => {
-                const uid = record.uid;
-                return (
-                  <div className="flex items-center gap-3 py-1">
-                    <div className="relative">
-                      <Avatar
-                        src={uid && /^[0-9]+$/.test(uid) ? `https://graph.facebook.com/${uid}/picture?type=normal` : undefined}
-                        icon={<UserOutlined />}
-                        size={44}
-                        className="shrink-0 bg-slate-800 border border-slate-700 shadow-sm"
-                      />
-                      {record.isProfileRow && (
-                        <div
-                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-amber-500/90 text-slate-950 flex items-center justify-center text-[10px] shadow"
-                          title="Tài khoản Via Mẹ (Profile)"
-                        >
-                          <CrownOutlined />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="font-bold text-slate-100 text-sm flex items-center gap-2">
-                        <span className="truncate max-w-[180px]">{record.pageName || `Via ${uid}`}</span>
-                        {record.isProfileRow ? (
-                          <Tag color="gold" className="text-[10px] font-semibold rounded px-1.5 py-0 border-0 leading-tight">
-                            👑 Via Mẹ
-                          </Tag>
-                        ) : (
-                          <Tag color="cyan" className="text-[10px] font-mono rounded px-1.5 py-0 border-0 leading-tight">
-                            Account
-                          </Tag>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-slate-400 font-mono mt-0.5 flex items-center gap-2">
-                        <span>UID: <span className="text-cyan-400 font-semibold">{uid}</span></span>
-                        <Tooltip title="Sao chép UID">
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<CopyOutlined className="text-[10px] text-slate-400 hover:text-cyan-300" />}
-                            onClick={() => {
-                              navigator.clipboard.writeText(uid);
-                              message.success(`Đã sao chép UID: ${uid}`);
-                            }}
-                            className="p-0 h-4 w-4"
-                          />
-                        </Tooltip>
-                      </div>
-                    </div>
-                  </div>
-                );
-              },
-            },
-            {
-              title: 'Link Profile Facebook',
-              key: 'facebookLink',
-              width: 170,
-              render: (_: any, record: MotherViaAccount) => {
-                const uid = record.uid;
-                const fbUrl = `https://www.facebook.com/${uid}`;
-                return (
-                  <div className="space-y-1">
-                    {uid && /^[0-9]+$/.test(uid) ? (
-                      <a
-                        href={fbUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 hover:underline font-medium"
-                      >
-                        <FacebookFilled className="text-sm" /> Mở Profile FB
-                      </a>
-                    ) : (
-                      <span className="text-slate-500 text-xs italic">Không có link</span>
-                    )}
-                    <div className="text-[11px] text-slate-500">
-                      Gốc: #{record.id} ({record.rawAccounts.length} bản ghi DB)
-                    </div>
-                  </div>
-                );
-              },
-            },
-            {
-              title: 'Dàn Fanpage & Nhóm Trực Thuộc',
-              key: 'pages',
-              render: (_: any, record: MotherViaAccount) => {
-                const uid = record.uid;
-                const isScanning = scanningUids.has(uid);
-                const totalCount = record.totalUniquePagesCount || record.scannedPages.length;
-
-                return (
-                  <div className="space-y-2 py-1">
-                    {/* Tags đếm số lượng */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <Tag
-                        color={record.scannedPages.length > 0 ? 'cyan' : 'default'}
-                        className="font-mono text-xs font-bold rounded-lg px-2 py-0.5 border-0 flex items-center gap-1"
-                      >
-                        <ThunderboltOutlined />
-                        <span>{record.scannedPages.length > 0 ? `${record.scannedPages.length} Page Quét` : '0 Page quét'}</span>
-                      </Tag>
-
-                      {record.dbPages.length > 0 && (
-                        <Tag color="purple" className="text-xs rounded-lg px-2 py-0.5 border-0 flex items-center gap-1">
-                          <AppstoreOutlined />
-                          <span>{record.dbPages.length} Page DB</span>
-                        </Tag>
-                      )}
-
-                      {record.dbGroups.length > 0 && (
-                        <Tag color="blue" className="text-xs rounded-lg px-2 py-0.5 border-0 flex items-center gap-1">
-                          <TeamOutlined />
-                          <span>{record.dbGroups.length} Nhóm</span>
-                        </Tag>
-                      )}
-                    </div>
-
-                    {/* Các nút hành động thao tác với dàn Page của Via này */}
-                    <div className="flex items-center gap-2 pt-0.5">
-                      <Tooltip title="Mở trình duyệt Playwright quét toàn bộ Fanpage được quản lý bởi nick này">
-                        <Button
-                          size="small"
-                          type="primary"
-                          loading={isScanning}
-                          icon={<ThunderboltOutlined />}
-                          onClick={() => handleScanPagesForVia(record)}
-                          className="bg-cyan-600 hover:bg-cyan-500 text-xs rounded-lg font-semibold border-0 h-7 px-2.5"
-                        >
-                          {isScanning ? 'Đang quét...' : 'Quét Page'}
-                        </Button>
-                      </Tooltip>
-
-                      <Button
-                        size="small"
-                        icon={<EyeOutlined />}
-                        onClick={() => {
-                          setSelectedMotherVia(record);
-                          setIsPageDrawerOpen(true);
-                          setDrawerActiveTab('scanned');
-                        }}
-                        className="bg-slate-900 border-slate-700 hover:border-cyan-500 text-cyan-300 text-xs rounded-lg font-semibold h-7 px-2.5"
-                      >
-                        Xem Dàn Page ({totalCount})
-                      </Button>
-
-                      <Tooltip title="Dán danh sách ID / Link Fanpage thủ công cho riêng Via này">
-                        <Button
-                          size="small"
-                          icon={<PlusOutlined />}
-                          onClick={() => {
-                            setSelectedMotherVia(record);
-                            setIsPageDrawerOpen(true);
-                            setIsAddingManualToDrawer(true);
-                          }}
-                          className="bg-slate-800/80 border-slate-700 text-slate-300 text-xs rounded-lg h-7 px-2"
-                        >
-                          + Dán Page
-                        </Button>
-                      </Tooltip>
-                    </div>
-                  </div>
-                );
-              },
-            },
-            {
-              title: 'Proxy Riêng',
-              key: 'proxyUrl',
-              width: 200,
-              render: (_: any, record: MotherViaAccount) => {
-                const val = record.proxyUrl;
-                const health = viaProxyHealthMap[record.id];
-                const isTesting = testingProxyVias.has(record.id);
-
-                return val ? (
-                  <div className="flex flex-col gap-1 items-start">
-                    <div className="flex items-center gap-1.5">
-                      <Tooltip title={val}>
-                        <Tag color="blue" className="font-mono text-xs rounded-lg px-2 py-0.5 border-0 flex items-center gap-1 max-w-[130px] truncate">
-                          <GlobalOutlined /> {val.replace(/:[^:]+@/, ':***@').slice(0, 14)}...
-                        </Tag>
-                      </Tooltip>
-                      <Tooltip title="Kiểm tra kết nối và độ trễ Proxy này ngay">
-                        <Button
-                          size="small"
-                          type="text"
-                          loading={isTesting}
-                          onClick={() => handleTestViaProxy(record)}
-                          className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-950/40 px-1 py-0 h-6 text-xs rounded font-semibold"
-                        >
-                          ⚡ Test
-                        </Button>
-                      </Tooltip>
-                    </div>
-                    {health && (
-                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                        health.success ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                      }`}>
-                        {health.success ? `● LIVE (${health.latencyMs}ms · ${health.country || 'Global'})` : '● DEAD / LỖI'}
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <span className="text-slate-500 text-xs italic flex items-center gap-1">
-                    <CompassOutlined /> Direct (Mạng máy)
-                  </span>
-                );
-              },
-            },
-            {
-              title: 'Trạng Thái Nick',
-              key: 'tokenStatus',
-              width: 140,
-              render: (_: any, record: MotherViaAccount) => {
-                const isLive = record.tokenStatus === 'OK';
-                const isTesting = testingCookieIds.has(record.id);
-                return (
-                  <div className="flex items-center gap-2">
-                    {isLive ? (
-                      <Badge
-                        status="success"
-                        text={<span className="text-emerald-400 font-bold text-xs">LIVE</span>}
-                      />
-                    ) : (
-                      <Badge
-                        status="error"
-                        text={<span className="text-rose-400 font-bold text-xs">{record.tokenStatus || 'CHECKPOINT'}</span>}
-                      />
-                    )}
-
-                    <Tooltip title="Kiểm tra Cookie còn sống hay đã checkpoint">
-                      <Button
-                        size="small"
-                        type="text"
-                        loading={isTesting}
-                        icon={<SyncOutlined className="text-[11px]" />}
-                        onClick={() => handleTestViaLive(record)}
-                        className="text-slate-400 hover:text-cyan-300 text-[11px] p-0 h-5"
-                      >
-                        Check
-                      </Button>
-                    </Tooltip>
-                  </div>
-                );
-              },
-            },
-            {
-              title: 'Thao Tác',
-              key: 'actions',
-              align: 'right',
-              width: 100,
-              render: (_: any, record: MotherViaAccount) => {
-                return (
-                  <Popconfirm
-                    title={`Xóa tài khoản Via [${record.pageName}]?`}
-                    description="Tài khoản mẹ và các liên kết dàn Page sẽ bị xóa khỏi hệ thống."
-                    onConfirm={() => handleDeleteVia(record)}
-                    okText="Xóa luôn"
-                    cancelText="Hủy"
-                    okButtonProps={{ danger: true }}
-                  >
-                    <Button
-                      size="small"
-                      type="text"
-                      danger
-                      icon={<DeleteOutlined />}
-                      className="hover:bg-rose-950/40 rounded-lg text-slate-400 hover:text-rose-400"
-                    >
-                      Xóa
-                    </Button>
-                  </Popconfirm>
-                );
-              },
-            },
-          ]}
+          columns={viaColumns}
         />
       </div>
 
@@ -1603,6 +1693,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         placement="right"
         width={620}
         open={isPageDrawerOpen}
+        destroyOnHidden
         onClose={() => {
           setIsPageDrawerOpen(false);
           setIsAddingManualToDrawer(false);
@@ -1619,11 +1710,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <Avatar
-                  src={
-                    activeDrawerVia.uid && /^[0-9]+$/.test(activeDrawerVia.uid)
-                      ? `https://graph.facebook.com/${activeDrawerVia.uid}/picture?type=normal`
-                      : undefined
-                  }
+                  src={fbAvatarSrc(activeDrawerVia.uid)}
                   icon={<UserOutlined />}
                   size={42}
                   className="bg-slate-800 border border-slate-700 shrink-0"
@@ -1760,14 +1847,14 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                             : 'Không tìm thấy Fanpage nào phù hợp với từ khóa tìm kiếm.'}
                         </div>
                       ) : (
-                        filteredScannedPages.map((page) => (
+                        scannedList.visible.map((page) => (
                           <div
                             key={page.id}
                             className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 flex items-center justify-between gap-3 transition-colors"
                           >
                             <div className="flex items-center gap-3 min-w-0">
                               <Avatar
-                                src={page.id && /^[0-9]+$/.test(page.id) ? `https://graph.facebook.com/${page.id}/picture?type=normal` : undefined}
+                                src={fbAvatarSrc(page.id)}
                                 icon={<ThunderboltOutlined />}
                                 size={36}
                                 className="shrink-0 bg-cyan-950 border border-cyan-800/60 text-cyan-400"
@@ -1841,6 +1928,8 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                         ))
                       )}
 
+                      <ShowMoreButton remaining={scannedList.remaining} onClick={scannedList.showMore} />
+
                       {currentScannedPages.length > 0 && (
                         <div className="pt-3 border-t border-slate-800/80 flex justify-between items-center text-xs text-slate-500">
                           <span>Tổng cộng: {currentScannedPages.length} Fanpage quét</span>
@@ -1882,7 +1971,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                             <AppstoreOutlined className="text-purple-400" />
                             <span>Fanpage ({filteredDbPages.length})</span>
                           </div>
-                          {filteredDbPages.map((item) => (
+                          {dbPagesList.visible.map((item) => (
                             <div
                               key={item.id}
                               className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between gap-2"
@@ -1919,6 +2008,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                               </Popconfirm>
                             </div>
                           ))}
+                          <ShowMoreButton remaining={dbPagesList.remaining} onClick={dbPagesList.showMore} />
                         </div>
                       )}
 
@@ -1929,7 +2019,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                             <TeamOutlined className="text-blue-400" />
                             <span>Nhóm Facebook ({filteredDbGroups.length})</span>
                           </div>
-                          {filteredDbGroups.map((item) => (
+                          {dbGroupsList.visible.map((item) => (
                             <div
                               key={item.id}
                               className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between gap-2"
@@ -1966,6 +2056,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                               </Popconfirm>
                             </div>
                           ))}
+                          <ShowMoreButton remaining={dbGroupsList.remaining} onClick={dbGroupsList.showMore} />
                         </div>
                       )}
 
@@ -1994,18 +2085,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                       <Input.TextArea
                         rows={10}
                         readOnly
-                        value={(() => {
-                          const all: string[] = [];
-                          for (const p of currentScannedPages) {
-                            all.push(`${p.id} | ${p.name || ''}`);
-                          }
-                          for (const p of currentDbPages) {
-                            if (!currentScannedPages.some((s) => s.id === p.platformAccountId)) {
-                              all.push(`${p.platformAccountId} | ${p.pageName || ''}`);
-                            }
-                          }
-                          return all.join('\n');
-                        })()}
+                        value={exportLines.join('\n')}
                         className="bg-slate-950 border-slate-700 text-slate-200 font-mono text-xs rounded-xl"
                       />
 
@@ -2013,17 +2093,8 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                         type="primary"
                         icon={<CopyOutlined />}
                         onClick={() => {
-                          const all: string[] = [];
-                          for (const p of currentScannedPages) {
-                            all.push(`${p.id} | ${p.name || ''}`);
-                          }
-                          for (const p of currentDbPages) {
-                            if (!currentScannedPages.some((s) => s.id === p.platformAccountId)) {
-                              all.push(`${p.platformAccountId} | ${p.pageName || ''}`);
-                            }
-                          }
-                          navigator.clipboard.writeText(all.join('\n'));
-                          message.success(`Đã sao chép ${all.length} dòng ID Fanpage!`);
+                          navigator.clipboard.writeText(exportLines.join('\n'));
+                          message.success(`Đã sao chép ${exportLines.length} dòng ID Fanpage!`);
                         }}
                         className="bg-cyan-600 hover:bg-cyan-500 text-xs font-semibold rounded-xl"
                       >
