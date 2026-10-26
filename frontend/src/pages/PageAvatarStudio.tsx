@@ -186,7 +186,12 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       }
 
       // Gộp thêm danh sách Fanpage từ bộ nhớ Cache quét Playwright
-      const scannedList = cachedPagesMap[uid] || [];
+      const rawCache = cachedPagesMap[uid];
+      const scannedList = Array.isArray(rawCache)
+        ? rawCache
+        : Array.isArray((rawCache as any)?.pages)
+        ? (rawCache as any).pages
+        : [];
       for (const sp of scannedList) {
         const pid = sp.id || sp.platformAccountId;
         if (!pid || seenPageIds.has(String(pid))) continue;
@@ -287,7 +292,15 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       .get('/buff-cached-pages')
       .then((res) => {
         if (res.data?.cache) {
-          setCachedPagesMap(res.data.cache);
+          const pageMap: Record<string, any[]> = {};
+          for (const [uid, item] of Object.entries(res.data.cache as Record<string, any>)) {
+            if (Array.isArray(item?.pages)) {
+              pageMap[uid] = item.pages;
+            } else if (Array.isArray(item)) {
+              pageMap[uid] = item;
+            }
+          }
+          setCachedPagesMap(pageMap);
         }
       })
       .catch(() => {});
