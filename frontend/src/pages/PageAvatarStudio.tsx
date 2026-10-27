@@ -48,6 +48,7 @@ import {
   AppstoreOutlined,
 } from '@ant-design/icons';
 import api from '../config/axios';
+import { cleanPageName } from './BuffEngagement';
 
 const WORKER_BASE_URL =
   import.meta.env.VITE_WORKER_BASE_URL ||
@@ -200,7 +201,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
         pages.push({
           id: pid,
           platformAccountId: String(pid),
-          pageName: sp.name || sp.pageName || `Fanpage ${pid}`,
+          pageName: cleanPageName(sp.name || sp.pageName) || `Fanpage ${pid}`,
           platform: 'FACEBOOK_PAGE',
           accountType: 'PERSONAL_COOKIE',
           tokenStatus: 'OK',
@@ -822,7 +823,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       render: (name, record) => (
         <div>
           <div className="font-semibold text-slate-200 text-sm hover:text-cyan-400 transition-colors flex items-center gap-1.5">
-            <span>{name}</span>
+            <span>{cleanPageName(name)}</span>
             <a
               href={`https://facebook.com/${record.platformAccountId}`}
               target="_blank"

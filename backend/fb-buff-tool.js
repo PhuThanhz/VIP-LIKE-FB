@@ -412,9 +412,19 @@ async function scanProfileSwitcherPages(page, uid) {
 
     const names = await dialog.evaluate((dlg) => {
       const noise = /^(Xem thêm trang|See more pages|Tạo|Create|Đi đến Trung tâm tài khoản|Go to Accounts Center|\d+ thông báo|Tìm kiếm.*)$/i;
+      const cleanName = (str) => {
+        if (!str) return '';
+        return str
+          .replace(/^(?:Chưa đọc|Unread)[\s\S]*?[·•]\s*/i, '')
+          .replace(/(?:\r?\n|^)\s*\d+\s*(?:thông báo|tin nhắn|notifications?|messages?)[^\n]*/gi, '')
+          .replace(/^[·•\s-]+|[·•\s-]+$/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      };
       const set = new Set();
       dlg.querySelectorAll('[role="listitem"], [role="radio"], [role="button"], a').forEach((e) => {
-        const t = (e.innerText || '').split('\n')[0].trim();
+        const raw = (e.innerText || '').split('\n')[0].trim();
+        const t = cleanName(raw);
         if (t && t.length > 1 && t.length < 80 && !noise.test(t)) set.add(t);
       });
       return [...set];
@@ -434,7 +444,8 @@ async function scanProfileSwitcherPages(page, uid) {
         if (m && m[1] !== String(uid)) id = m[1];
       }
       if (!id || id === String(uid)) continue;
-      results.push({ id, name, url: url || `https://www.facebook.com/profile.php?id=${id}` });
+      const cleanUrl = (url || `https://www.facebook.com/profile.php?id=${id}`).split('&sk=')[0].split('&notif_id')[0].split('?notif_id')[0];
+      results.push({ id, name, url: cleanUrl });
     }
     return results;
   } finally {
@@ -533,8 +544,10 @@ async function getManagedPages(cookieStr, options = {}) {
       const cleanPageName = (raw) => {
         if (!raw) return '';
         let cleaned = raw
+          .replace(/^(?:Chưa đọc|Unread)[\s\S]*?[·•]\s*/i, '')
           .replace(/(?:\r?\n|^)\s*\d+\s*(?:thông báo|tin nhắn|notifications?|messages?)[^\n]*/gi, '')
           .replace(/(?:\r?\n|^)\s*(?:Chuyển sang|Chuyển ngay|Switch into|Switch now|Quản lý|Manage|Xem trang)[^\n]*/gi, '')
+          .replace(/^[·•\s-]+|[·•\s-]+$/g, '')
           .replace(/\s+/g, ' ')
           .trim();
         return cleaned;
@@ -600,6 +613,7 @@ async function getManagedPages(cookieStr, options = {}) {
       const results = [];
       for (const [id, item] of pageMap.entries()) {
         item.name = cleanPageName(item.name);
+        item.url = (item.url || `https://www.facebook.com/profile.php?id=${id}`).split('&sk=')[0].split('&notif_id')[0].split('?notif_id')[0];
         if (!item.name || noiseRegex.test(item.name)) {
           item.name = `Fanpage (${id.slice(-4)})`;
         }

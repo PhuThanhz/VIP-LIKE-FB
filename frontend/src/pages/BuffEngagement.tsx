@@ -70,6 +70,7 @@ interface FanpageItem {
   id: string;
   name: string;
   url: string;
+  avatarUrl?: string;
   viaAccountId?: number | 'CUSTOM';
   viaName?: string;
   viaCookie?: string;
@@ -428,9 +429,22 @@ const REACTIONS = [
   { key: 'ANGRY', label: 'Phẫn nộ (Angry)', emoji: '😡', color: '#e9710f' },
 ];
 
+export function cleanPageName(raw: string): string {
+  if (!raw || typeof raw !== 'string') return '';
+  let cleaned = raw
+    .replace(/^(?:Chưa đọc|Unread)[\s\S]*?[·•]\s*/i, '')
+    .replace(/(?:\r?\n|^)\s*\d+\s*(?:thông báo|tin nhắn|notifications?|messages?)[^\n]*/gi, '')
+    .replace(/(?:\r?\n|^)\s*(?:Chuyển sang|Chuyển ngay|Switch into|Switch now|Quản lý|Manage|Xem trang)[^\n]*/gi, '')
+    .replace(/^[·•\s-]+|[·•\s-]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || raw.trim();
+}
+
 const getInitials = (name: string): string => {
   if (!name) return 'FP';
-  const parts = name.trim().split(/\s+/);
+  const clean = cleanPageName(name);
+  const parts = clean.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
@@ -460,7 +474,11 @@ function getStoredPagesForVia(viaKey: string): FanpageItem[] {
     if (!raw) return [];
     const map = JSON.parse(raw);
     const pages = map[viaKey];
-    return Array.isArray(pages) ? pages : [];
+    if (!Array.isArray(pages)) return [];
+    return pages.map((p) => ({
+      ...p,
+      name: cleanPageName(p.name),
+    }));
   } catch {
     return [];
   }
@@ -519,6 +537,19 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [fastSwitch, setFastSwitch] = useState<boolean>(true);
   const [antiCheckpointGuard, setAntiCheckpointGuard] = useState<boolean>(true);
   const [isAiGeneratingComments, setIsAiGeneratingComments] = useState<boolean>(false);
+  const [avatarCacheMap, setAvatarCacheMap] = useState<Record<string, { pageId: string; name?: string; avatarUrl?: string; hasAvatar?: boolean }>>({});
+
+  // Tải trạng thái và URL Avatar của các Fanpage
+  useEffect(() => {
+    api
+      .get('/avatars/cached-status')
+      .then((res) => {
+        if (res.data?.results) {
+          setAvatarCacheMap(res.data.results);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Nhận link bài viết tự động truyền từ Job Kinh Tế
   useEffect(() => {
@@ -2725,6 +2756,12 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[360px] overflow-y-auto pr-1">
                             {filteredPages.map((page) => {
                               const isChecked = selectedPageIds.includes(page.id);
+                              const cleanName = cleanPageName(page.name);
+                              const avatarInfo = avatarCacheMap[page.id];
+                              const avatarUrl =
+                                page.avatarUrl ||
+                                avatarInfo?.avatarUrl ||
+                                (page.id ? `https://graph.facebook.com/${page.id}/picture?type=square` : '');
                               return (
                                 <div
                                   key={page.id}
@@ -2742,18 +2779,30 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   }`}
                                 >
                                   <div className="flex items-center gap-2 min-w-0">
-                                    <div
-                                      className={`w-7 h-7 shrink-0 rounded-lg text-on-accent font-semibold text-[10px] flex items-center justify-center ${
-                                        actorMode === 'VIAS'
-                                          ? 'bg-emerald-600'
-                                          : getAvatarGradient(page.name)
-                                      } shadow-sm`}
-                                    >
-                                      {getInitials(page.name)}
+                                    <div className="relative w-7 h-7 shrink-0 rounded-lg overflow-hidden bg-slate-800 border border-slate-700/60 shadow-sm flex items-center justify-center">
+                                      {avatarUrl ? (
+                                        <img
+                                          src={avatarUrl}
+                                          alt={cleanName}
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => {
+                                            (e.target as HTMLElement).style.display = 'none';
+                                            const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
+                                            if (fallback) fallback.classList.remove('hidden');
+                                          }}
+                                        />
+                                      ) : null}
+                                      <div
+                                        className={`w-full h-full text-on-accent font-semibold text-[10px] items-center justify-center ${
+                                          actorMode === 'VIAS' ? 'bg-emerald-600' : getAvatarGradient(cleanName)
+                                        } ${avatarUrl ? 'hidden' : 'flex'}`}
+                                      >
+                                        {getInitials(cleanName)}
+                                      </div>
                                     </div>
                                     <div className="min-w-0">
-                                      <div className="font-bold text-xs truncate max-w-[125px] sm:max-w-[135px]" title={page.name}>
-                                        {page.name}
+                                      <div className="font-bold text-xs truncate max-w-[125px] sm:max-w-[135px]" title={cleanName}>
+                                        {cleanName}
                                       </div>
                                       <div className="flex items-center gap-1 text-[10px] font-mono text-slate-400 truncate">
                                         <span>ID: {page.id}</span>
@@ -3293,28 +3342,52 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                     }`}
                                   >
                                     <div className="flex items-center gap-2 min-w-0 flex-1">
-                                      <div
-                                        className={`w-6 h-6 shrink-0 rounded-lg text-on-accent font-semibold text-[9px] flex items-center justify-center ${getAvatarGradient(
-                                          detail.pageName
-                                        )} shadow-sm`}
-                                      >
-                                        {getInitials(detail.pageName)}
-                                      </div>
-                                      <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-1.5">
-                                          <span className="font-bold text-xs text-slate-100 truncate">
-                                            {detail.pageName}
-                                          </span>
-                                          {engagementMode !== 'COMMENT_ONLY' && (
-                                            <span className="text-xs">{reactionObj.emoji}</span>
-                                          )}
-                                        </div>
-                                        {detail.commentText && (
-                                          <div className="text-[10px] text-blue-300 italic truncate max-w-[240px]">
-                                            "{detail.commentText}"
-                                          </div>
-                                        )}
-                                      </div>
+                                      {(() => {
+                                        const cleanDetailName = cleanPageName(detail.pageName);
+                                        const detailAvatar =
+                                          avatarCacheMap[detail.pageId]?.avatarUrl ||
+                                          (detail.pageId ? `https://graph.facebook.com/${detail.pageId}/picture?type=square` : '');
+                                        return (
+                                          <>
+                                            <div className="relative w-6 h-6 shrink-0 rounded-lg overflow-hidden bg-slate-800 border border-slate-700/60 shadow-sm flex items-center justify-center">
+                                              {detailAvatar ? (
+                                                <img
+                                                  src={detailAvatar}
+                                                  alt={cleanDetailName}
+                                                  className="w-full h-full object-cover"
+                                                  onError={(e) => {
+                                                    (e.target as HTMLElement).style.display = 'none';
+                                                    const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
+                                                    if (fallback) fallback.classList.remove('hidden');
+                                                  }}
+                                                />
+                                              ) : null}
+                                              <div
+                                                className={`w-full h-full text-on-accent font-semibold text-[9px] items-center justify-center ${getAvatarGradient(
+                                                  cleanDetailName
+                                                )} ${detailAvatar ? 'hidden' : 'flex'}`}
+                                              >
+                                                {getInitials(cleanDetailName)}
+                                              </div>
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                              <div className="flex items-center gap-1.5">
+                                                <span className="font-bold text-xs text-slate-100 truncate" title={cleanDetailName}>
+                                                  {cleanDetailName}
+                                                </span>
+                                                {engagementMode !== 'COMMENT_ONLY' && (
+                                                  <span className="text-xs">{reactionObj.emoji}</span>
+                                                )}
+                                              </div>
+                                              {detail.commentText && (
+                                                <div className="text-[10px] text-blue-300 italic truncate max-w-[240px]">
+                                                  "{detail.commentText}"
+                                                </div>
+                                              )}
+                                            </div>
+                                          </>
+                                        );
+                                      })()}
                                     </div>
 
                                     <div className="shrink-0">
