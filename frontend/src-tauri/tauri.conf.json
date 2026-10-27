@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "VIPLIKE RADIANT v2.0 - Hệ Thống Nuôi & Tăng Tương Tác Facebook Chuyên Nghiệp",
         "width": 1360,
         "height": 880,

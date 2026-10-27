@@ -1,16 +1,25 @@
 import axios from 'axios';
 
+export const getSafeHost = (): string => {
+  if (typeof window === 'undefined') return '127.0.0.1';
+  const h = window.location.hostname;
+  if (!h || h.includes('tauri') || h === 'localhost' || h === '127.0.0.1') {
+    return '127.0.0.1';
+  }
+  return h;
+};
+
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
-  `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3100/api`;
+  `http://${getSafeHost()}:3100/api`;
 
 export const WORKER_BASE_URL =
   import.meta.env.VITE_WORKER_BASE_URL ||
-  `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3100`;
+  `http://${getSafeHost()}:3100`;
 
 export const SPRING_API_BASE_URL =
   import.meta.env.VITE_SPRING_API_BASE_URL ||
-  `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:8080/api`;
+  `http://${getSafeHost()}:8080/api`;
 
 const api = axios.create({
   baseURL: API_BASE_URL,

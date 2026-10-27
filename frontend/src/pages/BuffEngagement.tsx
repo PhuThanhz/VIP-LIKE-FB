@@ -53,7 +53,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import api from '../config/axios';
+import api, { WORKER_BASE_URL } from '../config/axios';
 import PasteLinkInput from '../components/common/PasteLinkInput';
 
 import PostHunterTab from '../components/buff/PostHunterTab';
@@ -61,10 +61,6 @@ import ViaManagementPage from './ViaManagementPage';
 import PageAvatarStudio from './PageAvatarStudio';
 import SystemSettingsPage from './SystemSettingsPage';
 import LicenseManagementPage from './LicenseManagementPage';
-
-const WORKER_BASE_URL =
-  import.meta.env.VITE_WORKER_BASE_URL ||
-  `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3100`;
 
 interface FanpageItem {
   id: string;

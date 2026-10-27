@@ -47,12 +47,8 @@ import {
   CrownOutlined,
   AppstoreOutlined,
 } from '@ant-design/icons';
-import api from '../config/axios';
+import api, { WORKER_BASE_URL } from '../config/axios';
 import { cleanPageName } from './BuffEngagement';
-
-const WORKER_BASE_URL =
-  import.meta.env.VITE_WORKER_BASE_URL ||
-  `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3100`;
 
 interface ChildPageItem {
   id: number | string;
