@@ -13,12 +13,9 @@ import {
   MenuUnfoldOutlined,
   MenuFoldOutlined,
   UserOutlined,
-  SunOutlined,
-  MoonOutlined,
   LogoutOutlined,
 } from '@ant-design/icons';
 import AuthModal, { CurrentUser } from './auth/AuthModal';
-import { useThemeMode } from '../theme/ThemeContext';
 
 
 export interface HeaderDbStatus {
@@ -100,7 +97,6 @@ export const Header: React.FC<HeaderProps> = ({
   onUserChange,
 }) => {
   const currentTab = TAB_TITLES[activeTabKey] || TAB_TITLES['buff-like'];
-  const { isLight, toggleTheme } = useThemeMode();
 
   const [localUser, setLocalUser] = useState<CurrentUser | null>(() => {
     try {
@@ -126,39 +122,31 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className={`border-b sticky top-0 z-20 px-4 sm:px-6 py-3 transition-colors duration-200 ${
-      isLight ? 'bg-white/95 border-slate-200/90 shadow-sm backdrop-blur-md' : 'bg-slate-900/90 border-slate-800/80 backdrop-blur-xl'
-    }`}>
+    <header className="border-b sticky top-0 z-20 px-4 sm:px-6 py-3 bg-slate-900/90 border-slate-800/80 backdrop-blur-xl">
       <div className="flex items-center justify-between gap-4">
         {/* Left: Collapse toggle + Active Page Title & Breadcrumb */}
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <Button
             type="text"
-            icon={collapsed ? <MenuUnfoldOutlined className={isLight ? 'text-slate-600 text-base' : 'text-slate-300 text-base'} /> : <MenuFoldOutlined className={isLight ? 'text-slate-600 text-base' : 'text-slate-300 text-base'} />}
+            icon={collapsed ? <MenuUnfoldOutlined className="text-slate-300 text-base" /> : <MenuFoldOutlined className="text-slate-300 text-base" />}
             onClick={onToggleCollapse}
-            className={`rounded-xl w-9 h-9 flex items-center justify-center p-0 shrink-0 ${
-              isLight ? 'hover:bg-slate-100' : 'hover:bg-slate-800'
-            }`}
+            className="rounded-xl w-9 h-9 flex items-center justify-center p-0 shrink-0 hover:bg-slate-800"
           />
 
           <div className="min-w-[120px] flex-1">
             <div className="flex items-center gap-2" title={currentTab.title}>
               <span className="shrink-0">{currentTab.icon}</span>
-              <h2 className={`text-sm sm:text-base font-bold tracking-wide m-0 leading-snug line-clamp-2 ${
-                isLight ? 'text-slate-800' : 'text-slate-100'
-              }`}>
+              <h2 className="text-sm sm:text-base font-bold tracking-wide m-0 leading-snug line-clamp-2 text-slate-100">
                 {currentTab.title}
               </h2>
             </div>
-            <p className={`text-[11px] hidden sm:block m-0 truncate ${
-              isLight ? 'text-slate-500' : 'text-slate-400'
-            }`}>
+            <p className="text-[11px] hidden sm:block m-0 truncate text-slate-400">
               {currentTab.subtitle}
             </p>
           </div>
         </div>
 
-        {/* Right Controls: Database status + Via manager + Settings + Theme + Auth */}
+        {/* Right Controls: Database status + Via manager + Settings + Auth */}
         <div className="flex items-center gap-2 xl:gap-3 shrink-0">
           {/* MySQL Status Pill */}
           <Tooltip
@@ -174,10 +162,10 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={onCheckDb}
               className={`cursor-pointer px-2.5 2xl:px-3 h-9 rounded-xl border text-xs flex items-center gap-2 transition-all shadow-sm ${
                 dbStatus.connected
-                  ? isLight ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-emerald-950/30 border-emerald-700/50 text-emerald-300 hover:bg-emerald-950/50'
+                  ? 'bg-emerald-950/30 border-emerald-700/50 text-emerald-300 hover:bg-emerald-950/50'
                   : dbStatus.usingCache
-                  ? isLight ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100' : 'bg-amber-950/30 border-amber-700/50 text-amber-300 hover:bg-amber-950/50'
-                  : isLight ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100' : 'bg-rose-950/30 border-rose-700/50 text-rose-300 hover:bg-rose-950/50'
+                  ? 'bg-amber-950/30 border-amber-700/50 text-amber-300 hover:bg-amber-950/50'
+                  : 'bg-rose-950/30 border-rose-700/50 text-rose-300 hover:bg-rose-950/50'
               }`}
             >
               <DatabaseOutlined
@@ -219,11 +207,7 @@ export const Header: React.FC<HeaderProps> = ({
               icon={<IdcardOutlined className="text-cyan-500" />}
               onClick={onOpenViaManager}
               aria-label="Quản lý Via & Cookie"
-              className={`text-xs font-semibold rounded-xl h-9 px-2.5 2xl:px-3 border ${
-                isLight
-                  ? 'bg-white border-slate-200 text-slate-700 hover:border-cyan-500 hover:text-cyan-600'
-                  : 'bg-slate-800 border-slate-700 text-slate-200 hover:border-cyan-500'
-              }`}
+              className="text-xs font-semibold rounded-xl h-9 px-2.5 2xl:px-3 border bg-slate-800 border-slate-700 text-slate-200 hover:border-cyan-500"
             >
               <span className="hidden 2xl:inline">Quản lý Via & Cookie</span>
             </Button>
@@ -233,33 +217,15 @@ export const Header: React.FC<HeaderProps> = ({
           {onOpenSettings && (
             <Tooltip title="Cài Đặt">
               <Button
-                icon={<SettingOutlined className={isLight ? 'text-slate-600' : 'text-slate-300'} />}
+                icon={<SettingOutlined className="text-slate-300" />}
                 onClick={onOpenSettings}
                 aria-label="Cài Đặt"
-                className={`text-xs rounded-xl h-9 px-2.5 2xl:px-3 border ${
-                  isLight
-                    ? 'bg-white border-slate-200 text-slate-700 hover:border-slate-400'
-                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
-                }`}
+                className="text-xs rounded-xl h-9 px-2.5 2xl:px-3 border bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600"
               >
                 <span className="hidden 2xl:inline">Cài Đặt</span>
               </Button>
             </Tooltip>
           )}
-
-          {/* Light / Dark toggle */}
-          <Tooltip title={isLight ? 'Chuyển sang giao diện Tối' : 'Chuyển sang giao diện Sáng'}>
-            <Button
-              aria-label="Chuyển giao diện Sáng/Tối"
-              icon={isLight ? <MoonOutlined className="text-indigo-600 text-sm" /> : <SunOutlined className="text-amber-400 text-sm" />}
-              onClick={toggleTheme}
-              className={`rounded-xl h-9 w-9 p-0 flex items-center justify-center border shadow-sm ${
-                isLight
-                  ? 'bg-white border-slate-200 hover:border-cyan-500'
-                  : 'bg-slate-800 border-slate-700 hover:border-cyan-500'
-              }`}
-            />
-          </Tooltip>
 
           {/* User Profile Dropdown when logged in, or Login button if not */}
           {currentUser ? (
@@ -304,11 +270,7 @@ export const Header: React.FC<HeaderProps> = ({
               placement="bottomRight"
             >
               <Button
-                className={`border text-xs rounded-xl h-9 px-2.5 flex items-center gap-2 cursor-pointer shadow-sm ${
-                  isLight
-                    ? 'bg-white border-slate-200 text-slate-800 hover:border-cyan-500'
-                    : 'bg-slate-800 border-slate-700 text-white hover:border-cyan-500'
-                }`}
+                className="border text-xs rounded-xl h-9 px-2.5 flex items-center gap-2 cursor-pointer shadow-sm bg-slate-800 border-slate-700 text-white hover:border-cyan-500"
               >
                 <Avatar
                   size={24}

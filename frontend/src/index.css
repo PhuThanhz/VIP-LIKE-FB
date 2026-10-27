@@ -42,45 +42,6 @@
   --menu-selected-shadow: 0 2px 14px rgba(56, 189, 248, 0.12);
 }
 
-/* Chế độ Sáng: trắng sạch, nhấn xanh dương */
-html.light {
-  --bg-primary: #f5f7fb;
-  --bg-secondary: #ffffff;
-  --glass-bg: rgba(255, 255, 255, 0.85);
-  --glass-border: #e6e9f0;
-  --glass-shadow: 0 4px 20px rgba(15, 23, 42, 0.06);
-  --accent-cyan: #0891b2;
-  --accent-blue: #2563eb;
-  --accent-emerald: #059669;
-
-  --text: #0f172a;
-  --text-strong: #0f172a;
-  --text-body: #1e293b;
-  --text-muted: #64748b;
-  --accent: #2563eb;
-  --accent-soft: rgba(37, 99, 235, 0.15);
-  --border: #e6e9f0;
-  --border-soft: #eef2f7;
-  --border-input: #d8dee8;
-  --surface-grad: #ffffff;
-  --surface-shadow: 0 4px 20px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
-  --surface-hover-border: rgba(37, 99, 235, 0.3);
-  --card-bg: #ffffff;
-  --table-head-bg: #f8fafc;
-  --row-hover: #f5f8ff;
-  --modal-bg: #ffffff;
-  --modal-border: #e6e9f0;
-  --modal-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
-  --input-bg: #ffffff;
-  --scroll-track: #f1f5f9;
-  --scroll-thumb: #cbd5e1;
-  --scroll-thumb-hover: #94a3b8;
-  --menu-hover-bg: #f1f5f9;
-  --menu-selected-bg: #eff6ff;
-  --menu-selected-border: #bfdbfe;
-  --menu-selected-shadow: 0 1px 3px rgba(37, 99, 235, 0.08);
-}
-
 body {
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background-color: var(--bg-primary);

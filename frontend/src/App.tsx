@@ -6,7 +6,7 @@ import Header from './components/Header';
 import Sidebar, { SidebarStats, SidebarDbStatus } from './components/Sidebar';
 import BuffEngagement from './pages/BuffEngagement';
 import api from './config/axios';
-import { ThemeProvider, useThemeMode } from './theme/ThemeContext';
+import { ThemeProvider } from './theme/ThemeContext';
 import LoginPage, { CurrentUser } from './components/auth/LoginPage';
 
 const { Content } = Layout;
@@ -184,80 +184,53 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
 const DARK_THEME: ThemeConfig = {
   algorithm: theme.darkAlgorithm,
   token: {
-    colorPrimary: '#38bdf8',
-    colorBgBase: '#0f172a',
-    colorBgContainer: '#1e293b',
+    colorPrimary: '#06b6d4',
+    colorBgBase: '#090d16',
+    colorBgContainer: '#0f172a',
     colorBgElevated: '#1e293b',
-    colorBorder: 'rgba(255, 255, 255, 0.12)',
-    colorBorderSecondary: 'rgba(255, 255, 255, 0.08)',
+    colorBorder: 'rgba(255, 255, 255, 0.08)',
+    colorBorderSecondary: 'rgba(255, 255, 255, 0.05)',
     colorText: '#f8fafc',
     colorTextSecondary: '#94a3b8',
     borderRadius: 12,
     fontFamily: "'Plus Jakarta Sans', sans-serif",
   },
   components: {
+    Card: {
+      colorBgContainer: '#0f172a',
+      colorBorderSecondary: 'rgba(255, 255, 255, 0.08)',
+    },
     Menu: {
       itemBg: 'transparent',
-      itemSelectedBg: 'rgba(56, 189, 248, 0.16)',
-      itemSelectedColor: '#38bdf8',
+      itemSelectedBg: 'rgba(6, 182, 212, 0.16)',
+      itemSelectedColor: '#22d3ee',
       itemHoverBg: 'rgba(255, 255, 255, 0.06)',
       itemHoverColor: '#f8fafc',
       itemActiveBg: 'transparent',
       itemMarginInline: 6,
       itemBorderRadius: 12,
       darkItemBg: 'transparent',
-      darkItemSelectedBg: 'rgba(56, 189, 248, 0.16)',
-      darkItemSelectedColor: '#38bdf8',
+      darkItemSelectedBg: 'rgba(6, 182, 212, 0.16)',
+      darkItemSelectedColor: '#22d3ee',
       darkItemHoverBg: 'rgba(255, 255, 255, 0.06)',
     },
     Layout: {
-      siderBg: '#0f172a',
-      bodyBg: '#0b1329',
-      headerBg: '#0f172a',
+      siderBg: '#090d16',
+      bodyBg: '#050811',
+      headerBg: '#090d16',
     },
-  },
-};
-
-const LIGHT_THEME: ThemeConfig = {
-  algorithm: theme.defaultAlgorithm,
-  token: {
-    colorPrimary: '#0284c7',
-    colorBgBase: '#f8fafc',
-    colorBgContainer: '#ffffff',
-    colorBgElevated: '#ffffff',
-    colorBorder: '#e2e8f0',
-    colorBorderSecondary: '#f1f5f9',
-    colorText: '#0f172a',
-    colorTextSecondary: '#475569',
-    borderRadius: 12,
-    fontFamily: "'Plus Jakarta Sans', sans-serif",
-  },
-  components: {
-    Card: {
-      colorBgContainer: '#ffffff',
-      colorBorderSecondary: '#e2e8f0',
+    Table: {
+      headerBg: '#090d16',
+      rowHoverBg: 'rgba(6, 182, 212, 0.06)',
     },
-    Menu: {
-      itemBg: 'transparent',
-      itemSelectedBg: '#e0f2fe',
-      itemSelectedColor: '#0284c7',
-      itemHoverBg: '#f1f5f9',
-      itemHoverColor: '#0f172a',
-      itemActiveBg: 'transparent',
-      itemColor: '#334155',
-      itemMarginInline: 6,
-      itemBorderRadius: 12,
-    },
-    Layout: {
-      siderBg: '#ffffff',
-      bodyBg: '#f8fafc',
-      headerBg: '#ffffff',
+    Input: {
+      colorBgContainer: '#090d16',
+      activeBorderColor: '#06b6d4',
     },
   },
 };
 
 const ThemedApp: React.FC = () => {
-  const { isLight } = useThemeMode();
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() => {
     try {
       const saved = localStorage.getItem('viplike_user');
@@ -274,7 +247,7 @@ const ThemedApp: React.FC = () => {
   }, []);
 
   return (
-    <ConfigProvider theme={isLight ? LIGHT_THEME : DARK_THEME}>
+    <ConfigProvider theme={DARK_THEME}>
       <AntdApp>
         {!currentUser ? (
           <LoginPage onLoginSuccess={setCurrentUser} />

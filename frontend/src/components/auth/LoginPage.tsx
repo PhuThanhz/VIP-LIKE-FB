@@ -5,13 +5,10 @@ import {
   LockOutlined,
   ThunderboltFilled,
   CrownOutlined,
-  SunOutlined,
-  MoonOutlined,
   KeyOutlined,
   CheckCircleOutlined,
   RocketOutlined,
 } from '@ant-design/icons';
-import { useThemeMode } from '../../theme/ThemeContext';
 import api from '../../config/axios';
 import { getMachineHwid } from '../../utils/tauriBridge';
 
@@ -29,7 +26,6 @@ interface LoginPageProps {
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnected = true }) => {
-  const { isLight, toggleTheme } = useThemeMode();
   const [activeTab, setActiveTab] = useState<'login' | 'quick' | 'license'>('login');
   const [loading, setLoading] = useState(false);
   const [hwid, setHwid] = useState('');
@@ -144,13 +140,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
   };
 
   return (
-    <div className={`min-h-screen flex flex-col justify-between transition-colors duration-300 ${
-      isLight ? 'bg-slate-50 text-slate-800' : 'bg-slate-950 text-slate-100'
-    }`}>
+    <div className="min-h-screen flex flex-col justify-between bg-slate-950 text-slate-100">
       {/* Top Bar */}
-      <header className={`px-6 py-4 flex items-center justify-between border-b backdrop-blur-xl ${
-        isLight ? 'bg-white/80 border-slate-200' : 'bg-slate-900/60 border-slate-800/80'
-      }`}>
+      <header className="px-6 py-4 flex items-center justify-between border-b bg-slate-900/60 border-slate-800/80 backdrop-blur-xl">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-md shadow-cyan-500/20 text-white font-bold">
             <ThunderboltFilled className="text-lg" />
@@ -166,21 +158,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
         <div className="flex items-center gap-3">
           <div className={`text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5 font-mono border ${
             dbConnected
-              ? isLight ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-emerald-950/40 text-emerald-400 border-emerald-800/60'
-              : isLight ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-amber-950/40 text-amber-400 border-amber-800/60'
+              ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/60'
+              : 'bg-amber-950/40 text-amber-400 border-amber-800/60'
           }`}>
             <span className={`w-2 h-2 rounded-full ${dbConnected ? 'bg-emerald-500' : 'bg-amber-500'} animate-pulse`} />
             <span>MySQL: {dbConnected ? 'ONLINE' : 'CACHE'}</span>
           </div>
-
-          <Tooltip title={isLight ? 'Chuyển sang giao diện Tối' : 'Chuyển sang giao diện Sáng'}>
-            <Button
-              shape="circle"
-              icon={isLight ? <MoonOutlined className="text-indigo-600" /> : <SunOutlined className="text-amber-400" />}
-              onClick={toggleTheme}
-              className={isLight ? 'border-slate-300 bg-white hover:bg-slate-100' : 'border-slate-700 bg-slate-900 hover:bg-slate-800'}
-            />
-          </Tooltip>
         </div>
       </header>
 
@@ -189,11 +172,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
         <div className="w-full max-w-md">
           <Card
             bordered
-            className={`shadow-2xl rounded-3xl transition-all duration-300 ${
-              isLight
-                ? '!bg-white !border-slate-200 shadow-slate-200/80'
-                : '!bg-slate-900/90 !border-slate-800 shadow-cyan-950/20'
-            }`}
+            className="shadow-2xl rounded-3xl !bg-slate-900/90 !border-slate-800 shadow-cyan-950/20"
           >
             {/* Header Badge & Brand */}
             <div className="text-center pb-4">
@@ -202,9 +181,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                 icon={<CrownOutlined />}
                 className="bg-gradient-to-tr from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/25 mb-3"
               />
-              <h1 className={`text-xl font-black tracking-tight mb-1 ${
-                isLight ? 'text-slate-900' : 'text-white'
-              }`}>
+              <h1 className="text-xl font-black tracking-tight mb-1 text-white">
                 ĐĂNG NHẬP HỆ THỐNG
               </h1>
               <p className="text-xs text-slate-400">
@@ -270,7 +247,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                         <button
                           type="button"
                           onClick={() => setActiveTab('quick')}
-                          className="text-xs text-cyan-600 hover:text-cyan-500 font-medium underline"
+                          className="text-xs text-cyan-400 hover:text-cyan-300 font-medium underline cursor-pointer"
                         >
                           Hoặc sử dụng Đăng Nhập Nhanh 1-Chạm (Khuyên Dùng) &rarr;
                         </button>
@@ -291,11 +268,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                         block
                         size="large"
                         onClick={() => handleQuickLogin('thanhan')}
-                        className={`h-auto py-3 px-4 rounded-2xl flex items-center justify-between border transition-all text-left ${
-                          isLight
-                            ? 'bg-cyan-50/70 border-cyan-200 hover:bg-cyan-100/70 hover:border-cyan-400'
-                            : 'bg-cyan-950/40 border-cyan-700/60 hover:bg-cyan-900/60 hover:border-cyan-500'
-                        }`}
+                        className="h-auto py-3 px-4 rounded-2xl flex items-center justify-between border transition-all text-left bg-cyan-950/40 border-cyan-700/60 hover:bg-cyan-900/60 hover:border-cyan-500"
                       >
                         <div className="flex items-center gap-3">
                           <Avatar
@@ -304,7 +277,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                             icon={<CrownOutlined />}
                           />
                           <div>
-                            <div className="font-bold text-xs text-cyan-600 dark:text-cyan-300">
+                            <div className="font-bold text-xs text-cyan-300">
                               Thành An (Nick Mẹ)
                             </div>
                             <div className="text-[11px] text-slate-400">UID: 100023403136194 • 512 Fanpage</div>
@@ -319,11 +292,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                         block
                         size="large"
                         onClick={() => handleQuickLogin('admin')}
-                        className={`h-auto py-3 px-4 rounded-2xl flex items-center justify-between border transition-all text-left ${
-                          isLight
-                            ? 'bg-blue-50/70 border-blue-200 hover:bg-blue-100/70 hover:border-blue-400'
-                            : 'bg-blue-950/40 border-blue-700/60 hover:bg-blue-900/60 hover:border-blue-500'
-                        }`}
+                        className="h-auto py-3 px-4 rounded-2xl flex items-center justify-between border transition-all text-left bg-blue-950/40 border-blue-700/60 hover:bg-blue-900/60 hover:border-blue-500"
                       >
                         <div className="flex items-center gap-3">
                           <Avatar
@@ -332,7 +301,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                             icon={<CheckCircleOutlined />}
                           />
                           <div>
-                            <div className="font-bold text-xs text-blue-600 dark:text-blue-300">
+                            <div className="font-bold text-xs text-blue-300">
                               Quản Trị Viên VIPLIKE
                             </div>
                             <div className="text-[11px] text-slate-400">Toàn quyền cấu hình & Bản quyền</div>
@@ -347,11 +316,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                         block
                         size="large"
                         onClick={() => handleQuickLogin('phu')}
-                        className={`h-auto py-3 px-4 rounded-2xl flex items-center justify-between border transition-all text-left ${
-                          isLight
-                            ? 'bg-purple-50/70 border-purple-200 hover:bg-purple-100/70 hover:border-purple-400'
-                            : 'bg-purple-950/40 border-purple-700/60 hover:bg-purple-900/60 hover:border-purple-500'
-                        }`}
+                        className="h-auto py-3 px-4 rounded-2xl flex items-center justify-between border transition-all text-left bg-purple-950/40 border-purple-700/60 hover:bg-purple-900/60 hover:border-purple-500"
                       >
                         <div className="flex items-center gap-3">
                           <Avatar
@@ -360,7 +325,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                             icon={<RocketOutlined />}
                           />
                           <div>
-                            <div className="font-bold text-xs text-purple-600 dark:text-purple-300">
+                            <div className="font-bold text-xs text-purple-300">
                               Huỳnh Thạnh Phú
                             </div>
                             <div className="text-[11px] text-slate-400">UID: 100008447847970 • 25 Fanpage</div>
@@ -383,11 +348,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                       onFinish={handleActivateLicense}
                       className="pt-2 space-y-2"
                     >
-                      <div className={`p-3 rounded-2xl border text-xs space-y-1 ${
-                        isLight ? 'bg-slate-100 border-slate-200' : 'bg-slate-950/80 border-slate-800'
-                      }`}>
+                      <div className="p-3 rounded-2xl border text-xs space-y-1 bg-slate-950/80 border-slate-800">
                         <div className="text-slate-400 font-medium">Mã Thiết Bị Máy Tính (HWID):</div>
-                        <div className="font-mono text-cyan-600 dark:text-cyan-300 font-bold text-xs truncate">
+                        <div className="font-mono text-cyan-300 font-bold text-xs truncate">
                           {hwid || 'Đang nhận diện HWID...'}
                         </div>
                       </div>
@@ -425,7 +388,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
       </main>
 
       {/* Footer */}
-      <footer className="py-3 px-6 text-center text-xs text-slate-400 border-t border-slate-200/60 dark:border-slate-800/60">
+      <footer className="py-3 px-6 text-center text-xs text-slate-400 border-t border-slate-800/60">
         VIPLIKE RADIANT v2.0 • Bản Quyền Thuộc Về Hệ Sinh Thái VIPLIKE SaaS • Bảo Vệ Bằng Mã Hóa HWID
       </footer>
     </div>

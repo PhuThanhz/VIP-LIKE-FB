@@ -1,8 +1,6 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo } from 'react';
 
-export type ThemeMode = 'dark' | 'light';
-
-const STORAGE_KEY = 'viplike-theme';
+export type ThemeMode = 'dark';
 
 interface ThemeContextValue {
   mode: ThemeMode;
@@ -13,41 +11,25 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-// Mặc định khởi động ở chế độ Sáng (Radiant Clean) trừ khi người dùng đã chọn Tối
-const readInitialMode = (): ThemeMode => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'dark') return 'dark';
-    if (saved === 'light') return 'light';
-    if (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) {
-      return 'dark';
-    }
-    return 'light';
-  } catch {
-    return 'light';
-  }
-};
-
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [mode, setMode] = useState<ThemeMode>(readInitialMode);
-
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.toggle('light', mode === 'light');
-    root.classList.toggle('dark', mode === 'dark');
-    root.style.colorScheme = mode;
+    root.classList.remove('light');
+    root.classList.add('dark');
+    root.style.colorScheme = 'dark';
     try {
-      localStorage.setItem(STORAGE_KEY, mode);
-    } catch {
-      // localStorage có thể bị chặn, bỏ qua
-    }
-  }, [mode]);
-
-  const toggleTheme = useCallback(() => setMode((prev) => (prev === 'light' ? 'dark' : 'light')), []);
+      localStorage.setItem('viplike-theme', 'dark');
+    } catch {}
+  }, []);
 
   const value = useMemo(
-    () => ({ mode, isLight: mode === 'light', toggleTheme, setMode }),
-    [mode, toggleTheme]
+    () => ({
+      mode: 'dark' as ThemeMode,
+      isLight: false,
+      toggleTheme: () => {},
+      setMode: () => {},
+    }),
+    []
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
@@ -55,6 +37,15 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
 export const useThemeMode = (): ThemeContextValue => {
   const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error('useThemeMode phải nằm trong ThemeProvider');
+  if (!ctx) {
+    return {
+      mode: 'dark',
+      isLight: false,
+      toggleTheme: () => {},
+      setMode: () => {},
+    };
+  }
   return ctx;
 };
+
+export default ThemeProvider;

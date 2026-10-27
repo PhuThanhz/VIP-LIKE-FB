@@ -18,9 +18,6 @@ import {
   PictureOutlined,
 } from '@ant-design/icons';
 
-
-import { useThemeMode } from '../theme/ThemeContext';
-
 const { Sider } = Layout;
 
 export interface SidebarStats {
@@ -62,7 +59,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   dbStatus = { connected: false, loading: false },
   onCheckDb,
 }) => {
-  const { isLight } = useThemeMode();
   const menuItems: MenuProps['items'] = [
     {
       key: 'buff-like',
@@ -182,9 +178,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       trigger={null}
       width={260}
       collapsedWidth={76}
-      className={`border-r flex flex-col justify-between select-none z-30 transition-all duration-300 ${
-        isLight ? '!bg-white border-slate-200' : '!bg-slate-900 border-slate-800/80'
-      }`}
+      className="border-r flex flex-col justify-between select-none z-30 transition-all duration-300 !bg-slate-900 border-slate-800/80"
       style={{
         position: 'sticky',
         top: 0,
@@ -194,14 +188,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     >
       <div className="flex flex-col h-full">
         {/* Brand Header */}
-        <div className={`h-16 flex items-center px-4 border-b shrink-0 ${
-          isLight ? 'border-slate-200 bg-white' : 'border-slate-800/80 bg-slate-900'
-        }`}>
+        <div className="h-16 flex items-center px-4 border-b shrink-0 border-slate-800/80 bg-slate-900">
           <div className="flex items-center gap-3 w-full overflow-hidden">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-600 via-blue-600 to-indigo-500 p-0.5 shadow-md shadow-cyan-500/20 shrink-0 flex items-center justify-center">
-              <div className={`w-full h-full rounded-[10px] flex items-center justify-center ${
-                isLight ? 'bg-white' : 'bg-slate-950/90'
-              }`}>
+              <div className="w-full h-full rounded-[10px] flex items-center justify-center bg-slate-950/90">
                 <ThunderboltFilled className="text-lg text-cyan-500 animate-pulse" />
               </div>
             </div>
@@ -212,13 +202,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span className="text-sm font-black tracking-wider bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 bg-clip-text text-transparent truncate uppercase">
                     VIPLIKE RADIANT
                   </span>
-                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold shrink-0 border ${
-                    isLight ? 'bg-cyan-50 text-cyan-700 border-cyan-200' : 'bg-cyan-950/90 text-cyan-300 border-cyan-800/60'
-                  }`}>
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold shrink-0 border bg-cyan-950/90 text-cyan-300 border-cyan-800/60">
                     v2.0
                   </span>
                 </div>
-                <span className={`text-[10px] truncate ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                <span className="text-[10px] truncate text-slate-400">
                   Buff Like & Săn Bài Meta
                 </span>
               </div>
@@ -229,7 +217,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Ant Design Navigation Menu */}
         <div className="flex-1 py-3 overflow-y-auto overflow-x-hidden">
           <Menu
-            theme={isLight ? 'light' : 'dark'}
+            theme="dark"
             mode="inline"
             selectedKeys={[activeTabKey]}
             items={menuItems}
@@ -239,9 +227,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Bottom Status & Collapse Toggle */}
-        <div className={`p-3 border-t shrink-0 space-y-2 ${
-          isLight ? 'border-slate-200 bg-slate-50/80' : 'border-slate-800/80 bg-slate-950/40'
-        }`}>
+        <div className="p-3 border-t shrink-0 space-y-2 border-slate-800/80 bg-slate-950/40">
           {/* MySQL Status Pill */}
           {!collapsed ? (
             <Tooltip
@@ -258,10 +244,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={onCheckDb}
                 className={`cursor-pointer px-3 py-2 rounded-xl border text-[11px] flex items-center justify-between gap-2 transition-all ${
                   dbStatus.connected
-                    ? isLight ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-emerald-950/30 border-emerald-800/50 text-emerald-300 hover:bg-emerald-950/50'
+                    ? 'bg-emerald-950/30 border-emerald-800/50 text-emerald-300 hover:bg-emerald-950/50'
                     : dbStatus.usingCache
-                    ? isLight ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-amber-950/30 border-amber-800/50 text-amber-300 hover:bg-amber-950/50'
-                    : isLight ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-rose-950/30 border-rose-800/50 text-rose-300 hover:bg-rose-950/50'
+                    ? 'bg-amber-950/30 border-amber-800/50 text-amber-300 hover:bg-amber-950/50'
+                    : 'bg-rose-950/30 border-rose-800/50 text-rose-300 hover:bg-rose-950/50'
                 }`}
               >
                 <div className="flex items-center gap-2 truncate">
@@ -331,9 +317,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             type="text"
             onClick={onToggleCollapse}
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            className={`w-full rounded-xl h-8 flex items-center justify-center text-xs transition-colors ${
-              isLight ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-100' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'
-            }`}
+            className="w-full rounded-xl h-8 flex items-center justify-center text-xs transition-colors text-slate-400 hover:text-slate-100 hover:bg-slate-800"
           >
             {!collapsed && <span className="ml-2 font-medium">Thu gọn thanh điều hướng</span>}
           </Button>
