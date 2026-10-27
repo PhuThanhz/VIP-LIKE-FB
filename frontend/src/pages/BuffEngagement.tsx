@@ -1097,7 +1097,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         if (legacy.length > 0) {
           await api.post('/buff-logs', { logs: legacy });
           localStorage.removeItem(LEGACY_BUFF_LOGS_STORAGE_KEY);
-          if (!cancelled) message.success(`Đã chuyển ${legacy.length} lượt lịch sử cũ lên MySQL`);
+          if (!cancelled) message.success(`Đã đồng bộ ${legacy.length} lượt lịch sử cũ lên hệ thống`);
         }
         const res = await api.get('/buff-logs', { params: { limit: 500 } });
         const fetched: BuffLogEntry[] = Array.isArray(res.data?.logs) ? res.data.logs : [];
@@ -4034,7 +4034,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                 {buffLogsLoading && buffLogs.length === 0 ? (
                   <Card className="app-surface text-center py-16">
                     <Spin />
-                    <div className="text-xs text-slate-400 mt-3">Đang tải lịch sử từ MySQL...</div>
+                    <div className="text-xs text-slate-400 mt-3">Đang tải lịch sử tương tác...</div>
                   </Card>
                 ) : buffLogs.length === 0 ? (
                   <Card className="app-surface text-center py-16">

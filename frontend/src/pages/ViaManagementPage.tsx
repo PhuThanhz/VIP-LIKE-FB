@@ -1319,27 +1319,27 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
           </div>
         </div>
 
-        {/* Card 3: Trạng thái MySQL */}
+        {/* Card 3: Trạng thái Lưu Trữ Dữ Liệu */}
         <div className="app-surface p-4 flex items-center justify-between border-l-4 border-emerald-500 shadow-md">
           <div className="min-w-0">
-            <div className="text-xs text-slate-400 font-medium uppercase tracking-wider">Cơ Sở Dữ Liệu MySQL</div>
+            <div className="text-xs text-slate-400 font-medium uppercase tracking-wider">Kho Lưu Trữ Dữ Liệu</div>
             <div className="text-base font-bold text-slate-100 mt-1 truncate">
-              {dbStatus.connected ? 'MySQL Workbench' : dbStatus.usingCache ? 'Bộ Nhớ Đệm Cache' : 'Ngoại tuyến'}
+              {dbStatus.connected ? 'Đã Đồng Bộ An Toàn' : dbStatus.usingCache ? 'Bộ Nhớ Đệm Tạm Thời' : 'Ngoại tuyến'}
             </div>
             <div className="text-[11px] mt-1 font-mono">
               {dbStatus.connected ? (
-                <span className="text-emerald-400 font-bold">● ONLINE: {dbStatus.database || 'autopost_saas'}</span>
+                <span className="text-emerald-400 font-bold">● SẴN SÀNG: Bảo Mật Đa Tầng</span>
               ) : dbStatus.usingCache ? (
-                <span className="text-amber-400 font-semibold">● CACHE ({accounts.length} Record)</span>
+                <span className="text-amber-400 font-semibold">● BỘ NHỚ ĐỆM ({accounts.length} Hồ sơ)</span>
               ) : (
-                <span className="text-rose-400 font-semibold">● OFFLINE</span>
+                <span className="text-rose-400 font-semibold">● NGOẠI TUYẾN</span>
               )}
             </div>
           </div>
           <div
             onClick={onCheckDb}
             className="w-11 h-11 rounded-xl bg-slate-900 border border-slate-700/80 hover:border-slate-500 flex items-center justify-center text-slate-300 text-lg cursor-pointer"
-            title="Nhấp để kiểm tra kết nối MySQL"
+            title="Nhấp để kiểm tra trạng thái lưu trữ"
           >
             <DatabaseOutlined />
           </div>
@@ -1955,13 +1955,13 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   label: (
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
                       <DatabaseOutlined className="text-purple-400" />
-                      <span>Trang & Nhóm Trong MySQL DB ({currentDbPages.length + currentDbGroups.length})</span>
+                      <span>Trang & Nhóm Đã Đồng Bộ ({currentDbPages.length + currentDbGroups.length})</span>
                     </span>
                   ),
                   children: (
                     <div className="space-y-3 mt-2">
                       <div className="text-[11px] text-slate-400 bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
-                        💡 Đây là các Page & Nhóm trực thuộc Via này được lưu trực tiếp trong bảng <code>social_accounts</code> của MySQL Workbench. Bạn có thể xóa từng mục con mà không làm ảnh hưởng tới Via Mẹ.
+                        💡 Danh sách Page &amp; Nhóm trực thuộc Via này đã được đồng bộ và lưu trữ an toàn. Bạn có thể quản lý hoặc gỡ bỏ từng mục con mà không làm ảnh hưởng tới Via Mẹ.
                       </div>
 
                       {/* Danh sách Pages trong DB */}

@@ -29,11 +29,15 @@ const api = axios.create({
   timeout: 180000, // 3 phút cho các tác vụ Playwright
 });
 
-// Tự động gắn Token JWT khi có đăng nhập
+// Tự động gắn Token JWT và Hardware HWID
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('viplike_token');
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  const hwid = localStorage.getItem('viplike_hwid');
+  if (hwid && config.headers) {
+    config.headers['X-Hardware-HWID'] = hwid;
   }
   return config;
 });

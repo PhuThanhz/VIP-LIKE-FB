@@ -14,7 +14,10 @@ export const getMachineHwid = async (): Promise<string> => {
       // Gọi trực tiếp hàm Rust `get_machine_hwid` đã đăng ký trong src/lib.rs
       const { invoke } = await import('@tauri-apps/api/core');
       const hwid = await invoke<string>('get_machine_hwid');
-      if (hwid) return hwid;
+      if (hwid) {
+        localStorage.setItem('viplike_hwid', hwid);
+        return hwid;
+      }
     }
   } catch (err) {
     console.warn('[Tauri Bridge] Không gọi được lệnh Rust, chuyển sang fallback:', err);

@@ -387,9 +387,37 @@ function saveLicensesCache(licenses) {
   }
 }
 
+let softwareLicensesTableReady = false;
+
+async function ensureSoftwareLicensesTable(p) {
+  if (softwareLicensesTableReady) return;
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS software_licenses (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      license_key VARCHAR(128) NOT NULL UNIQUE,
+      customer_name VARCHAR(255) NOT NULL,
+      customer_contact VARCHAR(255) DEFAULT '',
+      hardware_hwid VARCHAR(255) DEFAULT NULL,
+      package_type VARCHAR(64) DEFAULT '1_MONTH',
+      max_vias INT DEFAULT 50,
+      status VARCHAR(32) DEFAULT 'ACTIVE',
+      activated_at DATETIME DEFAULT NULL,
+      expires_at DATETIME NOT NULL,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_license_key (license_key),
+      INDEX idx_status (status),
+      INDEX idx_hardware_hwid (hardware_hwid)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  softwareLicensesTableReady = true;
+}
+
 async function getLicenses() {
   try {
     const p = getPool();
+    await ensureSoftwareLicensesTable(p);
     const [rows] = await p.execute(`
       SELECT 
         id, 
@@ -411,11 +439,49 @@ async function getLicenses() {
     if (Array.isArray(rows) && rows.length > 0) {
       saveLicensesCache(rows);
       return rows;
+    } else {
+      // Nếu bảng rỗng, đồng bộ bản ghi mẫu từ cache vào MySQL
+      const cached = loadLicensesCache();
+      for (const lic of cached) {
+        try {
+          await p.execute(
+            `INSERT IGNORE INTO software_licenses 
+              (license_key, customer_name, customer_contact, hardware_hwid, package_type, max_vias, status, activated_at, expires_at, notes) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              lic.licenseKey,
+              lic.customerName,
+              lic.customerContact || '',
+              lic.hardwareHwid || null,
+              lic.packageType || '1_MONTH',
+              lic.maxVias || 50,
+              lic.status || 'ACTIVE',
+              lic.activatedAt ? new Date(lic.activatedAt) : null,
+              new Date(lic.expiresAt),
+              lic.notes || ''
+            ]
+          );
+        } catch (_) {}
+      }
+      return cached;
     }
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Lỗi đọc licenses:', err.message);
+    console.warn('[Database] ⚠️ Lỗi đọc licenses:', err.message);
   }
   return loadLicensesCache();
+}
+
+async function verifyLicenseActive(hardwareHwid = null) {
+  const licenses = await getLicenses();
+  const now = new Date();
+  const active = licenses.find((l) => {
+    if (l.status !== 'ACTIVE') return false;
+    const exp = new Date(l.expiresAt);
+    if (exp < now) return false;
+    if (hardwareHwid && l.hardwareHwid && l.hardwareHwid !== hardwareHwid) return false;
+    return true;
+  });
+  return active || null;
 }
 
 async function createLicense({
@@ -789,6 +855,7 @@ module.exports = {
   loadAccountsCache,
   saveAccountsCache,
   getLicenses,
+  verifyLicenseActive,
   createLicense,
   activateLicense,
   updateLicenseStatus,

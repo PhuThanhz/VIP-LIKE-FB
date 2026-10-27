@@ -230,7 +230,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               VIPLIKE RADIANT SaaS
             </Title>
             <Text className="text-slate-400 text-xs">
-              Hệ thống tài khoản bảo mật bằng Java Spring Boot &amp; MySQL
+              Hệ thống bảo mật đa tầng &amp; Mã hoá chuẩn Enterprise
             </Text>
           </div>
 

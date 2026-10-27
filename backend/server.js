@@ -490,8 +490,29 @@ app.post('/api/buff-ai-generate-comments', async (req, res) => {
   }
 });
 
+// Helper xác thực Bản quyền phần mềm (License Key) cho các tính năng tương tác chính
+async function checkLicenseOrReject(req, res) {
+  try {
+    const hwid = req.headers['x-hardware-hwid'] || req.body?.hardwareHwid || req.query?.hardwareHwid;
+    const active = await db.verifyLicenseActive(hwid);
+    if (!active) {
+      res.status(403).json({
+        success: false,
+        error: 'Bản quyền phần mềm chưa kích hoạt hoặc đã hết hạn thuê. Vui lòng vào mục "Cho Thuê & Bản Quyền" để kích hoạt License Key.',
+      });
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[License Check] ⚠️ Bỏ qua lỗi kiểm tra license:', err.message);
+    return true;
+  }
+}
+
 // Buff Like & Comment (Đồng bộ)
 app.post('/api/buff-like', async (req, res) => {
+  if (!(await checkLicenseOrReject(req, res))) return;
+
   const {
     cookieString,
     targetUrl,
@@ -548,6 +569,8 @@ app.post('/api/buff-like', async (req, res) => {
 
 // Buff Like & Comment Stream thời gian thực (SSE)
 app.post('/api/buff-like-stream', async (req, res) => {
+  if (!(await checkLicenseOrReject(req, res))) return;
+
   const {
     cookieString,
     targetUrl,
@@ -697,6 +720,8 @@ function addBuffQueueTask(taskPayload) {
 
 app.post('/api/buff-queue/add', async (req, res) => {
   try {
+    if (!(await checkLicenseOrReject(req, res))) return;
+
     if (!req.body.targetUrl) {
       return res.status(400).json({ success: false, error: 'Thiếu targetUrl' });
     }
@@ -1871,6 +1896,8 @@ app.post('/api/avatars/stop', (req, res) => {
 
 // 3. Cập nhật Avatar hàng loạt với Realtime Progress qua Server-Sent Events (SSE)
 app.post('/api/avatars/update-stream', async (req, res) => {
+  if (!(await checkLicenseOrReject(req, res))) return;
+
   const {
     motherViaId,
     cookieString: providedCookie,
@@ -2008,6 +2035,8 @@ app.post('/api/covers/stop', (req, res) => {
 
 // Cập nhật Ảnh Bìa hàng loạt qua SSE Stream
 app.post('/api/covers/update-stream', async (req, res) => {
+  if (!(await checkLicenseOrReject(req, res))) return;
+
   const {
     motherViaId,
     cookieString: providedCookie,
