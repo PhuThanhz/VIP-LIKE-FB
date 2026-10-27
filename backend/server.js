@@ -856,11 +856,62 @@ app.post('/api/buff-like', async (req, res) => {
   }
 });
 
+// Trạng thái phiên Buff trực tiếp đang chạy ngầm (hỗ trợ duy trì tiến trình khi người dùng F5 / reload trang)
+let activeLiveBuffSession = null;
+
+// Lấy thông tin phiên Buff trực tiếp đang chạy ngầm
+app.get('/api/buff-live/active', (req, res) => {
+  try {
+    if (!activeLiveBuffSession) {
+      return res.json({ success: true, activeSession: null });
+    }
+    // Tự động dọn dẹp nếu phiên đã xong và qua 30 phút
+    if (
+      activeLiveBuffSession.status !== 'RUNNING' &&
+      Date.now() - new Date(activeLiveBuffSession.updatedAt).getTime() > 30 * 60 * 1000
+    ) {
+      activeLiveBuffSession = null;
+      return res.json({ success: true, activeSession: null });
+    }
+    return res.json({ success: true, activeSession: activeLiveBuffSession });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Lệnh dừng tác vụ Buff trực tiếp
+app.post('/api/buff-live/stop', (req, res) => {
+  try {
+    if (activeLiveBuffSession && activeLiveBuffSession.status === 'RUNNING') {
+      activeLiveBuffSession.stopRequested = true;
+      activeLiveBuffSession.status = 'STOPPED';
+      activeLiveBuffSession.updatedAt = new Date().toISOString();
+      console.log(`[BuffStream] 🛑 Đã nhận lệnh dừng tác vụ buff trực tiếp (Session: ${activeLiveBuffSession.sessionId})`);
+      return res.json({ success: true, message: 'Đã gửi lệnh dừng tiến trình buff trực tiếp', activeSession: activeLiveBuffSession });
+    }
+    return res.json({ success: true, message: 'Không có phiên buff trực tiếp nào đang chạy' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Xóa cache phiên Buff trực tiếp
+app.post('/api/buff-live/clear', (req, res) => {
+  try {
+    activeLiveBuffSession = null;
+    return res.json({ success: true, message: 'Đã xóa thông tin phiên buff trực tiếp' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Buff Like & Comment Stream thời gian thực (SSE)
 app.post('/api/buff-like-stream', async (req, res) => {
   if (!(await checkLicenseOrReject(req, res))) return;
 
   const {
+    sessionId = null,
+    totalSelectedCount = 0,
     cookieString,
     targetUrl,
     reactionType = 'LIKE',
@@ -895,7 +946,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
   res.on('close', () => {
     if (!res.writableFinished) {
       clientGone = true;
-      console.log('[BuffStream] 🔌 Client đã ngắt kết nối SSE.');
+      console.log('[BuffStream] 🔌 Client đã ngắt kết nối SSE (reload trang hoặc chuyển tab). Background worker vẫn tiếp tục chạy an toàn...');
     }
   });
 
@@ -905,6 +956,33 @@ app.post('/api/buff-like-stream', async (req, res) => {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     } catch (e) {}
   };
+
+  const sessionKey = sessionId || ('live_' + Date.now());
+  const incomingTotal = parseInt(totalSelectedCount, 10) || selectedPages.length;
+
+  if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey && activeLiveBuffSession.status === 'RUNNING') {
+    activeLiveBuffSession.updatedAt = new Date().toISOString();
+    activeLiveBuffSession.targetUrl = targetUrl;
+    activeLiveBuffSession.reactionType = reactionType;
+  } else {
+    activeLiveBuffSession = {
+      sessionId: sessionKey,
+      targetUrl,
+      reactionType,
+      status: 'RUNNING',
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      total: Math.max(incomingTotal, selectedPages.length),
+      done: 0,
+      success: 0,
+      alreadyLiked: 0,
+      failed: 0,
+      percent: 0,
+      currentRunningPageName: '',
+      details: [],
+      stopRequested: false,
+    };
+  }
 
   try {
     const sysSettings = loadBuffSettings();
@@ -929,17 +1007,65 @@ app.post('/api/buff-like-stream', async (req, res) => {
         concurrency: Math.max(1, Math.min(3, parseInt(concurrency, 10) || 1)),
         dripFeedMode: Boolean(dripFeedMode),
         dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
-        shouldStop: () => clientGone || isEmergencyStopped(),
+        // CHỈ DỪNG KHI NGƯỜI DÙNG BẤM NÚT DỪNG HOẶC DỪNG KHẨN CẤP.
+        // NẾU NGƯỜI DÙNG F5/LOAD LẠI TRANG, BACKGROUND VẪN TIẾP TỤC CHẠY KHÔNG BỊ HỦY!
+        shouldStop: () => Boolean(activeLiveBuffSession?.stopRequested) || isEmergencyStopped(),
         onProgress: (evt) => {
+          if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
+            activeLiveBuffSession.updatedAt = new Date().toISOString();
+            if (evt.type === 'PAGE_START') {
+              activeLiveBuffSession.currentRunningPageName = evt.pageName || '';
+            } else if (evt.type === 'PAGE_FINISH') {
+              activeLiveBuffSession.done = (activeLiveBuffSession.done || 0) + 1;
+              if (evt.status === 'SUCCESS') activeLiveBuffSession.success++;
+              else if (evt.status === 'ALREADY_LIKED') activeLiveBuffSession.alreadyLiked++;
+              else if (evt.status === 'FAILED' || evt.status === 'ERROR') activeLiveBuffSession.failed++;
+              activeLiveBuffSession.percent = Math.min(
+                100,
+                Math.round((activeLiveBuffSession.done / Math.max(1, activeLiveBuffSession.total)) * 100)
+              );
+
+              const detailItem = {
+                pageId: evt.pageId,
+                pageName: evt.pageName,
+                viaName: evt.viaName,
+                status: evt.status,
+                likeStatus: evt.likeStatus,
+                commentStatus: evt.commentStatus,
+                commentText: evt.commentText,
+                message: evt.message,
+                error: evt.error,
+              };
+              const exIdx = activeLiveBuffSession.details.findIndex((d) => d.pageId === evt.pageId);
+              if (exIdx >= 0) {
+                activeLiveBuffSession.details[exIdx] = { ...activeLiveBuffSession.details[exIdx], ...detailItem };
+              } else {
+                activeLiveBuffSession.details.push(detailItem);
+              }
+            }
+          }
           sendEvent('progress', evt);
         },
       })
     );
 
+    if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
+      if (activeLiveBuffSession.done >= activeLiveBuffSession.total || activeLiveBuffSession.stopRequested) {
+        activeLiveBuffSession.status = activeLiveBuffSession.stopRequested ? 'STOPPED' : 'DONE';
+        activeLiveBuffSession.currentRunningPageName = '';
+      }
+      activeLiveBuffSession.updatedAt = new Date().toISOString();
+    }
+
     sendEvent('done', { result });
     res.end();
   } catch (err) {
     console.error('[BuffStream] ❌ Lỗi stream:', err.message);
+    if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
+      activeLiveBuffSession.status = 'ERROR';
+      activeLiveBuffSession.error = err.message;
+      activeLiveBuffSession.updatedAt = new Date().toISOString();
+    }
     sendEvent('error', { error: err.message });
     res.end();
   }

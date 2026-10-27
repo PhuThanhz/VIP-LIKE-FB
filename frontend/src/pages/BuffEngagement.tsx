@@ -141,9 +141,13 @@ async function runBuffStream(
 ): Promise<BuffRunResult> {
   let receivedAny = false;
   try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('viplike_token') : null;
     const response = await fetch(`${WORKER_BASE_URL}/api/buff-like-stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify(payload),
       signal,
     });
@@ -603,6 +607,100 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     status: 'IDLE',
     details: [],
   });
+
+  // Khôi phục phiên Buff trực tiếp đang chạy ngầm nếu người dùng F5 hoặc tải lại trang
+  useEffect(() => {
+    let pollTimer: any = null;
+
+    const restoreActiveSession = async () => {
+      try {
+        const res = await axios.get(`${WORKER_BASE_URL}/api/buff-live/active`);
+        const session = res.data?.activeSession;
+        if (!session) return;
+
+        if (session.status === 'RUNNING') {
+          if (session.targetUrl) setTargetPostUrl(session.targetUrl);
+          if (session.reactionType) setSelectedReaction(session.reactionType);
+
+          setAutoBuffProgress({
+            total: session.total || 0,
+            success: session.success || 0,
+            failed: session.failed || 0,
+            alreadyLiked: session.alreadyLiked || 0,
+            percent: session.percent || 0,
+            status: 'RUNNING',
+            currentRunningPageName: session.currentRunningPageName || 'Đang thực thi...',
+            details: session.details || [],
+          });
+
+          message.loading({
+            content: `🔄 Đang tiếp tục theo dõi tiến trình chạy ngầm bài viết: ${session.targetUrl.slice(0, 35)}...`,
+            key: 'restore-buff-session',
+            duration: 4,
+          });
+
+          pollTimer = setInterval(async () => {
+            try {
+              const pollRes = await axios.get(`${WORKER_BASE_URL}/api/buff-live/active`);
+              const live = pollRes.data?.activeSession;
+              if (!live) {
+                clearInterval(pollTimer);
+                return;
+              }
+
+              setAutoBuffProgress({
+                total: live.total || 0,
+                success: live.success || 0,
+                failed: live.failed || 0,
+                alreadyLiked: live.alreadyLiked || 0,
+                percent: live.percent || 0,
+                status: live.status,
+                currentRunningPageName: live.currentRunningPageName || '',
+                details: live.details || [],
+              });
+
+              if (live.status !== 'RUNNING') {
+                clearInterval(pollTimer);
+                if (live.status === 'DONE') {
+                  message.success({
+                    content: `🎉 Tác vụ buff ngầm đã hoàn tất: ${live.success}/${live.total} thành công!`,
+                    key: 'restore-buff-session',
+                    duration: 5,
+                  });
+                } else if (live.status === 'STOPPED') {
+                  message.warning({
+                    content: 'Đã dừng tác vụ buff ngầm theo yêu cầu.',
+                    key: 'restore-buff-session',
+                  });
+                }
+              }
+            } catch (err) {
+              console.error('Lỗi kiểm tra tiến trình:', err);
+            }
+          }, 1200);
+        } else if (session.status === 'DONE' && Date.now() - new Date(session.updatedAt).getTime() < 120000) {
+          if (session.targetUrl) setTargetPostUrl(session.targetUrl);
+          setAutoBuffProgress({
+            total: session.total || 0,
+            success: session.success || 0,
+            failed: session.failed || 0,
+            alreadyLiked: session.alreadyLiked || 0,
+            percent: 100,
+            status: 'DONE',
+            details: session.details || [],
+          });
+        }
+      } catch (e) {
+        // bỏ qua nếu backend không phản hồi
+      }
+    };
+
+    restoreActiveSession();
+
+    return () => {
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, []);
 
   // Tab 3: Buff View State
   const [targetViewUrl, setTargetViewUrl] = useState('');
@@ -1794,6 +1892,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         (selectedAccountId !== 'CUSTOM' && selectedAccountId !== 'ALL_VIAS' ? currentViaAccount?.pageName : '') || 'Via Facebook'
       );
 
+      const liveSessionId = 'live_' + Date.now();
       const controller = new AbortController();
       buffAbortRef.current = controller;
 
@@ -1835,6 +1934,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           comment: commentLines.length > 0 ? commentLines[(finishedPagesCount + pIdx) % commentLines.length] : '',
         }));
         const payload = {
+          sessionId: liveSessionId,
+          totalSelectedCount: pagesToBuff.length,
           cookieString: group.cookieString,
           targetUrl: runTargetUrl,
           reactionType: selectedReaction,
@@ -1965,6 +2066,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
   const handleStopAutoBuff = () => {
     buffAbortRef.current?.abort();
+    axios.post(`${WORKER_BASE_URL}/api/buff-live/stop`).catch(() => {});
     message.info('Đang dừng: worker sẽ dừng sau Page hiện tại.');
   };
 
@@ -2256,6 +2358,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     batchStreamAbortRef.current?.abort();
     setIsBatchPaused(false);
     setBatchOrders((prev) => prev.map((o) => (o.status === 'PENDING' ? { ...o, status: 'PAUSED' } : o)));
+    axios.post(`${WORKER_BASE_URL}/api/buff-live/stop`).catch(() => {});
     message.info('Đang dừng: worker sẽ dừng sau Page hiện tại.');
   };
 

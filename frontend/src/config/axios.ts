@@ -29,8 +29,21 @@ const api = axios.create({
   timeout: 180000, // 3 phút cho các tác vụ Playwright
 });
 
-// Tự động gắn Token JWT và Hardware HWID
+// Tự động gắn Token JWT và Hardware HWID cho instance api
 api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('viplike_token');
+  if (token && config.headers) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  const hwid = localStorage.getItem('viplike_hwid');
+  if (hwid && config.headers) {
+    config.headers['X-Hardware-HWID'] = hwid;
+  }
+  return config;
+});
+
+// Tự động gắn Token JWT cho cả axios mặc định (phòng trường hợp component gọi axios trực tiếp)
+axios.interceptors.request.use((config) => {
   const token = localStorage.getItem('viplike_token');
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
