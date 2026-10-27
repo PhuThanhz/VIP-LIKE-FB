@@ -42,19 +42,19 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
     try {
       const res = await api.post('/auth/login', {
         username: values.username.trim(),
-        password: values.password || '123456',
+        password: values.password.trim(),
       });
 
       const data = res.data?.data || res.data;
-      if (data?.token || res.data?.success) {
-        const userObj: CurrentUser = {
+      if (data?.token && (data?.user || data?.username)) {
+        const userObj: CurrentUser = data.user || {
           id: data.id || Date.now(),
           username: data.username || values.username.trim(),
           email: data.email || `${values.username.trim()}@viplike.vn`,
-          fullName: data.fullName || (values.username.toLowerCase().includes('thanh') ? 'Thành An (Quản Trị)' : values.username),
+          fullName: data.fullName || values.username.trim(),
           role: data.role || 'ADMIN',
         };
-        const token = data.token || `viplike_jwt_${Date.now()}`;
+        const token = data.token;
         localStorage.setItem('viplike_token', token);
         localStorage.setItem('viplike_user', JSON.stringify(userObj));
         message.success(`🎉 Chào mừng ${userObj.fullName} đã đăng nhập thành công!`);
@@ -63,77 +63,60 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
         message.error(res.data?.error || 'Đăng nhập không thành công');
       }
     } catch (err: any) {
-      // Fallback đăng nhập cục bộ nếu backend bận
-      const username = values.username.trim();
-      const userObj: CurrentUser = {
-        id: Date.now(),
-        username,
-        email: `${username}@viplike.vn`,
-        fullName: username.toLowerCase().includes('thanh') ? 'Thành An (Quản Trị)' : username,
-        role: 'ADMIN',
-      };
-      localStorage.setItem('viplike_token', `viplike_token_${Date.now()}`);
-      localStorage.setItem('viplike_user', JSON.stringify(userObj));
-      message.success(`🎉 Đăng nhập thành công với tài khoản: ${userObj.fullName}`);
-      onLoginSuccess(userObj);
+      message.error(err.response?.data?.error || 'Tài khoản hoặc mật khẩu không chính xác!');
     } finally {
       setLoading(false);
     }
   };
 
-  // Đăng nhập nhanh 1-Click
-  const handleQuickLogin = (accountType: 'thanhan' | 'admin' | 'phu') => {
-    let userObj: CurrentUser;
-    if (accountType === 'thanhan') {
-      userObj = {
-        id: 100023403136194,
-        username: 'thanhan',
-        email: 'thanhan@viplike.vn',
-        fullName: 'Thành An (Nick Mẹ 512 Page)',
-        role: 'ADMIN',
-      };
-    } else if (accountType === 'admin') {
-      userObj = {
-        id: 1,
-        username: 'admin',
-        email: 'admin@viplike.vn',
-        fullName: 'Quản Trị Viên VIPLIKE RADIANT',
-        role: 'ADMIN',
-      };
-    } else {
-      userObj = {
-        id: 100008447847970,
-        username: 'huynhthanhphu',
-        email: 'phu@viplike.vn',
-        fullName: 'Huỳnh Thạnh Phú',
-        role: 'ADMIN',
-      };
+  // Đăng nhập nhanh 1-Click (Gửi thông tin thật lên backend để nhận JWT token chuẩn)
+  const handleQuickLogin = async (accountType: 'thanhan' | 'admin' | 'phu') => {
+    setLoading(true);
+    const username = accountType === 'thanhan' ? 'thanhan' : accountType === 'admin' ? 'admin' : 'huynhthanhphu';
+    try {
+      const res = await api.post('/auth/login', {
+        username,
+        password: '123',
+      });
+      const data = res.data?.data || res.data;
+      if (data?.token) {
+        const userObj: CurrentUser = data.user || {
+          id: data.id || Date.now(),
+          username: data.username || username,
+          email: data.email || `${username}@viplike.vn`,
+          fullName: data.fullName || username,
+          role: data.role || 'ADMIN',
+        };
+        localStorage.setItem('viplike_token', data.token);
+        localStorage.setItem('viplike_user', JSON.stringify(userObj));
+        message.success(`🎉 Đã đăng nhập xác thực JWT thành công: ${userObj.fullName}`);
+        onLoginSuccess(userObj);
+      } else {
+        message.error(res.data?.error || 'Đăng nhập nhanh thất bại');
+      }
+    } catch (err: any) {
+      message.error(err.response?.data?.error || 'Không kết nối được server xác thực');
+    } finally {
+      setLoading(false);
     }
-
-    localStorage.setItem('viplike_token', `viplike_quick_token_${Date.now()}`);
-    localStorage.setItem('viplike_user', JSON.stringify(userObj));
-    message.success(`🎉 Đã đăng nhập nhanh với tài khoản: ${userObj.fullName}`);
-    onLoginSuccess(userObj);
   };
 
   // Kích hoạt key bản quyền
   const handleActivateLicense = async (values: any) => {
     setLoading(true);
     try {
-      const res = await api.post('/license/activate', {
+      const res = await api.post('/api/license/activate', {
         licenseKey: values.licenseKey.trim(),
         hardwareHwid: hwid,
       });
       if (res.data?.success) {
         message.success('🎉 Kích hoạt Bản Quyền VIPLIKE thành công!');
-        handleQuickLogin('thanhan');
+        await handleQuickLogin('thanhan');
       } else {
         message.error(res.data?.error || 'Mã key không hợp lệ hoặc đã hết hạn.');
       }
-    } catch {
-      // Tự động kích hoạt key thành công
-      message.success('🎉 Kích hoạt Bản Quyền thành công! Đang vào hệ thống...');
-      handleQuickLogin('thanhan');
+    } catch (err: any) {
+      message.error(err.response?.data?.error || 'Kích hoạt key bản quyền thất bại.');
     } finally {
       setLoading(false);
     }
@@ -213,10 +196,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                       <Form.Item
                         name="password"
                         label={<span className="text-xs font-semibold">Mật Khẩu</span>}
+                        rules={[{ required: true, message: 'Vui lòng nhập mật khẩu tài khoản' }]}
                       >
                         <Input.Password
                           prefix={<LockOutlined className="text-slate-400 mr-1" />}
-                          placeholder="Nhập mật khẩu (hoặc để trống)"
+                          placeholder="Nhập mật khẩu (Mặc định: 123)"
                           size="large"
                           className="rounded-xl text-sm"
                         />

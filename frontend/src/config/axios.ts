@@ -45,6 +45,13 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response?.status === 401 && !error.config?.url?.includes('/auth/login')) {
+      localStorage.removeItem('viplike_token');
+      localStorage.removeItem('viplike_user');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('viplike_auth_expired'));
+      }
+    }
     if (!error.response && error.code === 'ERR_NETWORK') {
       error.message = 'Không kết nối được máy chủ Backend VIPLIKE (:3100). Hãy kiểm tra backend đang chạy.';
     }

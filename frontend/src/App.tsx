@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ConfigProvider, App as AntdApp, Layout, theme } from 'antd';
+import { ConfigProvider, App as AntdApp, Layout, theme, Spin } from 'antd';
 import type { ThemeConfig } from 'antd';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import Header from './components/Header';
@@ -231,20 +231,60 @@ const DARK_THEME: ThemeConfig = {
 };
 
 const ThemedApp: React.FC = () => {
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() => {
-    try {
-      const saved = localStorage.getItem('viplike_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [authChecking, setAuthChecking] = useState<boolean>(true);
+
+  const verifyAuth = useCallback(async () => {
+    const token = localStorage.getItem('viplike_token');
+    if (!token) {
+      setCurrentUser(null);
+      setAuthChecking(false);
+      return;
     }
-  });
+    try {
+      const res = await api.get('/auth/me');
+      if (res.data?.authenticated && res.data?.user) {
+        setCurrentUser(res.data.user);
+        localStorage.setItem('viplike_user', JSON.stringify(res.data.user));
+      } else {
+        localStorage.removeItem('viplike_token');
+        localStorage.removeItem('viplike_user');
+        setCurrentUser(null);
+      }
+    } catch {
+      localStorage.removeItem('viplike_token');
+      localStorage.removeItem('viplike_user');
+      setCurrentUser(null);
+    } finally {
+      setAuthChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    verifyAuth();
+    const handleAuthExpired = () => {
+      setCurrentUser(null);
+    };
+    window.addEventListener('viplike_auth_expired', handleAuthExpired);
+    return () => window.removeEventListener('viplike_auth_expired', handleAuthExpired);
+  }, [verifyAuth]);
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('viplike_token');
     localStorage.removeItem('viplike_user');
     setCurrentUser(null);
   }, []);
+
+  if (authChecking) {
+    return (
+      <ConfigProvider theme={DARK_THEME}>
+        <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center gap-3">
+          <Spin size="large" />
+          <span className="text-xs font-mono text-cyan-400">Đang xác thực phiên làm việc JWT...</span>
+        </div>
+      </ConfigProvider>
+    );
+  }
 
   return (
     <ConfigProvider theme={DARK_THEME}>
