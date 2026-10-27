@@ -146,60 +146,8 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Right Controls: Database status + Via manager + Settings + Auth */}
+        {/* Right Controls: Via manager + Settings + Auth */}
         <div className="flex items-center gap-2 xl:gap-3 shrink-0">
-          {/* MySQL Status Pill */}
-          <Tooltip
-            title={
-              dbStatus.connected
-                ? `Đã kết nối MySQL Workbench thành công (DB: ${dbStatus.database || 'autopost_saas'})`
-                : dbStatus.usingCache
-                ? `MySQL chưa bật - Đang hoạt động ở chế độ Bộ Nhớ Đệm (${dbStatus.cachedCount || 0} Via sẵn sàng). Nhấp để thử kết nối lại MySQL.`
-                : `Lỗi kết nối MySQL: ${dbStatus.error || 'Kiểm tra port 3306'}`
-            }
-          >
-            <div
-              onClick={onCheckDb}
-              className={`cursor-pointer px-2.5 2xl:px-3 h-9 rounded-xl border text-xs flex items-center gap-2 transition-all shadow-sm ${
-                dbStatus.connected
-                  ? 'bg-emerald-950/30 border-emerald-700/50 text-emerald-300 hover:bg-emerald-950/50'
-                  : dbStatus.usingCache
-                  ? 'bg-amber-950/30 border-amber-700/50 text-amber-300 hover:bg-amber-950/50'
-                  : 'bg-rose-950/30 border-rose-700/50 text-rose-300 hover:bg-rose-950/50'
-              }`}
-            >
-              <DatabaseOutlined
-                className={
-                  dbStatus.connected
-                    ? 'text-emerald-500'
-                    : dbStatus.usingCache
-                    ? 'text-amber-500'
-                    : 'text-rose-500'
-                }
-              />
-              <span className="font-semibold hidden 2xl:inline">MySQL:</span>
-              <span className="font-mono font-bold text-[11px] hidden lg:inline">
-                {dbStatus.loading ? (
-                  <SyncOutlined spin className="text-slate-400" />
-                ) : dbStatus.connected ? (
-                  'ONLINE'
-                ) : dbStatus.usingCache ? (
-                  'CACHE (SẴN SÀNG)'
-                ) : (
-                  'OFFLINE'
-                )}
-              </span>
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  dbStatus.connected
-                    ? 'bg-emerald-500 animate-pulse'
-                    : dbStatus.usingCache
-                    ? 'bg-amber-500'
-                    : 'bg-rose-500'
-                }`}
-              />
-            </div>
-          </Tooltip>
 
           {/* Via Management shortcut */}
           <Tooltip title="Quản lý Via & Cookie">

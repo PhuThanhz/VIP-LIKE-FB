@@ -155,16 +155,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className={`text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5 font-mono border ${
-            dbConnected
-              ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/60'
-              : 'bg-amber-950/40 text-amber-400 border-amber-800/60'
-          }`}>
-            <span className={`w-2 h-2 rounded-full ${dbConnected ? 'bg-emerald-500' : 'bg-amber-500'} animate-pulse`} />
-            <span>MySQL: {dbConnected ? 'ONLINE' : 'CACHE'}</span>
-          </div>
-        </div>
       </header>
 
       {/* Center Auth Card */}
