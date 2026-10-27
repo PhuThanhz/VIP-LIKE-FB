@@ -1930,8 +1930,12 @@ app.get('/api/buff-vias/overview', async (req, res) => {
       const allAccounts = await db.getSocialAccounts();
       const seenCUsers = new Set();
       for (const row of allAccounts) {
-        const m = (row.cookieString || '').match(/(?:^|;\s*)c_user=([^;]+)/);
-        const uid = m ? m[1] : `id_${row.id}`;
+        // Bỏ qua Nhóm (Group) và các dòng không có cookie
+        if (row.platform === 'FACEBOOK_GROUP') continue;
+        if (!row.cookieString || !row.cookieString.includes('c_user=')) continue;
+        const m = row.cookieString.match(/(?:^|;\s*)c_user=([^;]+)/);
+        if (!m) continue;
+        const uid = m[1];
         if (!seenCUsers.has(uid)) {
           seenCUsers.add(uid);
           const isLive = row.tokenStatus !== 'EXPIRED' && row.tokenStatus !== 'CHECKPOINT';
