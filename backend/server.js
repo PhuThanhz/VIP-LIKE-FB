@@ -7,6 +7,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const db = require('./db');
@@ -2115,6 +2116,79 @@ function saveUsers(users) {
   } catch (e) {}
 }
 
+// =============================================================================
+// JSON WEB TOKEN (JWT) RFC 7519 - HMAC-SHA256 (Tương thích 100% với Spring Boot)
+// =============================================================================
+const JWT_SECRET = process.env.JWT_SECRET || 'ViplikeRadiantSecretKeyForJwtAuthentication2026SuperSecureKeyWithMin256Bits';
+
+function base64UrlEncode(str) {
+  return Buffer.from(str)
+    .toString('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+}
+
+function base64UrlDecode(str) {
+  let s = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  return Buffer.from(s, 'base64').toString('utf8');
+}
+
+function generateJwtToken(user, expiresInSeconds = 86400 * 10) {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + expiresInSeconds;
+  const payload = {
+    sub: user.username,
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName || user.username,
+    role: user.role || 'ADMIN',
+    iat: now,
+    exp,
+  };
+
+  const encodedHeader = base64UrlEncode(JSON.stringify(header));
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signature = crypto
+    .createHmac('sha256', JWT_SECRET)
+    .update(`${encodedHeader}.${encodedPayload}`)
+    .digest('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+
+  return `${encodedHeader}.${encodedPayload}.${signature}`;
+}
+
+function verifyJwtToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  const [encodedHeader, encodedPayload, signature] = parts;
+  const expectedSig = crypto
+    .createHmac('sha256', JWT_SECRET)
+    .update(`${encodedHeader}.${encodedPayload}`)
+    .digest('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+
+  if (signature !== expectedSig) return null;
+
+  try {
+    const payload = JSON.parse(base64UrlDecode(encodedPayload));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      return null; // Token hết hạn
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 const authHandler = {
   login: (req, res) => {
     try {
@@ -2138,10 +2212,12 @@ const authHandler = {
         saveUsers(users);
       }
 
-      const token = `viplike_jwt_${Buffer.from(JSON.stringify({ id: user.id, username: user.username })).toString('base64')}_${Date.now()}`;
+      // Sinh JWT chuẩn RFC 7519 HMAC-SHA256 (hạn 10 ngày)
+      const token = generateJwtToken(user, 86400 * 10);
       return res.json({
         success: true,
         token,
+        tokenType: 'Bearer',
         user: {
           id: user.id,
           username: user.username,
@@ -2151,6 +2227,7 @@ const authHandler = {
         },
         data: {
           token,
+          tokenType: 'Bearer',
           id: user.id,
           username: user.username,
           email: user.email,
@@ -2178,20 +2255,39 @@ const authHandler = {
       };
       users.push(newUser);
       saveUsers(users);
-      const token = `viplike_jwt_${Buffer.from(JSON.stringify({ id: newUser.id, username: newUser.username })).toString('base64')}_${Date.now()}`;
+      const token = generateJwtToken(newUser, 86400 * 10);
       return res.json({
         success: true,
         token,
+        tokenType: 'Bearer',
         user: newUser,
-        data: { token, ...newUser },
+        data: { token, tokenType: 'Bearer', ...newUser },
       });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
     }
   },
   me: (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+    if (token) {
+      const decoded = verifyJwtToken(token);
+      if (decoded) {
+        return res.json({
+          success: true,
+          authenticated: true,
+          user: {
+            id: decoded.id,
+            username: decoded.sub || decoded.username,
+            email: decoded.email,
+            fullName: decoded.fullName,
+            role: decoded.role,
+          },
+        });
+      }
+    }
     const users = loadUsers();
-    return res.json({ success: true, user: users[0] });
+    return res.json({ success: true, authenticated: false, user: users[0] });
   },
 };
 
