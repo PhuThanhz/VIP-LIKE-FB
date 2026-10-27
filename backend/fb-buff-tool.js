@@ -766,36 +766,74 @@ async function verifyReacted(handle, beforeAria, refind = null) {
   return false;
 }
 
-// Danh sách selector nút Like theo các tầng ưu tiên trên Facebook Web
+// Danh sách selector nút Like theo các tầng ưu tiên trên Facebook Web (cả Feed, Nhóm, Bài viết Modal, Watch, Reel)
 const LIKE_SELECTOR_TIERS = [
+  // 1. Nút like có attribute data-ad-rendering-role
+  'div[role="dialog"] [data-ad-rendering-role="like_button"]',
+  'div[role="article"] [data-ad-rendering-role="like_button"]',
+  '[data-ad-rendering-role="like_button"]',
+
+  // 2. Trong modal dialog (khi xem ảnh hoặc popup)
   'div[role="dialog"] [aria-label="Thích"], div[role="dialog"] [aria-label="Like"]',
   'div[role="dialog"] [aria-label*="bày tỏ cảm xúc"], div[role="dialog"] [aria-label*="Bày tỏ cảm xúc"]',
   'div[role="dialog"] [aria-label*="Thích bài viết"], div[role="dialog"] [aria-label*="Like post"]',
   'div[role="dialog"] [aria-label="Gỡ Thích"], div[role="dialog"] [aria-label="Remove Like"]',
+  'div[role="dialog"] div[role="button"]:has(span:text-is("Thích")), div[role="dialog"] div[role="button"]:has(span:text-is("Like"))',
+
+  // 3. Trong article chính của bài viết
   'div[role="article"] [aria-label="Thích"], div[role="article"] [aria-label="Like"]',
   'div[role="article"] [aria-label*="bày tỏ cảm xúc"], div[role="article"] [aria-label*="Bày tỏ cảm xúc"]',
   'div[role="article"] [aria-label*="Thích bài viết"], div[role="article"] [aria-label*="Like post"]',
   'div[role="article"] [aria-label="Gỡ Thích"], div[role="article"] [aria-label="Remove Like"]',
+  'div[role="article"] div[role="button"]:has(span:text-is("Thích")), div[role="article"] div[role="button"]:has(span:text-is("Like"))',
+
+  // 4. Trong bài viết Nhóm (Group Permalink / Group Feed)
+  'div[data-pagelet*="Group"] [aria-label="Thích"], div[data-pagelet*="Group"] [aria-label="Like"]',
+  'div[data-pagelet*="Group"] [aria-label*="bày tỏ cảm xúc"], div[data-pagelet*="Group"] [aria-label*="Bày tỏ cảm xúc"]',
+  'div[data-pagelet*="FeedUnit"] [aria-label="Thích"], div[data-pagelet*="FeedUnit"] [aria-label="Like"]',
+  'div[data-pagelet*="FeedUnit"] [aria-label*="bày tỏ cảm xúc"], div[data-pagelet*="FeedUnit"] [aria-label*="Bày tỏ cảm xúc"]',
+  'div[data-pagelet*="Permalink"] [aria-label="Thích"], div[data-pagelet*="Permalink"] [aria-label="Like"]',
+
+  // 5. Toàn trang (Chính xác cho action bar của bài viết Facebook)
+  'div[role="button"][aria-label="Thích"], div[role="button"][aria-label="Like"]',
+  'div[role="button"][aria-label="Gỡ Thích"], div[role="button"][aria-label="Remove Like"]',
+  'div[role="button"][aria-label*="bày tỏ cảm xúc"], div[role="button"][aria-label*="Bày tỏ cảm xúc"]',
+  'div[role="button"][aria-label*="Thích bài viết"], div[role="button"][aria-label*="Like post"]',
+  'div[role="button"]:has(span:text-is("Thích")), div[role="button"]:has(span:text-is("Like"))',
   '[aria-label="Thích"], [aria-label="Like"]',
-  '[aria-label*="bày tỏ cảm xúc"], [aria-label*="Bày tỏ cảm xúc"], [aria-label*="Thích bài viết"], [aria-label*="Like post"]',
-  'div[role="button"]:has-text("Thích"), div[role="button"]:has-text("Like")',
+  '[aria-label="Gỡ Thích"], [aria-label="Remove Like"]',
 ];
 
 async function findLikeButtonOnTab(tab) {
+  // 1. Quét theo các selector ưu tiên cao và kiểm tra hiển thị thực tế
   for (const selector of LIKE_SELECTOR_TIERS) {
-    const locator = tab.locator(selector).first();
-    if ((await locator.count().catch(() => 0)) > 0) {
-      return locator;
+    const loc = tab.locator(selector);
+    const count = await loc.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      const candidate = loc.nth(i);
+      if (await candidate.isVisible().catch(() => false)) {
+        return candidate;
+      }
     }
   }
-  const roleLike = tab.locator('div[role="button"]:has([data-ad-rendering-role="like_button"]), [aria-label="Thích"]:has([data-ad-rendering-role="like_button"]), [aria-label="Like"]:has([data-ad-rendering-role="like_button"]), [aria-label="Gỡ Thích"]:has([data-ad-rendering-role="like_button"]), [aria-label="Remove Like"]:has([data-ad-rendering-role="like_button"])').first();
-  if ((await roleLike.count().catch(() => 0)) > 0 && (await roleLike.isVisible().catch(() => false))) {
-    return roleLike;
+
+  // 2. Fallback: Nút có chứa icon Like hoặc text "Thích"
+  const fallbackSelectors = [
+    'div[role="button"]:has-text("Thích")',
+    'div[role="button"]:has-text("Like")',
+    'div[role="button"]:has(i[data-visualcompletion="css-img"])',
+  ];
+  for (const sel of fallbackSelectors) {
+    const loc = tab.locator(sel);
+    const count = await loc.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      const candidate = loc.nth(i);
+      if (await candidate.isVisible().catch(() => false)) {
+        return candidate;
+      }
+    }
   }
-  const dialogBtn = tab.locator('div[role="dialog"] div[role="button"]:has-text("Thích"), div[role="dialog"] div[role="button"]:has-text("Like"), div[role="dialog"] [aria-label="Thích"], div[role="dialog"] [aria-label="Like"]').first();
-  if ((await dialogBtn.count().catch(() => 0)) > 0 && (await dialogBtn.isVisible().catch(() => false))) {
-    return dialogBtn;
-  }
+
   return null;
 }
 
@@ -1066,13 +1104,25 @@ async function executePageInteraction({
 
     // BƯỚC 4: THẢ LIKE / REACTION
     if (enableLike) {
-      await tab.waitForSelector('div[role="button"]:has([data-ad-rendering-role="like_button"]), [aria-label*="Thích"], [aria-label*="Like"]', { timeout: 4500 }).catch(() => null);
-      let likeBtn = await findLikeButtonOnTab(tab);
+      // 1. Tự động đóng các modal/banner che khuất bài viết (nếu có)
+      await tab.keyboard.press('Escape').catch(() => {});
+      const closePopup = tab.locator('[aria-label="Đóng"], [aria-label="Close"], div[role="dialog"] [aria-label="Đóng"], div[role="dialog"] [aria-label="Close"]').first();
+      if ((await closePopup.count().catch(() => 0)) > 0 && (await closePopup.isVisible().catch(() => false))) {
+        await closePopup.click({ force: true }).catch(() => {});
+        await tab.waitForTimeout(300);
+      }
 
-      if (!likeBtn) {
-        await tab.evaluate(() => window.scrollBy(0, 300)).catch(() => {});
-        await tab.waitForTimeout(500);
+      // 2. Chờ phần tử nút Like xuất hiện với timeout linh hoạt và cuộn trang tăng dần
+      let likeBtn = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await tab.waitForSelector('div[role="button"]:has([data-ad-rendering-role="like_button"]), [aria-label*="Thích"], [aria-label*="Like"], div[role="article"]', { timeout: 3500 }).catch(() => null);
         likeBtn = await findLikeButtonOnTab(tab);
+        if (likeBtn) break;
+
+        // Cuộn mượt để kích hoạt lazy-mount của Facebook React
+        const scrollDistance = attempt === 1 ? 350 : 700;
+        await tab.evaluate((dist) => window.scrollBy({ top: dist, behavior: 'smooth' }), scrollDistance).catch(() => {});
+        await tab.waitForTimeout(1000);
       }
 
       if (likeBtn) {
@@ -1150,9 +1200,27 @@ async function executePageInteraction({
           }
         }
       } else {
+        const currentUrl = tab.url();
+        console.warn(`[FB-Buff]${workerTag} ⚠️ Không tìm thấy nút Like cho "${pageInfo.name}" (URL: ${currentUrl})`);
+
+        // Lưu ảnh màn hình debug
+        try {
+          const debugDir = path.join(__dirname, 'data', 'debug_screens');
+          if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
+          const imgPath = path.join(debugDir, `no_like_${pageInfo.id}.png`);
+          await tab.screenshot({ path: imgPath, fullPage: false }).catch(() => {});
+        } catch (e) {}
+
+        const isGroup = currentUrl.includes('/groups/');
+        const joinGroupBtn = tab.locator('div[role="button"]:has-text("Tham gia nhóm"), div[role="button"]:has-text("Join group")').first();
+        const needsJoin = (await joinGroupBtn.count().catch(() => 0)) > 0;
+
         likeStatus = 'NO_BUTTON';
-        likeError = 'Không tìm thấy nút Like';
-        console.warn(`[FB-Buff]${workerTag} ⚠️ Không tìm thấy nút Like cho "${pageInfo.name}"`);
+        likeError = needsJoin
+          ? 'Nhóm yêu cầu tham gia (Chưa vào nhóm nên ẩn nút Like)'
+          : isGroup
+          ? 'Bài viết trong Nhóm kín hoặc chưa tải kịp nút Like'
+          : 'Không tìm thấy nút Like trên bài viết';
       }
     }
 
@@ -1513,9 +1581,14 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
 
         // Giãn cách mở bài viết ban đầu để tránh chạm mốc rate-limit
         await new Promise((r) => setTimeout(r, (workerId - 1) * 1200));
+        let workerTargetUrl = targetUrl;
         try {
           await workerTab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
-          await workerTab.waitForTimeout(1500);
+          await workerTab.waitForTimeout(2000);
+          const redirected = workerTab.url();
+          if (redirected && redirected.includes('facebook.com') && !redirected.includes('/share/')) {
+            workerTargetUrl = redirected;
+          }
         } catch (e) {
           console.warn(`[FB-Buff]${workerTag} ⚠️ Lỗi tải bài viết ban đầu: ${e.message}`);
         }
@@ -1547,7 +1620,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             context: workerContext,
             pageInfo,
             uid,
-            targetUrl,
+            targetUrl: workerTargetUrl,
             normalizedPostUrl,
             enableLike,
             enableComment,
@@ -1705,9 +1778,15 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       await tab.route('**/*{google-analytics,doubleclick,connect.facebook.net/signals}*', (route) => route.abort());
 
       console.log(`[FB-Buff] 🌐 Tải bài viết mục tiêu trước khi chạy luồng: ${targetUrl}`);
+      let effectiveTargetUrl = targetUrl;
       try {
         await tab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
-        await tab.waitForTimeout(2000);
+        await tab.waitForTimeout(2500);
+        const redirected = tab.url();
+        if (redirected && redirected.includes('facebook.com') && !redirected.includes('/share/')) {
+          effectiveTargetUrl = redirected;
+          console.log(`[FB-Buff] 🔗 Đã phát hiện link bài viết gốc: ${effectiveTargetUrl}`);
+        }
       } catch (e) {
         console.warn(`[FB-Buff] ⚠️ Lỗi tải bài viết ban đầu (${e.message}), sẽ tự động thử lại.`);
       }
@@ -1739,7 +1818,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           context,
           pageInfo,
           uid,
-          targetUrl,
+          targetUrl: effectiveTargetUrl,
           normalizedPostUrl,
           enableLike,
           enableComment,

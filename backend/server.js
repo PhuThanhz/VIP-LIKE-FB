@@ -248,6 +248,295 @@ async function resolveViaProxy(cookieString, explicitProxy = '') {
   return '';
 }
 
+// =============================================================================
+// AUTHENTICATION, JWT (RFC 7519 HMAC-SHA256) & ACCESS CONTROL
+// =============================================================================
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+const DEFAULT_USERS = [
+  {
+    id: 1,
+    username: 'thanhan',
+    password: '123',
+    email: 'thanhan@viplike.vn',
+    fullName: 'Thành An (Nick Mẹ 512 Page)',
+    role: 'ADMIN',
+  },
+  {
+    id: 2,
+    username: 'admin',
+    password: 'admin',
+    email: 'admin@viplike.vn',
+    fullName: 'Quản Trị Viên VIPLIKE',
+    role: 'ADMIN',
+  },
+  {
+    id: 3,
+    username: 'huynhthanhphu',
+    password: '123',
+    email: 'phu@viplike.vn',
+    fullName: 'Huỳnh Thạnh Phú',
+    role: 'ADMIN',
+  },
+];
+
+function loadUsers() {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch (e) {}
+  saveUsers(DEFAULT_USERS);
+  return DEFAULT_USERS;
+}
+
+function saveUsers(users) {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
+  } catch (e) {}
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || 'ViplikeRadiantSecretKeyForJwtAuthentication2026SuperSecureKeyWithMin256Bits';
+
+function base64UrlEncode(str) {
+  return Buffer.from(str)
+    .toString('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+}
+
+function base64UrlDecode(str) {
+  let s = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  return Buffer.from(s, 'base64').toString('utf8');
+}
+
+function generateJwtToken(user, expiresInSeconds = 86400 * 10) {
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + expiresInSeconds;
+  const payload = {
+    sub: user.username,
+    id: user.id,
+    email: user.email,
+    fullName: user.fullName || user.username,
+    role: user.role || 'ADMIN',
+    iat: now,
+    exp,
+  };
+
+  const encodedHeader = base64UrlEncode(JSON.stringify(header));
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signature = crypto
+    .createHmac('sha256', JWT_SECRET)
+    .update(`${encodedHeader}.${encodedPayload}`)
+    .digest('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+
+  return `${encodedHeader}.${encodedPayload}.${signature}`;
+}
+
+function verifyJwtToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  const [encodedHeader, encodedPayload, signature] = parts;
+  const expectedSig = crypto
+    .createHmac('sha256', JWT_SECRET)
+    .update(`${encodedHeader}.${encodedPayload}`)
+    .digest('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+
+  if (signature !== expectedSig) return null;
+
+  try {
+    const payload = JSON.parse(base64UrlDecode(encodedPayload));
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      return null; // Token hết hạn
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+const authHandler = {
+  login: (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!' });
+      }
+      const users = loadUsers();
+      const u = username.trim().toLowerCase();
+      const user = users.find((x) => x.username.toLowerCase() === u || x.email.toLowerCase() === u);
+
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          error: 'Tài khoản không tồn tại trên hệ thống. Vui lòng kiểm tra lại!',
+        });
+      }
+
+      // So khớp mật khẩu chính xác tuyệt đối 1:1 (Strict Equality)
+      const isMatch = Boolean(user.password && password.trim() === user.password);
+
+      if (!isMatch) {
+        return res.status(401).json({
+          success: false,
+          error: 'Mật khẩu không chính xác. Vui lòng nhập đúng mật khẩu!',
+        });
+      }
+
+      // Sinh JWT chuẩn RFC 7519 HMAC-SHA256 (hạn 10 ngày)
+      const token = generateJwtToken(user, 86400 * 10);
+      return res.json({
+        success: true,
+        token,
+        tokenType: 'Bearer',
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          fullName: user.fullName || user.username,
+          role: user.role || 'ADMIN',
+        },
+        data: {
+          token,
+          tokenType: 'Bearer',
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          fullName: user.fullName || user.username,
+          role: user.role || 'ADMIN',
+        },
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  },
+  register: (req, res) => {
+    try {
+      const { username, password, email, fullName } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!' });
+      }
+      const users = loadUsers();
+      const exists = users.find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
+      if (exists) return res.status(400).json({ success: false, error: 'Tên đăng nhập đã tồn tại!' });
+      const newUser = {
+        id: Date.now(),
+        username: username.trim(),
+        password: password.trim(),
+        email: email || `${username.trim()}@viplike.vn`,
+        fullName: fullName || username.trim(),
+        role: 'USER',
+      };
+      users.push(newUser);
+      saveUsers(users);
+      const token = generateJwtToken(newUser, 86400 * 10);
+      return res.json({
+        success: true,
+        token,
+        tokenType: 'Bearer',
+        user: newUser,
+        data: { token, tokenType: 'Bearer', ...newUser },
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  },
+  me: (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader;
+    if (!token) {
+      return res.status(401).json({ success: false, authenticated: false, error: 'Yêu cầu đăng nhập. Chưa có mã xác thực JWT.' });
+    }
+    const decoded = verifyJwtToken(token);
+    if (!decoded) {
+      return res.status(401).json({ success: false, authenticated: false, error: 'Phiên đăng nhập (JWT) không hợp lệ hoặc đã hết hạn.' });
+    }
+    return res.json({
+      success: true,
+      authenticated: true,
+      user: {
+        id: decoded.id,
+        username: decoded.sub || decoded.username,
+        email: decoded.email,
+        fullName: decoded.fullName,
+        role: decoded.role,
+      },
+    });
+  },
+};
+
+// Các route xác thực (Công khai)
+app.post('/api/auth/login', authHandler.login);
+app.post('/auth/login', authHandler.login);
+app.post('/api/auth/register', authHandler.register);
+app.post('/auth/register', authHandler.register);
+app.get('/api/auth/me', authHandler.me);
+app.get('/auth/me', authHandler.me);
+
+// Middleware xác thực JWT bắt buộc cho toàn bộ API hệ thống
+function authenticateJwt(req, res, next) {
+  if (req.method === 'OPTIONS') return next();
+
+  const publicPaths = [
+    '/api/auth/login',
+    '/auth/login',
+    '/api/auth/register',
+    '/auth/register',
+    '/api/auth/me',
+    '/auth/me',
+    '/api/db/test',
+    '/db/test',
+    '/api/health',
+    '/health',
+    '/api/license/activate',
+    '/api/license/status',
+  ];
+
+  const currentPath = req.path.toLowerCase();
+  const isPublic = publicPaths.some(
+    (p) => currentPath === p.toLowerCase() || currentPath === p.toLowerCase() + '/'
+  );
+
+  if (isPublic) return next();
+
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      authenticated: false,
+      error: 'Yêu cầu đăng nhập. Không tìm thấy mã xác thực JWT (Bearer token).',
+    });
+  }
+
+  const decoded = verifyJwtToken(token);
+  if (!decoded) {
+    return res.status(401).json({
+      success: false,
+      authenticated: false,
+      error: 'Phiên đăng nhập (JWT) không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.',
+    });
+  }
+
+  req.user = decoded;
+  next();
+}
+
+app.use(authenticateJwt);
+
 // Kiểm tra sức khỏe và tốc độ Proxy thời gian thực
 app.post('/api/proxy/test', async (req, res) => {
   const { proxyUrl } = req.body;
@@ -2159,235 +2448,6 @@ app.get('/api/avatars/custom-image/:filename', (req, res) => {
   }
   return res.status(404).send('Không tìm thấy ảnh');
 });
-
-// =============================================================================
-// 6. AUTHENTICATION & USER MANAGEMENT
-// =============================================================================
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-
-const DEFAULT_USERS = [
-  {
-    id: 1,
-    username: 'thanhan',
-    email: 'thanhan@viplike.vn',
-    fullName: 'Thành An (Quản Trị)',
-    role: 'ADMIN',
-  },
-  {
-    id: 2,
-    username: 'admin',
-    email: 'admin@viplike.vn',
-    fullName: 'Quản Trị Viên VIPLIKE',
-    role: 'ADMIN',
-  },
-  {
-    id: 3,
-    username: 'huynhthanhphu',
-    email: 'phu@viplike.vn',
-    fullName: 'Huỳnh Thạnh Phú',
-    role: 'ADMIN',
-  },
-];
-
-function loadUsers() {
-  try {
-    if (fs.existsSync(USERS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
-      if (Array.isArray(data) && data.length > 0) return data;
-    }
-  } catch (e) {}
-  saveUsers(DEFAULT_USERS);
-  return DEFAULT_USERS;
-}
-
-function saveUsers(users) {
-  try {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
-  } catch (e) {}
-}
-
-// =============================================================================
-// JSON WEB TOKEN (JWT) RFC 7519 - HMAC-SHA256 (Tương thích 100% với Spring Boot)
-// =============================================================================
-const JWT_SECRET = process.env.JWT_SECRET || 'ViplikeRadiantSecretKeyForJwtAuthentication2026SuperSecureKeyWithMin256Bits';
-
-function base64UrlEncode(str) {
-  return Buffer.from(str)
-    .toString('base64')
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-}
-
-function base64UrlDecode(str) {
-  let s = str.replace(/-/g, '+').replace(/_/g, '/');
-  while (s.length % 4) s += '=';
-  return Buffer.from(s, 'base64').toString('utf8');
-}
-
-function generateJwtToken(user, expiresInSeconds = 86400 * 10) {
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const now = Math.floor(Date.now() / 1000);
-  const exp = now + expiresInSeconds;
-  const payload = {
-    sub: user.username,
-    id: user.id,
-    email: user.email,
-    fullName: user.fullName || user.username,
-    role: user.role || 'ADMIN',
-    iat: now,
-    exp,
-  };
-
-  const encodedHeader = base64UrlEncode(JSON.stringify(header));
-  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
-  const signature = crypto
-    .createHmac('sha256', JWT_SECRET)
-    .update(`${encodedHeader}.${encodedPayload}`)
-    .digest('base64')
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-
-  return `${encodedHeader}.${encodedPayload}.${signature}`;
-}
-
-function verifyJwtToken(token) {
-  if (!token || typeof token !== 'string') return null;
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
-
-  const [encodedHeader, encodedPayload, signature] = parts;
-  const expectedSig = crypto
-    .createHmac('sha256', JWT_SECRET)
-    .update(`${encodedHeader}.${encodedPayload}`)
-    .digest('base64')
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-
-  if (signature !== expectedSig) return null;
-
-  try {
-    const payload = JSON.parse(base64UrlDecode(encodedPayload));
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-      return null; // Token hết hạn
-    }
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
-const authHandler = {
-  login: (req, res) => {
-    try {
-      const { username, password } = req.body;
-      if (!username || !password) {
-        return res.status(400).json({ success: false, error: 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu' });
-      }
-      const users = loadUsers();
-      const u = username.trim().toLowerCase();
-      const user = users.find((x) => x.username.toLowerCase() === u || x.email.toLowerCase() === u);
-
-      if (!user) {
-        return res.status(401).json({ success: false, error: 'Tài khoản không tồn tại trên hệ thống. Vui lòng kiểm tra lại.' });
-      }
-
-      // Kiểm tra mật khẩu (hỗ trợ mật khẩu đã lưu hoặc 123 / 123456)
-      const allowedPasswords = [user.password, '123', '123456', 'admin', 'admin123'].filter(Boolean);
-      const isMatch = allowedPasswords.includes(password.trim());
-
-      if (!isMatch) {
-        return res.status(401).json({ success: false, error: 'Mật khẩu không chính xác. Vui lòng nhập đúng mật khẩu.' });
-      }
-
-      // Sinh JWT chuẩn RFC 7519 HMAC-SHA256 (hạn 10 ngày)
-      const token = generateJwtToken(user, 86400 * 10);
-      return res.json({
-        success: true,
-        token,
-        tokenType: 'Bearer',
-        user: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          fullName: user.fullName || user.username,
-          role: user.role || 'ADMIN',
-        },
-        data: {
-          token,
-          tokenType: 'Bearer',
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          fullName: user.fullName || user.username,
-          role: user.role || 'ADMIN',
-        },
-      });
-    } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
-    }
-  },
-  register: (req, res) => {
-    try {
-      const { username, password, email, fullName } = req.body;
-      if (!username || !password) return res.status(400).json({ success: false, error: 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu' });
-      const users = loadUsers();
-      const exists = users.find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
-      if (exists) return res.status(400).json({ success: false, error: 'Tên đăng nhập đã tồn tại' });
-      const newUser = {
-        id: Date.now(),
-        username: username.trim(),
-        password: password.trim(),
-        email: email || `${username.trim()}@viplike.vn`,
-        fullName: fullName || username.trim(),
-        role: 'USER',
-      };
-      users.push(newUser);
-      saveUsers(users);
-      const token = generateJwtToken(newUser, 86400 * 10);
-      return res.json({
-        success: true,
-        token,
-        tokenType: 'Bearer',
-        user: newUser,
-        data: { token, tokenType: 'Bearer', ...newUser },
-      });
-    } catch (err) {
-      return res.status(500).json({ success: false, error: err.message });
-    }
-  },
-  me: (req, res) => {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
-    if (!token) {
-      return res.status(401).json({ success: false, authenticated: false, error: 'Yêu cầu đăng nhập. Chưa có mã xác thực JWT.' });
-    }
-    const decoded = verifyJwtToken(token);
-    if (!decoded) {
-      return res.status(401).json({ success: false, authenticated: false, error: 'Phiên đăng nhập (JWT) không hợp lệ hoặc đã hết hạn.' });
-    }
-    return res.json({
-      success: true,
-      authenticated: true,
-      user: {
-        id: decoded.id,
-        username: decoded.sub || decoded.username,
-        email: decoded.email,
-        fullName: decoded.fullName,
-        role: decoded.role,
-      },
-    });
-  },
-};
-
-app.post('/api/auth/login', authHandler.login);
-app.post('/auth/login', authHandler.login);
-app.post('/api/auth/register', authHandler.register);
-app.post('/auth/register', authHandler.register);
-app.get('/api/auth/me', authHandler.me);
-app.get('/auth/me', authHandler.me);
 
 // Khởi động server
 
