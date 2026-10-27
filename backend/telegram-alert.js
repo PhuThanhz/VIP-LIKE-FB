@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = {
   isEmergencyStopped: false,
   emergencyReason: '',
   emergencyStoppedAt: null,
+  proxyPool: [],
 };
 
 function loadSettings() {

@@ -263,6 +263,58 @@ app.post('/api/proxy/test', async (req, res) => {
   }
 });
 
+// Lấy danh sách Proxy Pool từ cài đặt hệ thống
+app.get('/api/proxy-pool', (req, res) => {
+  try {
+    const settings = loadBuffSettings();
+    return res.json({ success: true, proxyPool: settings.proxyPool || [] });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Cập nhật danh sách Proxy Pool
+app.post('/api/proxy-pool', (req, res) => {
+  try {
+    const { proxyPool } = req.body;
+    if (!Array.isArray(proxyPool)) {
+      return res.status(400).json({ success: false, error: 'proxyPool phải là một mảng chuỗi proxy' });
+    }
+    const cleanPool = proxyPool
+      .map((p) => (typeof p === 'string' ? p.trim() : ''))
+      .filter((p) => Boolean(p));
+
+    const updated = saveBuffSettings({ proxyPool: cleanPool });
+    return res.json({ success: true, proxyPool: updated?.proxyPool || cleanPool });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Kiểm tra sức khỏe toàn bộ Proxy trong Pool song song
+app.post('/api/proxy-pool/test', async (req, res) => {
+  try {
+    const { proxies } = req.body;
+    const pool = Array.isArray(proxies) ? proxies : (loadBuffSettings().proxyPool || []);
+    if (!pool.length) {
+      return res.json({ success: true, results: [] });
+    }
+
+    const results = await Promise.all(
+      pool.map(async (proxyStr) => {
+        const health = await fbBuffTool.testProxyHealth(proxyStr, 6000);
+        return {
+          proxy: proxyStr,
+          ...health,
+        };
+      })
+    );
+    return res.json({ success: true, results });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // =============================================================================
 // 3. API ROUTES - MYSQL WORKBENCH DATABASE
 // =============================================================================
@@ -464,6 +516,8 @@ app.post('/api/buff-like', async (req, res) => {
   }
 
   try {
+    const sysSettings = loadBuffSettings();
+    const proxyPool = Array.isArray(sysSettings.proxyPool) ? sysSettings.proxyPool : [];
     const proxyUrl = await resolveViaProxy(cookieString, explicitProxy);
     const laneUid = fbBuffTool.getUserIdFromCookie(cookieString);
     const result = await withBuffLane(laneUid, () =>
@@ -479,6 +533,7 @@ app.post('/api/buff-like', async (req, res) => {
         cooldownDurationMs,
         comments,
         proxyUrl,
+        proxyPool,
         concurrency: Math.max(1, Math.min(3, parseInt(concurrency, 10) || 1)),
         dripFeedMode: Boolean(dripFeedMode),
         dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
@@ -540,6 +595,8 @@ app.post('/api/buff-like-stream', async (req, res) => {
   };
 
   try {
+    const sysSettings = loadBuffSettings();
+    const proxyPool = Array.isArray(sysSettings.proxyPool) ? sysSettings.proxyPool : [];
     const proxyUrl = await resolveViaProxy(cookieString, explicitProxy);
     const laneUid = fbBuffTool.getUserIdFromCookie(cookieString);
 
@@ -556,6 +613,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
         cooldownDurationMs,
         comments,
         proxyUrl,
+        proxyPool,
         concurrency: Math.max(1, Math.min(3, parseInt(concurrency, 10) || 1)),
         dripFeedMode: Boolean(dripFeedMode),
         dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
@@ -884,6 +942,8 @@ async function executeQueueTask(task) {
 
     for (const group of viaGroupsMap.values()) {
       if (isEmergencyStopped()) break;
+      const sysSettings = loadBuffSettings();
+      const proxyPool = Array.isArray(sysSettings.proxyPool) ? sysSettings.proxyPool : [];
       const laneUid = fbBuffTool.getUserIdFromCookie(group.cookieString);
       const res = await withBuffLane(laneUid, () =>
         fbBuffTool.buffLikesWithPages(group.cookieString, task.targetUrl, {
@@ -898,6 +958,7 @@ async function executeQueueTask(task) {
           cooldownDurationMs: 4000,
           comments: task.comments || [],
           proxyUrl: group.proxyUrl,
+          proxyPool,
           shouldStop: () => isEmergencyStopped(),
           onProgress: (ev) => {
             if (ev.type === 'PAGE_FINISH') {
