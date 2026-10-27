@@ -742,10 +742,45 @@ app.post('/api/buff-get-pages', async (req, res) => {
 app.get('/api/buff-cached-pages', (req, res) => {
   try {
     const { uid } = req.query;
+    let pages = [];
+
     if (uid) {
-      const pages = fbBuffTool.getCachedPages(String(uid)) || [];
+      pages = fbBuffTool.getCachedPages(String(uid)) || [];
+      if (!pages || pages.length === 0) {
+        // Fallback 1: Tìm trong accounts_cache
+        try {
+          const cachedAccounts = db.loadAccountsCache() || [];
+          const matched = cachedAccounts.filter(
+            (a) =>
+              a.platform === 'FACEBOOK_PAGE' &&
+              ((a.cookieString && a.cookieString.includes(`c_user=${uid}`)) || (a.accessToken && a.accessToken.includes(`c_user=${uid}`)))
+          );
+          if (matched.length > 0) {
+            pages = matched.map((m) => ({
+              id: m.platformAccountId || m.pageId || String(m.id),
+              name: m.pageName || `Fanpage ${m.id}`,
+              url: `https://www.facebook.com/${m.platformAccountId || m.pageId || m.id}`,
+            }));
+          }
+        } catch (e) {}
+      }
       return res.json({ success: true, uid, count: pages.length, pages });
     }
+
+    // Nếu không truyền UID, trả về toàn bộ cache từ avatar_status_cache & accounts_cache
+    try {
+      const avatarCache = avatarTool.loadAvatarCache() || {};
+      const pageList = Object.values(avatarCache).map((p) => ({
+        id: p.pageId,
+        name: p.name || p.pageName || `Fanpage ${p.pageId}`,
+        url: `https://www.facebook.com/${p.pageId}`,
+        hasAvatar: p.hasAvatar,
+      }));
+      if (pageList.length > 0) {
+        return res.json({ success: true, count: pageList.length, pages: pageList });
+      }
+    } catch (e) {}
+
     const allCache = fbBuffTool.loadPagesCache();
     return res.json({ success: true, cache: allCache });
   } catch (err) {

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VIPLIKE Avatar Fast Uploader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-box">
+        <div class="logo-badge">⚡</div>
+        <div class="logo-text">
+          <h1>VIPLIKE RADIANT</h1>
+          <span>Avatar Fast Uploader v1.0</span>
+        </div>
+      </div>
+      <div id="fb-status-pill" class="status-pill status-disconnected">
+        <span class="dot"></span>
+        <span id="fb-status-text">Đang kết nối...</span>
+      </div>
+    </header>
+
+    <!-- User Account Card -->
+    <div class="card account-card">
+      <div class="user-avatar" id="user-avatar-placeholder">👤</div>
+      <div class="user-info">
+        <div class="user-name" id="user-name">Đang kiểm tra tab Facebook...</div>
+        <div class="user-uid" id="user-uid">UID: ---</div>
+      </div>
+      <button id="btn-refresh-user" class="btn-icon" title="Kiểm tra lại Facebook">🔄</button>
+    </div>
+
+    <!-- Configuration Section -->
+    <div class="card config-card">
+      <!-- Preset Selection -->
+      <div class="form-group">
+        <label for="avatar-preset">Kho ảnh đại diện:</label>
+        <select id="avatar-preset" class="form-select">
+          <option value="mix">✨ Ngẫu nhiên Nam & Nữ HD (220+ ảnh)</option>
+          <option value="women">👩 Chân dung Nữ sắc nét (112 ảnh)</option>
+          <option value="men">👨 Chân dung Nam sắc nét (112 ảnh)</option>
+          <option value="business">💼 Doanh nhân / Studio HD (Unsplash)</option>
+        </select>
+      </div>
+
+      <!-- Source Selection -->
+      <div class="form-group">
+        <label for="page-source">Nguồn nạp danh sách Fanpage:</label>
+        <select id="page-source" class="form-select">
+          <option value="viplike_backend">⚡ Nạp từ VIPLIKE RADIANT (:3100) (Khuyên dùng)</option>
+          <option value="custom_list">📝 Tự nhập danh sách ID / Link Fanpage</option>
+          <option value="fb_tab">🌐 Quét từ Tab Facebook hiện tại</option>
+        </select>
+      </div>
+
+      <!-- Custom Page Input (Hidden by default) -->
+      <div class="form-group" id="custom-pages-group" style="display: none;">
+        <label for="custom-pages-input">Nhập ID / Link Page (mỗi dòng 1 Page):</label>
+        <textarea id="custom-pages-input" class="form-textarea" rows="3" placeholder="61594573362379&#10;61594510094814&#10;https://facebook.com/61595161642497"></textarea>
+      </div>
+
+      <!-- Speed & Delay -->
+      <div class="form-group">
+        <div class="label-row">
+          <label for="delay-slider">Thời gian chờ giữa mỗi Page:</label>
+          <span id="delay-val" class="badge">4.0s</span>
+        </div>
+        <input type="range" id="delay-slider" min="2.5" max="8" step="0.5" value="4.0" class="form-range">
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="actions-row">
+        <button id="btn-start" class="btn btn-primary">
+          <span>🚀</span> Bắt đầu đổi Avatar
+        </button>
+        <button id="btn-pause" class="btn btn-warning" style="display: none;">
+          <span>⏸️</span> Tạm dừng
+        </button>
+        <button id="btn-stop" class="btn btn-danger" style="display: none;">
+          <span>⏹️</span> Dừng
+        </button>
+      </div>
+    </div>
+
+    <!-- Progress Card -->
+    <div class="card progress-card" id="progress-card">
+      <div class="progress-header">
+        <span class="progress-title">Tiến trình thực thi:</span>
+        <span id="progress-percent" class="progress-percent">0%</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-badge stat-total">
+          <span class="stat-num" id="stat-total">0</span>
+          <span class="stat-label">Tổng Page</span>
+        </div>
+        <div class="stat-badge stat-success">
+          <span class="stat-num" id="stat-success">0</span>
+          <span class="stat-label">Thành công</span>
+        </div>
+        <div class="stat-badge stat-failed">
+          <span class="stat-num" id="stat-failed">0</span>
+          <span class="stat-label">Lỗi</span>
+        </div>
+      </div>
+      <div class="current-page-text" id="current-page-status">
+        Sẵn sàng. Hãy đảm bảo bạn đang mở Facebook trên một tab Chrome.
+      </div>
+    </div>
+
+    <!-- Log Stream Card -->
+    <div class="card logs-card">
+      <div class="logs-header">
+        <span>Nhật ký thời gian thực</span>
+        <button id="btn-clear-logs" class="btn-text">Xóa</button>
+      </div>
+      <div id="logs-list" class="logs-list">
+        <div class="empty-log">Chưa có nhật ký hoạt động.</div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span>VIPLIKE RADIANT &copy; 2026 - Tự động hóa trình duyệt thật</span>
+    </footer>
+  </div>
+
+  <script src="avatars-data.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
