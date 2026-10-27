@@ -38,3 +38,10 @@ blob-report/
 backend/browser_profiles/
 backend/data/page_usage.json
 
+
+# Dữ liệu runtime của backend (tài khoản, cài đặt, cache, khoá JWT)
+backend/data/*.json
+backend/data/.jwt_secret
+backend/data/temp_avatars/
+backend/data/debug_screens/
+backend/data/*.bak*

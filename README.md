@@ -33,7 +33,7 @@ Phần mềm kết nối trực tiếp với MySQL Workbench theo cấu hình tr
 - **Host**: `localhost`
 - **Port**: `3306`
 - **User**: `root`
-- **Password**: `26082003`
+- **Password**: điền vào `DB_PASSWORD` trong file `.env` (không ghi mật khẩu vào README)
 - **Database**: `autopost_saas`
 - **Bảng dữ liệu**: `social_accounts`
 

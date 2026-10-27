@@ -1,122 +1,68 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, Button, Tabs, Tag, Avatar, Tooltip, message, Space } from 'antd';
-import {
-  UserOutlined,
-  LockOutlined,
-  ThunderboltFilled,
-  CrownOutlined,
-  KeyOutlined,
-  CheckCircleOutlined,
-  RocketOutlined,
-} from '@ant-design/icons';
+import { Card, Form, Input, Button, Tabs, Avatar, message } from 'antd';
+import { UserOutlined, LockOutlined, ThunderboltFilled, CrownOutlined, KeyOutlined } from '@ant-design/icons';
 import api from '../../config/axios';
 import { getMachineHwid } from '../../utils/tauriBridge';
-
-export interface CurrentUser {
-  id: number;
-  username: string;
-  email: string;
-  fullName: string;
-  role: string;
-}
+import { CurrentUser, parseAuthResponse, saveSession } from '../../auth/session';
 
 interface LoginPageProps {
   onLoginSuccess: (user: CurrentUser) => void;
-  dbConnected?: boolean;
 }
 
-export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnected = true }) => {
-  const [activeTab, setActiveTab] = useState<'login' | 'quick' | 'license'>('login');
+type LoginTab = 'login' | 'license';
+
+// Dùng chung key để lỗi mới thay thế lỗi cũ, không chồng thông báo khi bấm nhiều lần
+const AUTH_MESSAGE_KEY = 'auth-message';
+
+export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
+  const [activeTab, setActiveTab] = useState<LoginTab>('login');
   const [loading, setLoading] = useState(false);
   const [hwid, setHwid] = useState('');
   const [form] = Form.useForm();
   const [licenseForm] = Form.useForm();
 
   useEffect(() => {
-    getMachineHwid().then((id) => setHwid(id || 'HWID-MAC-RADIANT-2026'));
+    getMachineHwid().then(setHwid);
   }, []);
 
-  // Xử lý đăng nhập form
-  const handleLoginSubmit = async (values: any) => {
+  const handleLoginSubmit = async (values: { username: string; password: string }) => {
     setLoading(true);
     try {
       const res = await api.post('/auth/login', {
         username: values.username.trim(),
-        password: values.password.trim(),
+        password: values.password,
       });
-
-      const data = res.data?.data || res.data;
-      if (data?.token && (data?.user || data?.username)) {
-        const userObj: CurrentUser = data.user || {
-          id: data.id || Date.now(),
-          username: data.username || values.username.trim(),
-          email: data.email || `${values.username.trim()}@viplike.vn`,
-          fullName: data.fullName || values.username.trim(),
-          role: data.role || 'ADMIN',
-        };
-        const token = data.token;
-        localStorage.setItem('viplike_token', token);
-        localStorage.setItem('viplike_user', JSON.stringify(userObj));
-        message.success(`🎉 Chào mừng ${userObj.fullName} đã đăng nhập thành công!`);
-        onLoginSuccess(userObj);
+      const session = parseAuthResponse(res.data);
+      if (session) {
+        saveSession(session.token, session.user);
+        message.success(`🎉 Chào mừng ${session.user.fullName} đã đăng nhập thành công!`);
+        onLoginSuccess(session.user);
       } else {
-        message.error(res.data?.error || 'Đăng nhập không thành công');
+        message.error({ content: res.data?.error || 'Đăng nhập không thành công', key: AUTH_MESSAGE_KEY });
       }
     } catch (err: any) {
-      message.error(err.response?.data?.error || 'Tài khoản hoặc mật khẩu không chính xác!');
+      message.error({ content: err.response?.data?.error || err.message || 'Tài khoản hoặc mật khẩu không chính xác!', key: AUTH_MESSAGE_KEY });
     } finally {
       setLoading(false);
     }
   };
 
-  // Đăng nhập nhanh 1-Click (Gửi thông tin thật lên backend để nhận JWT token chuẩn)
-  const handleQuickLogin = async (accountType: 'thanhan' | 'admin' | 'phu') => {
-    setLoading(true);
-    const username = accountType === 'thanhan' ? 'thanhan' : accountType === 'admin' ? 'admin' : 'huynhthanhphu';
-    try {
-      const res = await api.post('/auth/login', {
-        username,
-        password: '123',
-      });
-      const data = res.data?.data || res.data;
-      if (data?.token) {
-        const userObj: CurrentUser = data.user || {
-          id: data.id || Date.now(),
-          username: data.username || username,
-          email: data.email || `${username}@viplike.vn`,
-          fullName: data.fullName || username,
-          role: data.role || 'ADMIN',
-        };
-        localStorage.setItem('viplike_token', data.token);
-        localStorage.setItem('viplike_user', JSON.stringify(userObj));
-        message.success(`🎉 Đã đăng nhập xác thực JWT thành công: ${userObj.fullName}`);
-        onLoginSuccess(userObj);
-      } else {
-        message.error(res.data?.error || 'Đăng nhập nhanh thất bại');
-      }
-    } catch (err: any) {
-      message.error(err.response?.data?.error || 'Không kết nối được server xác thực');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Kích hoạt key bản quyền
-  const handleActivateLicense = async (values: any) => {
+  const handleActivateLicense = async (values: { licenseKey: string }) => {
     setLoading(true);
     try {
-      const res = await api.post('/api/license/activate', {
+      const res = await api.post('/license/activate', {
         licenseKey: values.licenseKey.trim(),
         hardwareHwid: hwid,
       });
       if (res.data?.success) {
-        message.success('🎉 Kích hoạt Bản Quyền VIPLIKE thành công!');
-        await handleQuickLogin('thanhan');
+        message.success('🎉 Kích hoạt Bản Quyền thành công! Vui lòng đăng nhập để tiếp tục.');
+        licenseForm.resetFields();
+        setActiveTab('login');
       } else {
-        message.error(res.data?.error || 'Mã key không hợp lệ hoặc đã hết hạn.');
+        message.error({ content: res.data?.error || 'Mã key không hợp lệ hoặc đã hết hạn.', key: AUTH_MESSAGE_KEY });
       }
     } catch (err: any) {
-      message.error(err.response?.data?.error || 'Kích hoạt key bản quyền thất bại.');
+      message.error({ content: err.response?.data?.error || 'Kích hoạt key bản quyền thất bại.', key: AUTH_MESSAGE_KEY });
     } finally {
       setLoading(false);
     }
@@ -144,7 +90,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
       <main className="flex-1 flex items-center justify-center p-4">
         <div className="w-full max-w-md">
           <Card
-            bordered
+            variant="outlined"
             className="shadow-2xl rounded-3xl !bg-slate-900/90 !border-slate-800 shadow-cyan-950/20"
           >
             {/* Header Badge & Brand */}
@@ -165,7 +111,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
             {/* Ant Design Tabs */}
             <Tabs
               activeKey={activeTab}
-              onChange={(key) => setActiveTab(key as any)}
+              onChange={(key) => setActiveTab(key as LoginTab)}
               centered
               className="custom-auth-tabs"
               items={[
@@ -177,17 +123,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                       form={form}
                       layout="vertical"
                       onFinish={handleLoginSubmit}
-                      initialValues={{ username: 'thanhan', password: '' }}
                       className="pt-2 space-y-2"
                     >
                       <Form.Item
                         name="username"
-                        label={<span className="text-xs font-semibold">Tên Đăng Nhập hoặc Nick Mẹ</span>}
+                        label={<span className="text-xs font-semibold">Tên Đăng Nhập hoặc Email</span>}
                         rules={[{ required: true, message: 'Vui lòng nhập tên đăng nhập' }]}
                       >
                         <Input
                           prefix={<UserOutlined className="text-slate-400 mr-1" />}
-                          placeholder="Ví dụ: thanhan hoặc admin"
+                          placeholder="Tên đăng nhập hoặc email"
                           size="large"
                           className="rounded-xl text-sm"
                         />
@@ -200,7 +145,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                       >
                         <Input.Password
                           prefix={<LockOutlined className="text-slate-400 mr-1" />}
-                          placeholder="Nhập mật khẩu (Mặc định: 123)"
+                          placeholder="Nhập mật khẩu"
                           size="large"
                           className="rounded-xl text-sm"
                         />
@@ -217,99 +162,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, dbConnecte
                         🚀 ĐĂNG NHẬP NGAY
                       </Button>
 
-                      <div className="pt-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab('quick')}
-                          className="text-xs text-cyan-400 hover:text-cyan-300 font-medium underline cursor-pointer"
-                        >
-                          Hoặc sử dụng Đăng Nhập Nhanh 1-Chạm (Khuyên Dùng) &rarr;
-                        </button>
-                      </div>
                     </Form>
-                  ),
-                },
-                {
-                  key: 'quick',
-                  label: <span className="font-semibold px-2">⚡ 1-Chạm Nhanh</span>,
-                  children: (
-                    <div className="pt-2 space-y-3">
-                      <p className="text-xs text-slate-400 text-center">
-                        Chọn tài khoản có sẵn trong hệ thống để vào ngay bảng điều khiển:
-                      </p>
-
-                      <Button
-                        block
-                        size="large"
-                        onClick={() => handleQuickLogin('thanhan')}
-                        className="h-auto py-3 px-4 rounded-2xl flex items-center justify-between border transition-all text-left bg-cyan-950/40 border-cyan-700/60 hover:bg-cyan-900/60 hover:border-cyan-500"
-                      >
-                        <div className="flex items-center gap-3">
-                          <Avatar
-                            size={36}
-                            className="bg-cyan-600 font-bold shrink-0"
-                            icon={<CrownOutlined />}
-                          />
-                          <div>
-                            <div className="font-bold text-xs text-cyan-300">
-                              Thành An (Nick Mẹ)
-                            </div>
-                            <div className="text-[11px] text-slate-400">UID: 100023403136194 • 512 Fanpage</div>
-                          </div>
-                        </div>
-                        <Tag color="cyan" className="rounded-full px-2 text-[10px] font-mono border-0">
-                          Chính
-                        </Tag>
-                      </Button>
-
-                      <Button
-                        block
-                        size="large"
-                        onClick={() => handleQuickLogin('admin')}
-                        className="h-auto py-3 px-4 rounded-2xl flex items-center justify-between border transition-all text-left bg-blue-950/40 border-blue-700/60 hover:bg-blue-900/60 hover:border-blue-500"
-                      >
-                        <div className="flex items-center gap-3">
-                          <Avatar
-                            size={36}
-                            className="bg-blue-600 font-bold shrink-0"
-                            icon={<CheckCircleOutlined />}
-                          />
-                          <div>
-                            <div className="font-bold text-xs text-blue-300">
-                              Quản Trị Viên VIPLIKE
-                            </div>
-                            <div className="text-[11px] text-slate-400">Toàn quyền cấu hình & Bản quyền</div>
-                          </div>
-                        </div>
-                        <Tag color="blue" className="rounded-full px-2 text-[10px] font-mono border-0">
-                          Admin
-                        </Tag>
-                      </Button>
-
-                      <Button
-                        block
-                        size="large"
-                        onClick={() => handleQuickLogin('phu')}
-                        className="h-auto py-3 px-4 rounded-2xl flex items-center justify-between border transition-all text-left bg-purple-950/40 border-purple-700/60 hover:bg-purple-900/60 hover:border-purple-500"
-                      >
-                        <div className="flex items-center gap-3">
-                          <Avatar
-                            size={36}
-                            className="bg-purple-600 font-bold shrink-0"
-                            icon={<RocketOutlined />}
-                          />
-                          <div>
-                            <div className="font-bold text-xs text-purple-300">
-                              Huỳnh Thạnh Phú
-                            </div>
-                            <div className="text-[11px] text-slate-400">UID: 100008447847970 • 25 Fanpage</div>
-                          </div>
-                        </div>
-                        <Tag color="purple" className="rounded-full px-2 text-[10px] font-mono border-0">
-                          Nick Phụ
-                        </Tag>
-                      </Button>
-                    </div>
                   ),
                 },
                 {

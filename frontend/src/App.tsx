@@ -1,13 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ConfigProvider, App as AntdApp, Layout, theme, Spin } from 'antd';
-import type { ThemeConfig } from 'antd';
-import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
+import { ConfigProvider, App as AntdApp, Layout, Spin } from 'antd';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Header from './components/Header';
-import Sidebar, { SidebarStats, SidebarDbStatus } from './components/Sidebar';
+import Sidebar, { SidebarStats } from './components/Sidebar';
 import BuffEngagement from './pages/BuffEngagement';
+import LoginPage from './components/auth/LoginPage';
 import api from './config/axios';
-import { ThemeProvider } from './theme/ThemeContext';
-import LoginPage, { CurrentUser } from './components/auth/LoginPage';
+import { DEFAULT_NAV_KEY } from './config/navigation';
+import { DARK_THEME } from './theme/antdTheme';
+import type { DbStatus } from './types/dbStatus';
+import {
+  AUTH_EXPIRED_EVENT,
+  CurrentUser,
+  CurrentUserContext,
+  clearSession,
+  getToken,
+  saveUser,
+} from './auth/session';
 
 const { Content } = Layout;
 
@@ -20,45 +29,22 @@ const queryClient = new QueryClient({
   },
 });
 
-interface MainDashboardProps {
-  currentUser: CurrentUser;
-  onLogout: () => void;
-}
+const DB_POLL_INTERVAL_MS = 30000;
 
-const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) => {
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return window.innerWidth < 1024;
-    }
-    return false;
-  });
-  const [activeTabKey, setActiveTabKey] = useState<string>('buff-like');
-  const [isExternalSettingsOpen, setIsExternalSettingsOpen] = useState(false);
+const isSameDbStatus = (a: DbStatus, b: DbStatus) =>
+  a.connected === b.connected &&
+  a.loading === b.loading &&
+  a.usingCache === b.usingCache &&
+  a.cachedCount === b.cachedCount &&
+  a.database === b.database &&
+  a.error === b.error;
 
-  const [stats, setStats] = useState<SidebarStats>({
-    queueCount: 0,
-    historyCount: 0,
-    monitorsCount: 0,
-    accountsCount: 0,
-  });
-
-  const [dbStatus, setDbStatus] = useState<SidebarDbStatus>({
-    connected: false,
-    loading: true,
-  });
+const useDbStatus = () => {
+  const [dbStatus, setDbStatus] = useState<DbStatus>({ connected: false, loading: true });
 
   // Chỉ cập nhật state khi trạng thái DB thật sự thay đổi, tránh re-render toàn app mỗi lần poll
-  const applyDbStatus = useCallback((next: SidebarDbStatus) => {
-    setDbStatus((prev) =>
-      prev.connected === next.connected &&
-      prev.loading === next.loading &&
-      prev.usingCache === next.usingCache &&
-      prev.cachedCount === next.cachedCount &&
-      prev.database === next.database &&
-      prev.error === next.error
-        ? prev
-        : next
-    );
+  const applyDbStatus = useCallback((next: DbStatus) => {
+    setDbStatus((prev) => (isSameDbStatus(prev, next) ? prev : next));
   }, []);
 
   const fetchDbStatus = useCallback(
@@ -93,58 +79,54 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
     [applyDbStatus]
   );
 
-  // Bấm nút kiểm tra thủ công: hiện loading
-  const checkDb = useCallback(() => {
-    fetchDbStatus(false);
-  }, [fetchDbStatus]);
-
   useEffect(() => {
     fetchDbStatus(false);
     // Poll nền: không bật loading để không làm cả cây re-render khi DB không đổi
-    const interval = setInterval(() => fetchDbStatus(true), 30000);
+    const interval = setInterval(() => fetchDbStatus(true), DB_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [fetchDbStatus]);
+
+  // Bấm nút kiểm tra thủ công: hiện loading
+  const checkDb = useCallback(() => fetchDbStatus(false), [fetchDbStatus]);
+
+  return { dbStatus, checkDb };
+};
+
+interface MainDashboardProps {
+  currentUser: CurrentUser;
+  onLogout: () => void;
+}
+
+const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) => {
+  const [collapsed, setCollapsed] = useState(false);
+  const [activeTabKey, setActiveTabKey] = useState<string>(DEFAULT_NAV_KEY);
+  const [stats, setStats] = useState<SidebarStats>({
+    queueCount: 0,
+    historyCount: 0,
+    monitorsCount: 0,
+    accountsCount: 0,
+  });
+  const { dbStatus, checkDb } = useDbStatus();
 
   const handleSelectTab = useCallback((key: string) => setActiveTabKey(key), []);
   const handleToggleCollapse = useCallback(() => setCollapsed((prev) => !prev), []);
   const openViaManager = useCallback(() => setActiveTabKey('via-management'), []);
   const openSettings = useCallback(() => setActiveTabKey('system-settings'), []);
-
-  const {
-    data: accounts = [],
-    isLoading: loadingAccounts,
-    refetch: refetchAccounts,
-  } = useQuery({
-    queryKey: ['socialAccounts'],
-    queryFn: async () => {
-      const res = await api.get('/connections');
-      return res.data || [];
-    },
-  });
-
-  // Cập nhật số tài khoản vào stats
-  useEffect(() => {
-    if (Array.isArray(accounts)) {
-      setStats((prev) => ({ ...prev, accountsCount: accounts.length }));
-    }
-  }, [accounts]);
+  const handleStatsUpdate = useCallback((newStats: SidebarStats) => {
+    setStats((prev) => ({ ...prev, ...newStats }));
+  }, []);
 
   return (
     <Layout className="min-h-screen !bg-app">
-      {/* Ant Design Sidebar */}
       <Sidebar
         activeTabKey={activeTabKey}
         onSelectTab={handleSelectTab}
         collapsed={collapsed}
+        onCollapsedChange={setCollapsed}
         onToggleCollapse={handleToggleCollapse}
-        onOpenViaManager={openViaManager}
-        onOpenSettings={openSettings}
         stats={stats}
-        dbStatus={dbStatus}
-        onCheckDb={checkDb}
       />
 
-      {/* Main App Layout */}
       <Layout className="!bg-app flex flex-col min-h-screen">
         <Header
           activeTabKey={activeTabKey}
@@ -152,28 +134,20 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
           onOpenSettings={openSettings}
           collapsed={collapsed}
           onToggleCollapse={handleToggleCollapse}
-          dbStatus={dbStatus}
-          onCheckDb={checkDb}
           currentUser={currentUser}
           onLogout={onLogout}
         />
 
         <Content className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto">
+          {/* BuffEngagement tự đếm accountsCount từ danh sách tài khoản và báo lên qua onStatsUpdate */}
           <BuffEngagement
             activeTabKey={activeTabKey}
-            onTabChange={(key) => setActiveTabKey(key)}
-            onOpenViaManager={() => setActiveTabKey('via-management')}
-            onOpenSettings={() => setActiveTabKey('system-settings')}
+            onTabChange={handleSelectTab}
+            onOpenViaManager={openViaManager}
+            onOpenSettings={openSettings}
             dbStatus={dbStatus}
             onCheckDb={checkDb}
-            isExternalSettingsOpen={isExternalSettingsOpen}
-            onCloseExternalSettings={() => setIsExternalSettingsOpen(false)}
-            onStatsUpdate={(newStats) => {
-              setStats((prev) => ({
-                ...prev,
-                ...newStats,
-              }));
-            }}
+            onStatsUpdate={handleStatsUpdate}
           />
         </Content>
       </Layout>
@@ -181,63 +155,17 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
   );
 };
 
-const DARK_THEME: ThemeConfig = {
-  algorithm: theme.darkAlgorithm,
-  token: {
-    colorPrimary: '#06b6d4',
-    colorBgBase: '#090d16',
-    colorBgContainer: '#0f172a',
-    colorBgElevated: '#1e293b',
-    colorBorder: 'rgba(255, 255, 255, 0.08)',
-    colorBorderSecondary: 'rgba(255, 255, 255, 0.05)',
-    colorText: '#f8fafc',
-    colorTextSecondary: '#94a3b8',
-    borderRadius: 12,
-    fontFamily: "'Plus Jakarta Sans', sans-serif",
-  },
-  components: {
-    Card: {
-      colorBgContainer: '#0f172a',
-      colorBorderSecondary: 'rgba(255, 255, 255, 0.08)',
-    },
-    Menu: {
-      itemBg: 'transparent',
-      itemSelectedBg: 'rgba(6, 182, 212, 0.16)',
-      itemSelectedColor: '#22d3ee',
-      itemHoverBg: 'rgba(255, 255, 255, 0.06)',
-      itemHoverColor: '#f8fafc',
-      itemActiveBg: 'transparent',
-      itemMarginInline: 6,
-      itemBorderRadius: 12,
-      darkItemBg: 'transparent',
-      darkItemSelectedBg: 'rgba(6, 182, 212, 0.16)',
-      darkItemSelectedColor: '#22d3ee',
-      darkItemHoverBg: 'rgba(255, 255, 255, 0.06)',
-    },
-    Layout: {
-      siderBg: '#090d16',
-      bodyBg: '#050811',
-      headerBg: '#090d16',
-    },
-    Table: {
-      headerBg: '#090d16',
-      rowHoverBg: 'rgba(6, 182, 212, 0.06)',
-    },
-    Input: {
-      colorBgContainer: '#090d16',
-      activeBorderColor: '#06b6d4',
-    },
-  },
-};
-
 const ThemedApp: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
 
+  const handleLogout = useCallback(() => {
+    clearSession();
+    setCurrentUser(null);
+  }, []);
+
   const verifyAuth = useCallback(async () => {
-    const token = localStorage.getItem('viplike_token');
-    if (!token) {
-      setCurrentUser(null);
+    if (!getToken()) {
       setAuthChecking(false);
       return;
     }
@@ -245,66 +173,52 @@ const ThemedApp: React.FC = () => {
       const res = await api.get('/auth/me');
       if (res.data?.authenticated && res.data?.user) {
         setCurrentUser(res.data.user);
-        localStorage.setItem('viplike_user', JSON.stringify(res.data.user));
+        saveUser(res.data.user);
       } else {
-        localStorage.removeItem('viplike_token');
-        localStorage.removeItem('viplike_user');
-        setCurrentUser(null);
+        handleLogout();
       }
     } catch {
-      localStorage.removeItem('viplike_token');
-      localStorage.removeItem('viplike_user');
-      setCurrentUser(null);
+      handleLogout();
     } finally {
       setAuthChecking(false);
     }
-  }, []);
+  }, [handleLogout]);
 
   useEffect(() => {
     verifyAuth();
-    const handleAuthExpired = () => {
-      setCurrentUser(null);
-    };
-    window.addEventListener('viplike_auth_expired', handleAuthExpired);
-    return () => window.removeEventListener('viplike_auth_expired', handleAuthExpired);
+    const handleAuthExpired = () => setCurrentUser(null);
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
   }, [verifyAuth]);
-
-  const handleLogout = useCallback(() => {
-    localStorage.removeItem('viplike_token');
-    localStorage.removeItem('viplike_user');
-    setCurrentUser(null);
-  }, []);
 
   if (authChecking) {
     return (
-      <ConfigProvider theme={DARK_THEME}>
-        <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center gap-3">
-          <Spin size="large" />
-          <span className="text-xs font-mono text-cyan-400">Đang xác thực phiên làm việc JWT...</span>
-        </div>
-      </ConfigProvider>
+      <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center gap-3">
+        <Spin size="large" />
+        <span className="text-xs font-mono text-cyan-400">Đang xác thực phiên đăng nhập...</span>
+      </div>
     );
   }
 
   return (
-    <ConfigProvider theme={DARK_THEME}>
-      <AntdApp>
-        {!currentUser ? (
-          <LoginPage onLoginSuccess={setCurrentUser} />
-        ) : (
+    <AntdApp>
+      {!currentUser ? (
+        <LoginPage onLoginSuccess={setCurrentUser} />
+      ) : (
+        <CurrentUserContext.Provider value={currentUser}>
           <MainDashboard currentUser={currentUser} onLogout={handleLogout} />
-        )}
-      </AntdApp>
-    </ConfigProvider>
+        </CurrentUserContext.Provider>
+      )}
+    </AntdApp>
   );
 };
 
 export const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
+      <ConfigProvider theme={DARK_THEME}>
         <ThemedApp />
-      </ThemeProvider>
+      </ConfigProvider>
     </QueryClientProvider>
   );
 };

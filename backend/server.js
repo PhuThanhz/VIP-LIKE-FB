@@ -252,43 +252,95 @@ async function resolveViaProxy(cookieString, explicitProxy = '') {
 // AUTHENTICATION, JWT (RFC 7519 HMAC-SHA256) & ACCESS CONTROL
 // =============================================================================
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const JWT_SECRET_FILE = path.join(DATA_DIR, '.jwt_secret');
 
-const DEFAULT_USERS = [
-  {
+// Mật khẩu lưu dạng: scrypt$<saltHex>$<hashHex>
+const PASSWORD_HASH_PREFIX = 'scrypt$';
+const SCRYPT_KEYLEN = 64;
+const scryptAsync = (password, salt) =>
+  new Promise((resolve, reject) =>
+    crypto.scrypt(password, salt, SCRYPT_KEYLEN, (err, key) => (err ? reject(err) : resolve(key)))
+  );
+
+function isHashedPassword(stored) {
+  return typeof stored === 'string' && stored.startsWith(PASSWORD_HASH_PREFIX);
+}
+
+function formatPasswordHash(salt, hash) {
+  return `${PASSWORD_HASH_PREFIX}${salt.toString('hex')}$${hash.toString('hex')}`;
+}
+
+function hashPasswordSync(plain) {
+  const salt = crypto.randomBytes(16);
+  return formatPasswordHash(salt, crypto.scryptSync(String(plain), salt, SCRYPT_KEYLEN));
+}
+
+async function hashPassword(plain) {
+  const salt = crypto.randomBytes(16);
+  return formatPasswordHash(salt, await scryptAsync(String(plain), salt));
+}
+
+async function verifyPassword(plain, stored) {
+  if (!isHashedPassword(stored)) return false;
+  const [, saltHex, hashHex] = stored.split('$');
+  if (!saltHex || !hashHex) return false;
+  const expected = Buffer.from(hashHex, 'hex');
+  const actual = await scryptAsync(String(plain), Buffer.from(saltHex, 'hex'));
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
+// Khi chưa có users.json: tạo 1 ADMIN từ ADMIN_USERNAME / ADMIN_PASSWORD (env), thiếu thì sinh mật khẩu ngẫu nhiên
+function createSeedAdmin() {
+  const username = (process.env.ADMIN_USERNAME || 'admin').trim();
+  let password = process.env.ADMIN_PASSWORD;
+  if (!password) {
+    password = crypto.randomBytes(12).toString('base64url');
+    console.log(`\n================================================================`);
+    console.log(`🔑 [Auth] Đã tạo tài khoản ADMIN mặc định (chỉ hiển thị 1 lần):`);
+    console.log(`   Tên đăng nhập: ${username}`);
+    console.log(`   Mật khẩu:      ${password}`);
+    console.log(`👉 Hãy đăng nhập và đổi mật khẩu, hoặc đặt ADMIN_USERNAME / ADMIN_PASSWORD trong .env`);
+    console.log(`================================================================\n`);
+  }
+  return {
     id: 1,
-    username: 'thanhan',
-    password: '123',
-    email: 'thanhan@viplike.vn',
-    fullName: 'Thành An (Nick Mẹ 512 Page)',
-    role: 'ADMIN',
-  },
-  {
-    id: 2,
-    username: 'admin',
-    password: 'admin',
-    email: 'admin@viplike.vn',
+    username,
+    password: hashPasswordSync(password),
+    email: `${username}@viplike.vn`,
     fullName: 'Quản Trị Viên VIPLIKE',
     role: 'ADMIN',
-  },
-  {
-    id: 3,
-    username: 'huynhthanhphu',
-    password: '123',
-    email: 'phu@viplike.vn',
-    fullName: 'Huỳnh Thạnh Phú',
-    role: 'ADMIN',
-  },
-];
+  };
+}
 
 function loadUsers() {
-  try {
-    if (fs.existsSync(USERS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
-      if (Array.isArray(data) && data.length > 0) return data;
+  if (fs.existsSync(USERS_FILE)) {
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+    } catch (e) {
+      // Không ghi đè file hỏng để tránh mất tài khoản
+      console.error('[Auth] ❌ users.json bị lỗi định dạng, không thể đọc:', e.message);
+      return [];
     }
-  } catch (e) {}
-  saveUsers(DEFAULT_USERS);
-  return DEFAULT_USERS;
+    if (Array.isArray(data) && data.length > 0) {
+      // Chuyển mật khẩu dạng chữ thường (plaintext) sang scrypt một lần duy nhất
+      const migrated = [];
+      for (const u of data) {
+        if (u.password && !isHashedPassword(u.password)) {
+          u.password = hashPasswordSync(u.password);
+          migrated.push(u.username);
+        }
+      }
+      if (migrated.length > 0) {
+        saveUsers(data);
+        console.log(`[Auth] 🔐 Đã mã hóa mật khẩu (scrypt) cho tài khoản: ${migrated.join(', ')}`);
+      }
+      return data;
+    }
+  }
+  const seeded = [createSeedAdmin()];
+  saveUsers(seeded);
+  return seeded;
 }
 
 function saveUsers(users) {
@@ -297,7 +349,31 @@ function saveUsers(users) {
   } catch (e) {}
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ViplikeRadiantSecretKeyForJwtAuthentication2026SuperSecureKeyWithMin256Bits';
+function publicUser(user) {
+  const { password, ...rest } = user;
+  return rest;
+}
+
+// JWT_SECRET: ưu tiên env, nếu thiếu thì sinh ngẫu nhiên và lưu vào data/.jwt_secret (dùng lại khi khởi động lại)
+function loadJwtSecret() {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  try {
+    if (fs.existsSync(JWT_SECRET_FILE)) {
+      const saved = fs.readFileSync(JWT_SECRET_FILE, 'utf-8').trim();
+      if (saved.length >= 32) return saved;
+    }
+  } catch (e) {}
+  const secret = crypto.randomBytes(48).toString('hex');
+  try {
+    fs.writeFileSync(JWT_SECRET_FILE, secret, { encoding: 'utf-8', mode: 0o600 });
+    console.log('[Auth] 🔑 Đã sinh JWT_SECRET ngẫu nhiên và lưu vào data/.jwt_secret');
+  } catch (e) {
+    console.warn('[Auth] ⚠️ Không lưu được data/.jwt_secret, phiên đăng nhập sẽ mất khi khởi động lại:', e.message);
+  }
+  return secret;
+}
+
+const JWT_SECRET = loadJwtSecret();
 
 function base64UrlEncode(str) {
   return Buffer.from(str)
@@ -322,7 +398,7 @@ function generateJwtToken(user, expiresInSeconds = 86400 * 10) {
     id: user.id,
     email: user.email,
     fullName: user.fullName || user.username,
-    role: user.role || 'ADMIN',
+    role: user.role || 'USER',
     iat: now,
     exp,
   };
@@ -354,7 +430,9 @@ function verifyJwtToken(token) {
     .replace(/\+/g, '-')
     .replace(/\//g, '_');
 
-  if (signature !== expectedSig) return null;
+  const sigBuf = Buffer.from(signature);
+  const expectedBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
 
   try {
     const payload = JSON.parse(base64UrlDecode(encodedPayload));
@@ -367,33 +445,83 @@ function verifyJwtToken(token) {
   }
 }
 
+// Giới hạn đăng nhập sai: quá 5 lần trong 60 giây (theo IP + tên đăng nhập) → 429
+const LOGIN_MAX_FAILURES = 5;
+const LOGIN_WINDOW_MS = 60 * 1000;
+const loginFailures = new Map(); // key -> { count, firstAt }
+
+function getLoginRateKey(req, username) {
+  return `${req.ip}|${String(username).trim().toLowerCase()}`;
+}
+
+function getLoginRetryAfterSec(key) {
+  const entry = loginFailures.get(key);
+  if (!entry) return 0;
+  const elapsed = Date.now() - entry.firstAt;
+  if (elapsed >= LOGIN_WINDOW_MS) {
+    loginFailures.delete(key);
+    return 0;
+  }
+  return entry.count >= LOGIN_MAX_FAILURES ? Math.ceil((LOGIN_WINDOW_MS - elapsed) / 1000) : 0;
+}
+
+function recordLoginFailure(key) {
+  const now = Date.now();
+  const entry = loginFailures.get(key);
+  if (!entry || now - entry.firstAt >= LOGIN_WINDOW_MS) {
+    loginFailures.set(key, { count: 1, firstAt: now });
+  } else {
+    entry.count += 1;
+  }
+  if (loginFailures.size > 5000) {
+    for (const [k, v] of loginFailures) {
+      if (now - v.firstAt >= LOGIN_WINDOW_MS) loginFailures.delete(k);
+    }
+  }
+}
+
 const authHandler = {
-  login: (req, res) => {
+  login: async (req, res) => {
     try {
       const { username, password } = req.body;
       if (!username || !password) {
         return res.status(400).json({ success: false, error: 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!' });
       }
+
+      const rateKey = getLoginRateKey(req, username);
+      const retryAfterSec = getLoginRetryAfterSec(rateKey);
+      if (retryAfterSec > 0) {
+        res.set('Retry-After', String(retryAfterSec));
+        return res.status(429).json({
+          success: false,
+          error: `Bạn đã đăng nhập sai quá nhiều lần. Vui lòng thử lại sau ${retryAfterSec} giây!`,
+        });
+      }
+
       const users = loadUsers();
       const u = username.trim().toLowerCase();
-      const user = users.find((x) => x.username.toLowerCase() === u || x.email.toLowerCase() === u);
+      const user = users.find((x) => x.username.toLowerCase() === u || (x.email || '').toLowerCase() === u);
 
       if (!user) {
+        recordLoginFailure(rateKey);
         return res.status(401).json({
           success: false,
           error: 'Tài khoản không tồn tại trên hệ thống. Vui lòng kiểm tra lại!',
         });
       }
 
-      // So khớp mật khẩu chính xác tuyệt đối 1:1 (Strict Equality)
-      const isMatch = Boolean(user.password && password.trim() === user.password);
+      // So khớp mật khẩu với hash scrypt (timing-safe)
+      const isMatch = await verifyPassword(password.trim(), user.password);
 
       if (!isMatch) {
+        recordLoginFailure(rateKey);
         return res.status(401).json({
           success: false,
           error: 'Mật khẩu không chính xác. Vui lòng nhập đúng mật khẩu!',
         });
       }
+
+      loginFailures.delete(rateKey);
 
       // Sinh JWT chuẩn RFC 7519 HMAC-SHA256 (hạn 10 ngày)
       const token = generateJwtToken(user, 86400 * 10);
@@ -406,7 +534,7 @@ const authHandler = {
           username: user.username,
           email: user.email,
           fullName: user.fullName || user.username,
-          role: user.role || 'ADMIN',
+          role: user.role || 'USER',
         },
         data: {
           token,
@@ -415,14 +543,14 @@ const authHandler = {
           username: user.username,
           email: user.email,
           fullName: user.fullName || user.username,
-          role: user.role || 'ADMIN',
+          role: user.role || 'USER',
         },
       });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
     }
   },
-  register: (req, res) => {
+  register: async (req, res) => {
     try {
       const { username, password, email, fullName } = req.body;
       if (!username || !password) {
@@ -434,7 +562,7 @@ const authHandler = {
       const newUser = {
         id: Date.now(),
         username: username.trim(),
-        password: password.trim(),
+        password: await hashPassword(password.trim()),
         email: email || `${username.trim()}@viplike.vn`,
         fullName: fullName || username.trim(),
         role: 'USER',
@@ -442,12 +570,13 @@ const authHandler = {
       users.push(newUser);
       saveUsers(users);
       const token = generateJwtToken(newUser, 86400 * 10);
+      const safeUser = publicUser(newUser);
       return res.json({
         success: true,
         token,
         tokenType: 'Bearer',
-        user: newUser,
-        data: { token, tokenType: 'Bearer', ...newUser },
+        user: safeUser,
+        data: { token, tokenType: 'Bearer', ...safeUser },
       });
     } catch (err) {
       return res.status(500).json({ success: false, error: err.message });
@@ -477,11 +606,9 @@ const authHandler = {
   },
 };
 
-// Các route xác thực (Công khai)
+// Các route xác thực (Công khai) — register yêu cầu ADMIN, đăng ký sau middleware JWT bên dưới
 app.post('/api/auth/login', authHandler.login);
 app.post('/auth/login', authHandler.login);
-app.post('/api/auth/register', authHandler.register);
-app.post('/auth/register', authHandler.register);
 app.get('/api/auth/me', authHandler.me);
 app.get('/auth/me', authHandler.me);
 
@@ -492,8 +619,6 @@ function authenticateJwt(req, res, next) {
   const publicPaths = [
     '/api/auth/login',
     '/auth/login',
-    '/api/auth/register',
-    '/auth/register',
     '/api/auth/me',
     '/auth/me',
     '/api/db/test',
@@ -538,7 +663,22 @@ function authenticateJwt(req, res, next) {
   next();
 }
 
+// Chỉ cho phép tài khoản ADMIN (dùng sau authenticateJwt)
+function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'ADMIN') {
+    return res.status(403).json({
+      success: false,
+      error: 'Bạn không có quyền thực hiện thao tác này. Chỉ tài khoản ADMIN được phép!',
+    });
+  }
+  next();
+}
+
 app.use(authenticateJwt);
+
+// Tạo tài khoản mới: chỉ ADMIN
+app.post('/api/auth/register', requireAdmin, authHandler.register);
+app.post('/auth/register', requireAdmin, authHandler.register);
 
 // Kiểm tra sức khỏe và tốc độ Proxy thời gian thực
 app.post('/api/proxy/test', async (req, res) => {
@@ -2080,7 +2220,7 @@ app.get('/api/buff-settings', (req, res) => {
   }
 });
 
-app.post('/api/buff-settings', (req, res) => {
+app.post('/api/buff-settings', requireAdmin, (req, res) => {
   try {
     const updated = saveBuffSettings(req.body);
     if (!updated) return res.status(500).json({ success: false, error: 'Không lưu được file cài đặt' });
@@ -2169,11 +2309,17 @@ app.post('/api/buff-registry/clear-post', (req, res) => {
 // =============================================================================
 
 // 1. Kiểm tra trạng thái bản quyền hiện tại
+// Chỉ trả về license đã gắn đúng HWID của máy gửi yêu cầu (header x-hardware-hwid)
+function maskLicenseKey(key) {
+  const s = String(key || '');
+  return s.length <= 4 ? s : '*'.repeat(s.length - 4) + s.slice(-4);
+}
+
 app.get('/api/license/status', async (req, res) => {
   try {
-    const licenses = await db.getLicenses();
-    const active = licenses.find((l) => l.status === 'ACTIVE');
-    if (!active) {
+    const hardwareHwid = String(req.headers['x-hardware-hwid'] || '').trim();
+    const active = hardwareHwid ? await db.verifyLicenseActive(hardwareHwid) : null;
+    if (!active || active.hardwareHwid !== hardwareHwid) {
       return res.json({
         success: true,
         activated: false,
@@ -2190,7 +2336,7 @@ app.get('/api/license/status', async (req, res) => {
       success: true,
       activated: !isExpired,
       license: {
-        licenseKey: active.licenseKey,
+        licenseKey: maskLicenseKey(active.licenseKey),
         customerName: active.customerName,
         packageType: active.packageType,
         maxVias: active.maxVias,
@@ -2223,7 +2369,7 @@ app.post('/api/license/activate', async (req, res) => {
 });
 
 // 3. Admin: Danh sách tất cả khách thuê
-app.get('/api/license/admin/list', async (req, res) => {
+app.get('/api/license/admin/list', requireAdmin, async (req, res) => {
   try {
     const licenses = await db.getLicenses();
     return res.json({ success: true, licenses });
@@ -2233,7 +2379,7 @@ app.get('/api/license/admin/list', async (req, res) => {
 });
 
 // 4. Admin: Tạo mã thuê mới cho đối tác/khách hàng
-app.post('/api/license/admin/create', async (req, res) => {
+app.post('/api/license/admin/create', requireAdmin, async (req, res) => {
   try {
     const { customerName, customerContact, packageType, maxVias, days, notes } = req.body;
     if (!customerName) {
@@ -2254,7 +2400,7 @@ app.post('/api/license/admin/create', async (req, res) => {
 });
 
 // 5. Admin: Cập nhật trạng thái hoặc gia hạn (+30 ngày)
-app.post('/api/license/admin/update-status', async (req, res) => {
+app.post('/api/license/admin/update-status', requireAdmin, async (req, res) => {
   try {
     const { id, status, addDays } = req.body;
     const result = await db.updateLicenseStatus(id, status, Number(addDays) || 0);

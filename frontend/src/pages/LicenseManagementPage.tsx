@@ -13,13 +13,9 @@ import {
   Space,
   Typography,
   Tooltip,
-  Divider,
-  Popconfirm,
-  Progress,
   message,
   Row,
   Col,
-  Statistic,
   Segmented,
 } from 'antd';
 import {
@@ -32,16 +28,13 @@ import {
   ClockCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
-  LaptopOutlined,
   CrownOutlined,
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
-  InfoCircleOutlined,
 } from '@ant-design/icons';
 import api from '../config/axios';
-import { getMachineHwid, isTauri } from '../utils/tauriBridge';
+import { getMachineHwid } from '../utils/tauriBridge';
+import { isAdmin, useCurrentUser } from '../auth/session';
 
-const { Title, Text, Paragraph } = Typography;
+const { Title, Text } = Typography;
 
 
 interface LicenseInfo {
@@ -81,7 +74,7 @@ export const LicenseManagementPage: React.FC = () => {
 
   const [hardwareHwid, setHardwareHwid] = useState<string>('Đang đọc mã máy...');
   const [activeLicenseTab, setActiveLicenseTab] = useState<'CLIENT' | 'ADMIN'>('CLIENT');
-  const isDesktop = isTauri();
+  const admin = isAdmin(useCurrentUser());
 
   useEffect(() => {
     getMachineHwid().then((hwid) => {
@@ -93,7 +86,7 @@ export const LicenseManagementPage: React.FC = () => {
   const fetchLicenseStatus = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/api/license/status');
+      const res = await api.get('/license/status');
       if (res.data?.success && res.data?.license) {
         setCurrentLicense(res.data.license);
       } else {
@@ -107,10 +100,11 @@ export const LicenseManagementPage: React.FC = () => {
   };
 
 
-  // Tải danh sách khách thuê (dành cho Admin)
+  // Tải danh sách khách thuê (chỉ Admin mới có quyền gọi API này)
   const fetchAdminLicenses = async () => {
+    if (!admin) return;
     try {
-      const res = await api.get('/api/license/admin/list');
+      const res = await api.get('/license/admin/list');
       if (res.data?.success) {
         setAdminLicenses(res.data.licenses || []);
       }
@@ -119,10 +113,14 @@ export const LicenseManagementPage: React.FC = () => {
     }
   };
 
-  useEffect(() => {
+  const refreshAll = () => {
     fetchLicenseStatus();
     fetchAdminLicenses();
-  }, []);
+  };
+
+  useEffect(() => {
+    refreshAll();
+  }, [admin]);
 
   // Kích hoạt License Key trên máy này
   const handleActivate = async () => {
@@ -132,15 +130,14 @@ export const LicenseManagementPage: React.FC = () => {
     }
     try {
       setActivating(true);
-      const res = await api.post('/api/license/activate', {
+      const res = await api.post('/license/activate', {
         licenseKey: licenseInput.trim(),
         hardwareHwid,
       });
       if (res.data?.success) {
         message.success('🎉 Kích hoạt Bản Quyền VIPLIKE RADIANT thành công!');
         setLicenseInput('');
-        fetchLicenseStatus();
-        fetchAdminLicenses();
+        refreshAll();
       }
     } catch (err: any) {
       message.error(err.response?.data?.error || 'Kích hoạt thất bại. Kiểm tra lại mã key.');
@@ -152,7 +149,7 @@ export const LicenseManagementPage: React.FC = () => {
   // Admin tạo key mới cho khách thuê
   const handleCreateLicense = async (values: any) => {
     try {
-      const res = await api.post('/api/license/admin/create', values);
+      const res = await api.post('/license/admin/create', values);
       if (res.data?.success) {
         message.success(`Đã tạo License Key thành công cho: ${values.customerName}`);
         setIsCreateModalOpen(false);
@@ -164,40 +161,35 @@ export const LicenseManagementPage: React.FC = () => {
     }
   };
 
-  // Admin gia hạn thêm 30 ngày
-  const handleExtendDays = async (id: number) => {
+  // Admin cập nhật trạng thái / gia hạn key
+  const updateLicenseStatus = async (
+    payload: { id: number; status: string; addDays?: number },
+    successMsg: string,
+    errorMsg: string
+  ) => {
     try {
-      const res = await api.post('/api/license/admin/update-status', {
-        id,
-        status: 'ACTIVE',
-        addDays: 30,
-      });
+      const res = await api.post('/license/admin/update-status', payload);
       if (res.data?.success) {
-        message.success('Đã gia hạn thêm +30 ngày cho khách thuê!');
-        fetchAdminLicenses();
-        fetchLicenseStatus();
+        message.success(successMsg);
+        refreshAll();
+      } else {
+        message.error(res.data?.error || errorMsg);
       }
     } catch (err: any) {
-      message.error('Gia hạn thất bại');
+      message.error(err.response?.data?.error || errorMsg);
     }
   };
 
-  // Admin Khóa / Mở Khóa key
-  const handleToggleLock = async (id: number, currentStatus: string) => {
+  const handleExtendDays = (id: number) =>
+    updateLicenseStatus({ id, status: 'ACTIVE', addDays: 30 }, 'Đã gia hạn thêm +30 ngày cho khách thuê!', 'Gia hạn thất bại');
+
+  const handleToggleLock = (id: number, currentStatus: string) => {
     const nextStatus = currentStatus === 'LOCKED' ? 'ACTIVE' : 'LOCKED';
-    try {
-      const res = await api.post('/api/license/admin/update-status', {
-        id,
-        status: nextStatus,
-      });
-      if (res.data?.success) {
-        message.info(nextStatus === 'LOCKED' ? 'Đã KHÓA mã thuê này!' : 'Đã MỞ KHÓA thành công!');
-        fetchAdminLicenses();
-        fetchLicenseStatus();
-      }
-    } catch (err: any) {
-      message.error('Lỗi cập nhật trạng thái');
-    }
+    return updateLicenseStatus(
+      { id, status: nextStatus },
+      nextStatus === 'LOCKED' ? 'Đã KHÓA mã thuê này!' : 'Đã MỞ KHÓA thành công!',
+      'Lỗi cập nhật trạng thái'
+    );
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -360,7 +352,7 @@ export const LicenseManagementPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {activeLicenseTab === 'ADMIN' && (
+          {admin && activeLicenseTab === 'ADMIN' && (
             <Button
               type="primary"
               icon={<PlusOutlined />}
@@ -374,10 +366,8 @@ export const LicenseManagementPage: React.FC = () => {
           <Button
             icon={<ReloadOutlined />}
             size="large"
-            onClick={() => {
-              fetchLicenseStatus();
-              fetchAdminLicenses();
-            }}
+            loading={loading}
+            onClick={refreshAll}
             className="border-slate-700 bg-slate-800/80 text-slate-300 hover:text-white"
           >
             Làm Mới
@@ -385,35 +375,37 @@ export const LicenseManagementPage: React.FC = () => {
         </div>
       </div>
 
-      {/* SEGMENTED TAB SWITCHER */}
-      <div className="flex justify-start">
-        <Segmented
-          size="large"
-          value={activeLicenseTab}
-          onChange={(val) => setActiveLicenseTab(val as 'CLIENT' | 'ADMIN')}
-          options={[
-            {
-              label: (
-                <div className="flex items-center gap-2 px-3 py-1 font-bold">
-                  <SafetyCertificateOutlined className="text-emerald-400" />
-                  <span>Kích Hoạt & Bản Quyền Thiết Bị Này</span>
-                </div>
-              ),
-              value: 'CLIENT',
-            },
-            {
-              label: (
-                <div className="flex items-center gap-2 px-3 py-1 font-bold">
-                  <CrownOutlined className="text-amber-400" />
-                  <span>Dành Cho Quản Trị Viên (Quản Lý {adminLicenses.length} Khách Thuê)</span>
-                </div>
-              ),
-              value: 'ADMIN',
-            },
-          ]}
-          className="bg-slate-900 border border-slate-800 text-slate-300 p-1 rounded-xl"
-        />
-      </div>
+      {/* SEGMENTED TAB SWITCHER (chỉ Admin thấy tab quản lý khách thuê) */}
+      {admin && (
+        <div className="flex justify-start">
+          <Segmented
+            size="large"
+            value={activeLicenseTab}
+            onChange={(val) => setActiveLicenseTab(val as 'CLIENT' | 'ADMIN')}
+            options={[
+              {
+                label: (
+                  <div className="flex items-center gap-2 px-3 py-1 font-bold">
+                    <SafetyCertificateOutlined className="text-emerald-400" />
+                    <span>Kích Hoạt & Bản Quyền Thiết Bị Này</span>
+                  </div>
+                ),
+                value: 'CLIENT',
+              },
+              {
+                label: (
+                  <div className="flex items-center gap-2 px-3 py-1 font-bold">
+                    <CrownOutlined className="text-amber-400" />
+                    <span>Dành Cho Quản Trị Viên (Quản Lý {adminLicenses.length} Khách Thuê)</span>
+                  </div>
+                ),
+                value: 'ADMIN',
+              },
+            ]}
+            className="bg-slate-900 border border-slate-800 text-slate-300 p-1 rounded-xl"
+          />
+        </div>
+      )}
 
       {/* NỘI DUNG TAB 1: KÍCH HOẠT & BẢN QUYỀN THIẾT BỊ NÀY */}
       {activeLicenseTab === 'CLIENT' && (
@@ -572,7 +564,7 @@ export const LicenseManagementPage: React.FC = () => {
       )}
 
       {/* NỘI DUNG TAB 2: QUẢN LÝ KHÁCH THUÊ DÀNH CHO ADMIN */}
-      {activeLicenseTab === 'ADMIN' && (
+      {admin && activeLicenseTab === 'ADMIN' && (
         <Card
           className="bg-card/90 border-slate-800 shadow-xl rounded-2xl"
           title={
