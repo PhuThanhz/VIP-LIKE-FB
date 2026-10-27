@@ -445,8 +445,11 @@ function verifyJwtToken(token) {
   }
 }
 
-// Giới hạn đăng nhập sai: quá 5 lần trong 60 giây (theo IP + tên đăng nhập) → 429
+// Giới hạn đăng nhập sai trong 60 giây → 429:
+//  - quá 5 lần theo IP + tên đăng nhập
+//  - quá 20 lần theo riêng IP (chặn dò nhiều tên đăng nhập từ một máy)
 const LOGIN_MAX_FAILURES = 5;
+const LOGIN_IP_MAX_FAILURES = 20;
 const LOGIN_WINDOW_MS = 60 * 1000;
 const loginFailures = new Map(); // key -> { count, firstAt }
 
@@ -454,7 +457,11 @@ function getLoginRateKey(req, username) {
   return `${req.ip}|${String(username).trim().toLowerCase()}`;
 }
 
-function getLoginRetryAfterSec(key) {
+function getLoginIpRateKey(req) {
+  return `ip:${req.ip}`;
+}
+
+function getLoginRetryAfterSec(key, max = LOGIN_MAX_FAILURES) {
   const entry = loginFailures.get(key);
   if (!entry) return 0;
   const elapsed = Date.now() - entry.firstAt;
@@ -462,7 +469,19 @@ function getLoginRetryAfterSec(key) {
     loginFailures.delete(key);
     return 0;
   }
-  return entry.count >= LOGIN_MAX_FAILURES ? Math.ceil((LOGIN_WINDOW_MS - elapsed) / 1000) : 0;
+  return entry.count >= max ? Math.ceil((LOGIN_WINDOW_MS - elapsed) / 1000) : 0;
+}
+
+// Tìm user theo thứ tự ưu tiên: username → email → alias (tránh khớp nhầm khi trùng chuỗi)
+function findUserByLogin(users, value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (!v) return null;
+  return (
+    users.find((x) => String(x.username || '').toLowerCase() === v) ||
+    users.find((x) => String(x.email || '').toLowerCase() === v) ||
+    users.find((x) => Array.isArray(x.aliases) && x.aliases.some((a) => String(a).toLowerCase() === v)) ||
+    null
+  );
 }
 
 function recordLoginFailure(key) {
@@ -489,7 +508,11 @@ const authHandler = {
       }
 
       const rateKey = getLoginRateKey(req, username);
-      const retryAfterSec = getLoginRetryAfterSec(rateKey);
+      const ipRateKey = getLoginIpRateKey(req);
+      const retryAfterSec = Math.max(
+        getLoginRetryAfterSec(rateKey),
+        getLoginRetryAfterSec(ipRateKey, LOGIN_IP_MAX_FAILURES)
+      );
       if (retryAfterSec > 0) {
         res.set('Retry-After', String(retryAfterSec));
         return res.status(429).json({
@@ -499,25 +522,18 @@ const authHandler = {
       }
 
       const users = loadUsers();
-      const u = username.trim().toLowerCase();
-      const user = users.find((x) => x.username.toLowerCase() === u || (x.email || '').toLowerCase() === u);
-
-      if (!user) {
-        recordLoginFailure(rateKey);
-        return res.status(401).json({
-          success: false,
-          error: 'Tài khoản không tồn tại trên hệ thống. Vui lòng kiểm tra lại!',
-        });
-      }
+      const user = findUserByLogin(users, username);
 
       // So khớp mật khẩu với hash scrypt (timing-safe)
-      const isMatch = await verifyPassword(password.trim(), user.password);
+      const isMatch = user ? await verifyPassword(password.trim(), user.password) : false;
 
-      if (!isMatch) {
+      // Cùng một thông báo cho "không có tài khoản" và "sai mật khẩu" để không lộ tên đăng nhập nào tồn tại
+      if (!user || !isMatch) {
         recordLoginFailure(rateKey);
+        recordLoginFailure(ipRateKey);
         return res.status(401).json({
           success: false,
-          error: 'Mật khẩu không chính xác. Vui lòng nhập đúng mật khẩu!',
+          error: 'Sai tên đăng nhập hoặc mật khẩu. Vui lòng kiểm tra lại!',
         });
       }
 
@@ -557,8 +573,13 @@ const authHandler = {
         return res.status(400).json({ success: false, error: 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!' });
       }
       const users = loadUsers();
-      const exists = users.find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
-      if (exists) return res.status(400).json({ success: false, error: 'Tên đăng nhập đã tồn tại!' });
+      // Username/email mới không được trùng username, email hay alias của bất kỳ user nào
+      if (findUserByLogin(users, username)) {
+        return res.status(400).json({ success: false, error: 'Tên đăng nhập đã tồn tại!' });
+      }
+      if (email && findUserByLogin(users, email)) {
+        return res.status(400).json({ success: false, error: 'Email đã được sử dụng!' });
+      }
       const newUser = {
         id: Date.now(),
         username: username.trim(),
