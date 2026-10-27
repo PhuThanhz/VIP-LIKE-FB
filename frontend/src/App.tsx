@@ -30,6 +30,9 @@ const queryClient = new QueryClient({
 });
 
 const DB_POLL_INTERVAL_MS = 30000;
+const SIDER_COLLAPSED_KEY = 'viplike_sider_collapsed';
+
+const getSavedCollapsed = () => localStorage.getItem(SIDER_COLLAPSED_KEY) === '1';
 
 const isSameDbStatus = (a: DbStatus, b: DbStatus) =>
   a.connected === b.connected &&
@@ -98,7 +101,7 @@ interface MainDashboardProps {
 }
 
 const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(getSavedCollapsed);
   const [activeTabKey, setActiveTabKey] = useState<string>(DEFAULT_NAV_KEY);
   const [stats, setStats] = useState<SidebarStats>({
     queueCount: 0,
@@ -109,7 +112,17 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
   const { dbStatus, checkDb } = useDbStatus();
 
   const handleSelectTab = useCallback((key: string) => setActiveTabKey(key), []);
-  const handleToggleCollapse = useCallback(() => setCollapsed((prev) => !prev), []);
+  // Bấm tay: nhớ lựa chọn cho lần mở sau
+  const handleToggleCollapse = useCallback(() => {
+    setCollapsed((prev) => {
+      localStorage.setItem(SIDER_COLLAPSED_KEY, prev ? '0' : '1');
+      return !prev;
+    });
+  }, []);
+  // Màn hình hẹp: luôn thu gọn; rộng lại thì trả về lựa chọn đã lưu
+  const handleBreakpoint = useCallback((broken: boolean) => {
+    setCollapsed(broken || getSavedCollapsed());
+  }, []);
   const openViaManager = useCallback(() => setActiveTabKey('via-management'), []);
   const openSettings = useCallback(() => setActiveTabKey('system-settings'), []);
   const handleStatsUpdate = useCallback((newStats: SidebarStats) => {
@@ -122,7 +135,7 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
         activeTabKey={activeTabKey}
         onSelectTab={handleSelectTab}
         collapsed={collapsed}
-        onCollapsedChange={setCollapsed}
+        onBreakpoint={handleBreakpoint}
         onToggleCollapse={handleToggleCollapse}
         stats={stats}
       />
@@ -134,6 +147,8 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
           onOpenSettings={openSettings}
           collapsed={collapsed}
           onToggleCollapse={handleToggleCollapse}
+          dbStatus={dbStatus}
+          onCheckDb={checkDb}
           currentUser={currentUser}
           onLogout={onLogout}
         />

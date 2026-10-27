@@ -18,7 +18,7 @@ interface SidebarProps {
   onSelectTab: (key: string) => void;
   collapsed: boolean;
   /** Antd gọi khi cửa sổ vượt qua breakpoint `lg` (1024px) */
-  onCollapsedChange: (collapsed: boolean) => void;
+  onBreakpoint: (broken: boolean) => void;
   onToggleCollapse: () => void;
   stats?: SidebarStats;
 }
@@ -52,7 +52,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
   activeTabKey,
   onSelectTab,
   collapsed,
-  onCollapsedChange,
+  onBreakpoint,
   onToggleCollapse,
   stats = {},
 }) => {
@@ -68,6 +68,8 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       const badge = renderBadge(item.key, badgeStats);
       items.push({
         key: item.key,
+        // Tooltip gọn khi Sidebar thu gọn (không kèm badge)
+        title: item.label,
         icon: <item.Icon className={`text-base ${item.iconColor}`} />,
         label: badge ? (
           <div className="flex items-center justify-between w-full">
@@ -93,7 +95,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       collapsible
       collapsed={collapsed}
       breakpoint="lg"
-      onBreakpoint={onCollapsedChange}
+      onBreakpoint={onBreakpoint}
       trigger={null}
       width={260}
       collapsedWidth={76}

@@ -13,17 +13,35 @@ type LoginTab = 'login' | 'license';
 
 // Dùng chung key để lỗi mới thay thế lỗi cũ, không chồng thông báo khi bấm nhiều lần
 const AUTH_MESSAGE_KEY = 'auth-message';
+const LAST_USERNAME_KEY = 'viplike_last_username';
+const DEFAULT_LOCKOUT_SEC = 60;
+
+/** Backend trả 429 kèm "thử lại sau N giây" trong thông báo lỗi */
+const parseLockoutSeconds = (errorText?: string): number => {
+  const match = errorText?.match(/(\d+)\s*giây/);
+  return match ? Number(match[1]) : DEFAULT_LOCKOUT_SEC;
+};
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [activeTab, setActiveTab] = useState<LoginTab>('login');
   const [loading, setLoading] = useState(false);
   const [hwid, setHwid] = useState('');
+  const [lockoutSec, setLockoutSec] = useState(0);
+  // Đã nhớ tên đăng nhập thì đặt con trỏ thẳng vào ô mật khẩu
+  const [lastUsername] = useState(() => localStorage.getItem(LAST_USERNAME_KEY) || '');
   const [form] = Form.useForm();
   const [licenseForm] = Form.useForm();
 
   useEffect(() => {
     getMachineHwid().then(setHwid);
   }, []);
+
+  // Đếm ngược thời gian bị tạm khoá đăng nhập
+  useEffect(() => {
+    if (lockoutSec <= 0) return;
+    const timer = setTimeout(() => setLockoutSec((sec) => sec - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [lockoutSec]);
 
   const handleLoginSubmit = async (values: { username: string; password: string }) => {
     setLoading(true);
@@ -35,13 +53,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       const session = parseAuthResponse(res.data);
       if (session) {
         saveSession(session.token, session.user);
+        localStorage.setItem(LAST_USERNAME_KEY, values.username.trim());
         message.success(`🎉 Chào mừng ${session.user.fullName} đã đăng nhập thành công!`);
         onLoginSuccess(session.user);
       } else {
         message.error({ content: res.data?.error || 'Đăng nhập không thành công', key: AUTH_MESSAGE_KEY });
       }
     } catch (err: any) {
-      message.error({ content: err.response?.data?.error || err.message || 'Tài khoản hoặc mật khẩu không chính xác!', key: AUTH_MESSAGE_KEY });
+      const errorText: string | undefined = err.response?.data?.error;
+      if (err.response?.status === 429) {
+        setLockoutSec(parseLockoutSeconds(errorText));
+      }
+      message.error({ content: errorText || err.message || 'Tài khoản hoặc mật khẩu không chính xác!', key: AUTH_MESSAGE_KEY });
     } finally {
       setLoading(false);
     }
@@ -123,6 +146,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       form={form}
                       layout="vertical"
                       onFinish={handleLoginSubmit}
+                      initialValues={{ username: lastUsername }}
                       className="pt-2 space-y-2"
                     >
                       <Form.Item
@@ -133,6 +157,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         <Input
                           prefix={<UserOutlined className="text-slate-400 mr-1" />}
                           placeholder="Tên đăng nhập hoặc email"
+                          autoComplete="username"
+                          autoFocus={!lastUsername}
                           size="large"
                           className="rounded-xl text-sm"
                         />
@@ -146,6 +172,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         <Input.Password
                           prefix={<LockOutlined className="text-slate-400 mr-1" />}
                           placeholder="Nhập mật khẩu"
+                          autoComplete="current-password"
+                          autoFocus={Boolean(lastUsername)}
                           size="large"
                           className="rounded-xl text-sm"
                         />
@@ -155,11 +183,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         type="primary"
                         htmlType="submit"
                         loading={loading}
+                        disabled={lockoutSec > 0}
                         block
                         size="large"
                         className="h-11 rounded-xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-blue-500 font-bold border-0 shadow-lg shadow-cyan-500/25 mt-2"
                       >
-                        🚀 ĐĂNG NHẬP NGAY
+                        {lockoutSec > 0 ? `Thử lại sau ${lockoutSec} giây` : '🚀 ĐĂNG NHẬP NGAY'}
                       </Button>
 
                     </Form>

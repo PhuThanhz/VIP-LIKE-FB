@@ -1,17 +1,6 @@
 import React from 'react';
+import { Alert, Input, Button, Switch, Row, Col, ConfigProvider } from 'antd';
 import {
-  Card,
-  Input,
-  Button,
-  Switch,
-  message,
-  Divider,
-  Tag,
-  Row,
-  Col,
-} from 'antd';
-import {
-  SettingOutlined,
   BellOutlined,
   SendOutlined,
   CheckOutlined,
@@ -20,8 +9,8 @@ import {
   PlayCircleOutlined,
   RobotOutlined,
   ThunderboltOutlined,
-
 } from '@ant-design/icons';
+import { isAdmin, useCurrentUser } from '../auth/session';
 
 export interface SystemSettingsPageProps {
   systemSettings: any;
@@ -46,30 +35,20 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
   onEmergencyStop,
   onResumeSystem,
 }) => {
-  return (
-    <div className="space-y-6 max-w-[1100px] mx-auto pb-24">
-      {/* 1. Header Banner */}
-      <div className="app-surface p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-2xl border-l-4 border-blue-500">
-        <div>
-          <h2 className="text-base sm:text-lg font-bold text-slate-100 m-0 flex items-center gap-2.5">
-            <SettingOutlined className="text-blue-400" />
-            <span>Cấu Hình Vận Hành & Giám Sát Hệ Thống</span>
-          </h2>
-          <p className="text-xs text-slate-400 m-0 mt-1">
-            Thiết lập Bot Telegram cảnh báo tức thời khi Via lỗi/Checkpoint, thông báo khi săn được bài mới và điều khiển an toàn hệ thống.
-          </p>
-        </div>
+  // Backend chỉ cho ADMIN lưu cấu hình (403 với tài khoản khác) nên khoá form để tránh sửa rồi lưu thất bại
+  const canEdit = isAdmin(useCurrentUser());
 
-        <Button
-          type="primary"
-          icon={<CheckOutlined />}
-          loading={savingSettings}
-          onClick={onSaveSettings}
-          className="bg-blue-600 hover:bg-blue-500 rounded-xl px-5 h-10 font-bold text-xs shrink-0 shadow-lg shadow-blue-500/20"
-        >
-          Lưu Cấu Hình
-        </Button>
-      </div>
+  return (
+    <ConfigProvider componentDisabled={!canEdit}>
+    <div className="space-y-6 max-w-[1100px] mx-auto pb-6">
+      {!canEdit && (
+        <Alert
+          type="info"
+          showIcon
+          message="Chỉ tài khoản ADMIN được thay đổi cấu hình hệ thống. Bạn đang xem ở chế độ chỉ đọc."
+          className="rounded-xl"
+        />
+      )}
 
       {/* 2. Emergency Stop Status & Control */}
       {bmOverview?.system?.isEmergencyStopped ? (
@@ -143,7 +122,8 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
             <label className="block text-xs font-semibold text-slate-200 mb-1.5">
               Telegram Bot Token:
             </label>
-            <Input
+            <Input.Password
+              autoComplete="off"
               placeholder={
                 systemSettings.telegramBotTokenMasked
                   ? `Đang dùng: ${systemSettings.telegramBotTokenMasked} (Nhập để đổi)`
@@ -303,9 +283,12 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
             />
           </div>
         </div>
+      </div>
 
-        {/* Action Save Button at bottom */}
-        <div className="flex justify-end pt-2">
+      {/* Thanh lưu cố định: luôn thấy nút Lưu dù đang ở phần nào của trang */}
+      {canEdit && (
+        <div className="sticky bottom-0 z-10 -mx-1 px-4 py-3 rounded-2xl border border-slate-800/80 bg-slate-900/95 backdrop-blur flex items-center justify-between gap-3 shadow-2xl">
+          <span className="text-xs text-slate-400">Thay đổi chỉ có hiệu lực sau khi bấm Lưu.</span>
           <Button
             type="primary"
             icon={<CheckOutlined />}
@@ -316,8 +299,9 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
             Lưu Cấu Hình
           </Button>
         </div>
-      </div>
+      )}
     </div>
+    </ConfigProvider>
   );
 });
 

@@ -9,10 +9,13 @@ import {
   UserOutlined,
   LogoutOutlined,
   KeyOutlined,
+  DatabaseOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import AuthModal, { AuthModalTab } from './auth/AuthModal';
 import { getNavItem } from '../config/navigation';
 import { CurrentUser, isAdmin } from '../auth/session';
+import type { DbStatus } from '../types/dbStatus';
 
 interface HeaderProps {
   activeTabKey: string;
@@ -20,9 +23,38 @@ interface HeaderProps {
   onOpenSettings: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
+  dbStatus: DbStatus;
+  onCheckDb: () => void;
   currentUser: CurrentUser;
   onLogout: () => void;
 }
+
+/** Trạng thái MySQL: xanh = kết nối, vàng = đang dùng cache, đỏ = mất kết nối. Bấm để kiểm tra lại. */
+const DbStatusButton: React.FC<{ status: DbStatus; onCheck: () => void }> = ({ status, onCheck }) => {
+  const view = status.connected
+    ? { dot: 'bg-emerald-400', label: 'MySQL', tip: `Đã kết nối MySQL (${status.database || 'autopost_saas'})` }
+    : status.usingCache
+      ? { dot: 'bg-amber-400', label: 'Cache', tip: `Mất kết nối MySQL, đang dùng dữ liệu cache (${status.cachedCount || 0} tài khoản)` }
+      : { dot: 'bg-rose-500', label: 'Mất kết nối', tip: `Không kết nối được MySQL: ${status.error || 'không rõ lỗi'}` };
+
+  return (
+    <Tooltip title={`${view.tip}. Bấm để kiểm tra lại.`}>
+      <Button
+        onClick={onCheck}
+        aria-label={view.tip}
+        className="text-xs rounded-xl h-9 px-2.5 border bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-500 flex items-center gap-2"
+      >
+        {status.loading ? (
+          <SyncOutlined spin className="text-slate-400" />
+        ) : (
+          <span className={`w-2 h-2 rounded-full ${view.dot}`} />
+        )}
+        <DatabaseOutlined className="text-slate-400" />
+        <span className="hidden xl:inline">{view.label}</span>
+      </Button>
+    </Tooltip>
+  );
+};
 
 const HeaderComponent: React.FC<HeaderProps> = ({
   activeTabKey,
@@ -30,6 +62,8 @@ const HeaderComponent: React.FC<HeaderProps> = ({
   onOpenSettings,
   collapsed,
   onToggleCollapse,
+  dbStatus,
+  onCheckDb,
   currentUser,
   onLogout,
 }) => {
@@ -117,6 +151,8 @@ const HeaderComponent: React.FC<HeaderProps> = ({
 
         {/* Right: lối tắt + tài khoản */}
         <div className="flex items-center gap-2 xl:gap-3 shrink-0">
+          <DbStatusButton status={dbStatus} onCheck={onCheckDb} />
+
           <Tooltip title="Quản lý Via & Cookie">
             <Button
               icon={<IdcardOutlined className="text-cyan-500" />}
