@@ -502,6 +502,9 @@ function authenticateJwt(req, res, next) {
     '/health',
     '/api/license/activate',
     '/api/license/status',
+    '/api/buff-cached-pages',
+    '/api/avatars/cached-status',
+    '/api/avatars/presets',
   ];
 
   const currentPath = req.path.toLowerCase();

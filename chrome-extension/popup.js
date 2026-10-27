@@ -179,22 +179,36 @@ async function checkActiveTab() {
     }
 
     // Gửi message tới content script để lấy thông tin đăng nhập
-    chrome.tabs.sendMessage(currentTabId, { action: 'GET_FB_INFO' }, (res) => {
+    chrome.tabs.sendMessage(currentTabId, { action: 'GET_FB_INFO' }, async (res) => {
       if (chrome.runtime.lastError || !res) {
-        setConnectionStatus(false, 'Cần F5 tab Facebook');
-        userNameEl.textContent = 'Chưa tải được Script';
-        userUidEl.textContent = 'Hãy F5 lại tab Facebook và mở lại extension';
-        return;
+        // Tự động inject Script nếu tab chưa được F5
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: currentTabId },
+            files: ['avatars-data.js', 'content.js'],
+          });
+          setTimeout(() => {
+            chrome.tabs.sendMessage(currentTabId, { action: 'GET_FB_INFO' }, (retryRes) => {
+              if (retryRes && retryRes.loggedIn) {
+                applyConnectedUser(retryRes);
+              } else {
+                setConnectionStatus(false, 'Cần F5 tab Facebook');
+                userNameEl.textContent = 'Chưa tải được Script';
+                userUidEl.textContent = 'Nhấn Cmd+R (F5) tab Facebook phía sau nhé!';
+              }
+            });
+          }, 400);
+          return;
+        } catch (injectErr) {
+          setConnectionStatus(false, 'Cần F5 tab Facebook');
+          userNameEl.textContent = 'Chưa tải được Script';
+          userUidEl.textContent = 'Nhấn Cmd+R (F5) tab Facebook phía sau nhé!';
+          return;
+        }
       }
 
       if (res.loggedIn && res.uid) {
-        fbUser = res;
-        setConnectionStatus(true, 'Facebook Đã Kết Nối');
-        userNameEl.textContent = res.name || 'Nick Facebook';
-        userUidEl.textContent = `UID: ${res.uid}`;
-        if (res.avatarUrl) {
-          userAvatarEl.innerHTML = `<img src="${res.avatarUrl}" alt="avatar">`;
-        }
+        applyConnectedUser(res);
       } else {
         setConnectionStatus(false, 'Chưa đăng nhập FB');
         userNameEl.textContent = 'Chưa đăng nhập Facebook';
@@ -204,6 +218,17 @@ async function checkActiveTab() {
   } catch (e) {
     setConnectionStatus(false, 'Lỗi kết nối');
   }
+}
+
+function applyConnectedUser(user) {
+  fbUser = user;
+  setConnectionStatus(true, 'Facebook Đã Kết Nối');
+  userNameEl.textContent = user.name || 'Nick Facebook';
+  userUidEl.textContent = `UID: ${user.uid}`;
+  if (user.avatarUrl) {
+    userAvatarEl.innerHTML = `<img src="${user.avatarUrl}" alt="avatar">`;
+  }
+  loadPagesList();
 }
 
 function setConnectionStatus(connected, text) {
@@ -266,7 +291,7 @@ async function loadPagesList() {
   }
 
   // 3. Quét từ tab Facebook hiện tại
-  if (source === 'fb_tab' || (pages.length === 0 && currentTabId)) {
+  if (source === 'fb_tab') {
     try {
       const resScan = await new Promise((resolve) => {
         chrome.tabs.sendMessage(currentTabId, { action: 'SCAN_DOM_PAGES' }, resolve);
