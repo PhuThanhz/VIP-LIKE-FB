@@ -583,19 +583,40 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
           throw new Error('Không thể mở hộp thoại chọn tệp của Facebook');
         }
 
-        // 7. Đợi modal xem trước & Bấm "Lưu" (Save)
-        await tab.waitForTimeout(4000);
-        const saveBtn = tab.locator('div[role="dialog"] div[role="button"]:has-text("Lưu"), div[role="dialog"] button:has-text("Lưu"), div[role="dialog"] div[role="button"]:has-text("Save")').first();
-        if (await saveBtn.isVisible().catch(() => false)) {
-          await saveBtn.click({ force: true });
-          console.log(`[AvatarStudio] 💾 Đã bấm "Lưu" ảnh đại diện cho Page "${pageName}"...`);
-          // Đợi modal lưu đóng
-          await tab.waitForSelector('div[role="dialog"] div[role="button"]:has-text("Lưu")', {
-            state: 'hidden',
-            timeout: 25000,
-          }).catch(() => {});
-          await tab.waitForTimeout(3000);
+        // 7. Đợi Facebook tải ảnh và bấm nút "Lưu" (Save) bắt buộc
+        let saveClicked = false;
+        const saveSelectors = [
+          'div[role="dialog"] div[role="button"]:has-text("Lưu")',
+          'div[role="dialog"] button:has-text("Lưu")',
+          'div[role="dialog"] [aria-label="Lưu"]',
+          'div[role="dialog"] div[role="button"]:has-text("Save")',
+          'div[role="dialog"] button:has-text("Save")',
+        ];
+
+        for (let waitSec = 0; waitSec < 12; waitSec++) {
+          await tab.waitForTimeout(1000);
+          for (const sel of saveSelectors) {
+            const btn = tab.locator(sel).first();
+            if ((await btn.count().catch(() => 0)) > 0 && (await btn.isVisible().catch(() => false))) {
+              await btn.click({ force: true }).catch(() => {});
+              saveClicked = true;
+              console.log(`[AvatarStudio] 💾 Đã bấm "Lưu" ảnh đại diện cho Page "${pageName}"...`);
+              break;
+            }
+          }
+          if (saveClicked) break;
         }
+
+        if (!saveClicked) {
+          throw new Error('Nút "Lưu" ảnh đại diện không xuất hiện trên Facebook (ảnh chưa tải lên xong hoặc mạng chậm)');
+        }
+
+        // Đợi modal lưu đóng lại xác nhận Facebook đã hoàn tất lưu
+        await tab.waitForSelector('div[role="dialog"] div[role="button"]:has-text("Lưu")', {
+          state: 'hidden',
+          timeout: 25000,
+        }).catch(() => {});
+        await tab.waitForTimeout(3000);
 
         console.log(`[AvatarStudio] ✅ Cập nhật Avatar THÀNH CÔNG cho Page: "${pageName}" (ID: ${pageId})`);
         updatedCount++;
@@ -879,17 +900,34 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
           throw new Error('Không thể kích hoạt hộp thoại chọn tệp Ảnh Bìa');
         }
 
-        // Bấm "Lưu thay đổi" (Save changes)
-        await tab.waitForTimeout(3500);
-        const saveCoverBtn = tab.locator(
-          'div[role="button"]:has-text("Lưu thay đổi"), button:has-text("Lưu thay đổi"), div[role="button"]:has-text("Save changes"), button:has-text("Save changes")'
-        ).first();
+        // Bấm "Lưu thay đổi" (Save changes) bắt buộc
+        let coverSaved = false;
+        const coverSaveSelectors = [
+          'div[role="button"]:has-text("Lưu thay đổi")',
+          'button:has-text("Lưu thay đổi")',
+          'div[role="button"]:has-text("Save changes")',
+          'button:has-text("Save changes")',
+        ];
 
-        if (await saveCoverBtn.isVisible().catch(() => false)) {
-          await saveCoverBtn.click({ force: true });
-          console.log(`[CoverStudio] 💾 Đã bấm "Lưu thay đổi" Ảnh Bìa cho Page "${pageName}"`);
-          await tab.waitForTimeout(3000);
+        for (let waitSec = 0; waitSec < 12; waitSec++) {
+          await tab.waitForTimeout(1000);
+          for (const sel of coverSaveSelectors) {
+            const btn = tab.locator(sel).first();
+            if ((await btn.count().catch(() => 0)) > 0 && (await btn.isVisible().catch(() => false))) {
+              await btn.click({ force: true }).catch(() => {});
+              coverSaved = true;
+              console.log(`[CoverStudio] 💾 Đã bấm "Lưu thay đổi" Ảnh Bìa cho Page "${pageName}"`);
+              break;
+            }
+          }
+          if (coverSaved) break;
         }
+
+        if (!coverSaved) {
+          throw new Error('Nút "Lưu thay đổi" ảnh bìa không xuất hiện trên Facebook');
+        }
+
+        await tab.waitForTimeout(3000);
 
         const duration = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
         updatedCount++;
