@@ -134,19 +134,32 @@
       await sleep(2000);
       await dismissFacebookPopups();
 
-      const preset = job.preset || 'mix';
-      const avatarUrl = window.getRandomAvatar
-        ? window.getRandomAvatar(preset)
-        : 'https://randomuser.me/api/portraits/women/1.jpg';
+      // KIỂM TRA BẢO VỆ AN TOÀN TRƯỚC KHI TẢI:
+      // Nếu phát hiện Page này trên thực tế ĐÃ CÓ avatar thật trên Facebook (không phải bóng mờ silhouette)
+      const hasRealAvatarOnFb = detectIfPageHasAvatarOnFacebook();
+      if (hasRealAvatarOnFb && !targetPage.forceUpdate) {
+        console.log(`[VIPLIKE Avatar] 🛡️ Page "${targetPage.name}" đã có Avatar thật trên Facebook. Bỏ qua an toàn!`);
+        addLog(job, `🛡️ Bỏ qua an toàn: ${targetPage.name} (Đã có Avatar thật)`, 'info');
+        job.statusMessage = `🛡️ Đã có avatar thật: Bỏ qua ${targetPage.name}...`;
+        await chrome.storage.local.set({ activeJob: job });
+        updateFloatingHud(job);
+        notifyPopup(job);
+        await sleep(1500);
+      } else {
+        const preset = job.preset || 'mix';
+        const avatarUrl = window.getRandomAvatar
+          ? window.getRandomAvatar(preset)
+          : 'https://randomuser.me/api/portraits/women/1.jpg';
 
-      console.log(`[VIPLIKE Avatar] Tải ảnh đại diện mẫu: ${avatarUrl}`);
-      const imageFile = await urlToFile(avatarUrl, `avatar_${targetPage.id}.jpg`);
+        console.log(`[VIPLIKE Avatar] Tải ảnh đại diện mẫu: ${avatarUrl}`);
+        const imageFile = await urlToFile(avatarUrl, `avatar_${targetPage.id}.jpg`);
 
-      await processAvatarUploadOnPage(imageFile, targetPage.name);
+        await processAvatarUploadOnPage(imageFile, targetPage.name);
 
-      job.success++;
-      addLog(job, `✅ Thành công: ${targetPage.name}`, 'success');
-      console.log(`[VIPLIKE Avatar] ✅ Cập nhật thành công cho ${targetPage.name}`);
+        job.success++;
+        addLog(job, `✅ Thành công: ${targetPage.name}`, 'success');
+        console.log(`[VIPLIKE Avatar] ✅ Cập nhật thành công cho ${targetPage.name}`);
+      }
     } catch (err) {
       console.warn(`[VIPLIKE Avatar] ⚠️ Lỗi Page ${targetPage.name}:`, err.message);
       job.failed++;
@@ -305,6 +318,32 @@
       const isTopRightNav = rect.top < 60 && rect.right > window.innerWidth - 150;
       return !isTopRightNav && rect.width > 0 && rect.height > 0;
     });
+  }
+
+  // Phát hiện xem Page hiện tại trên Facebook đã có avatar thật hay chỉ là silhouette mặc định
+  function detectIfPageHasAvatarOnFacebook() {
+    try {
+      const avatarImgs = Array.from(
+        document.querySelectorAll('image, img[src*="scontent"], div[role="img"] image, a[href*="/photo"] img')
+      );
+      for (const el of avatarImgs) {
+        const src = el.getAttribute('xlink:href') || el.getAttribute('src') || '';
+        if (!src) continue;
+        const isSilhouette =
+          src.includes('t1.30497-1') ||
+          src.includes('silhouette') ||
+          src.includes('default_profile') ||
+          src.includes('static.xx.fbcdn.net/rsrc.php');
+        const isRealPhoto = (src.includes('t39.30808-1') || src.includes('fbcdn.net')) && !isSilhouette;
+
+        const rect = el.getBoundingClientRect();
+        // Ảnh đại diện chính thường nằm ở phần header (top < 450px) và kích thước lớn (>= 50px)
+        if (isRealPhoto && rect.width >= 50 && rect.height >= 50 && rect.top < 450) {
+          return true;
+        }
+      }
+    } catch (e) {}
+    return false;
   }
 
   async function dismissFacebookPopups() {

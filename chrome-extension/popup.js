@@ -8,6 +8,11 @@ let isRunning = false;
 let isPaused = false;
 let syncTimer = null;
 
+// Quản lý danh sách Fanpage và bộ lọc
+let allLoadedPages = [];
+let selectedPageIds = new Set();
+let searchQuery = '';
+
 // DOM Elements
 const fbStatusPill = document.getElementById('fb-status-pill');
 const fbStatusText = document.getElementById('fb-status-text');
@@ -22,6 +27,18 @@ const customPagesGroup = document.getElementById('custom-pages-group');
 const customPagesInput = document.getElementById('custom-pages-input');
 const delaySlider = document.getElementById('delay-slider');
 const delayVal = document.getElementById('delay-val');
+
+// Page selection elements
+const pillMissingCount = document.getElementById('pill-missing-count');
+const pillHasCount = document.getElementById('pill-has-count');
+const btnReloadPages = document.getElementById('btn-reload-pages');
+const btnFilterMissingOnly = document.getElementById('btn-filter-missing-only');
+const btnFilterSelectAll = document.getElementById('btn-filter-select-all');
+const btnFilterDeselectAll = document.getElementById('btn-filter-deselect-all');
+const pagesSearchInput = document.getElementById('pages-search-input');
+const pagesListEl = document.getElementById('pages-list');
+const selectedCountEl = document.getElementById('selected-count');
+const totalPagesCountEl = document.getElementById('total-pages-count');
 
 const btnStart = document.getElementById('btn-start');
 const btnPause = document.getElementById('btn-pause');
@@ -41,6 +58,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
   loadSavedState();
   await checkActiveTab();
+  await loadPagesList();
   await syncJobStateFromStorage();
 
   // Polling sync định kỳ để đồng bộ liên tục
@@ -61,21 +79,58 @@ function setupEventListeners() {
     chrome.storage.local.set({ avatarPreset: e.target.value });
   });
 
-  pageSourceSelect.addEventListener('change', (e) => {
+  pageSourceSelect.addEventListener('change', async (e) => {
     const val = e.target.value;
     chrome.storage.local.set({ pageSource: val });
     if (customPagesGroup) {
       customPagesGroup.style.display = val === 'custom_list' ? 'block' : 'none';
     }
+    await loadPagesList();
   });
 
   if (customPagesInput) {
     customPagesInput.addEventListener('input', (e) => {
       chrome.storage.local.set({ customPagesText: e.target.value });
+      if (pageSourceSelect.value === 'custom_list') {
+        loadPagesList();
+      }
     });
   }
 
-  btnRefreshUser.addEventListener('click', checkActiveTab);
+  btnReloadPages.addEventListener('click', loadPagesList);
+
+  btnFilterMissingOnly.addEventListener('click', () => {
+    setFilterButtonActive(btnFilterMissingOnly);
+    selectedPageIds.clear();
+    allLoadedPages.forEach((p) => {
+      if (!p.hasAvatar) selectedPageIds.add(p.id);
+    });
+    renderPagesList();
+  });
+
+  btnFilterSelectAll.addEventListener('click', () => {
+    setFilterButtonActive(btnFilterSelectAll);
+    selectedPageIds.clear();
+    allLoadedPages.forEach((p) => selectedPageIds.add(p.id));
+    renderPagesList();
+  });
+
+  btnFilterDeselectAll.addEventListener('click', () => {
+    setFilterButtonActive(btnFilterDeselectAll);
+    selectedPageIds.clear();
+    renderPagesList();
+  });
+
+  pagesSearchInput.addEventListener('input', (e) => {
+    searchQuery = e.target.value.toLowerCase().trim();
+    renderPagesList();
+  });
+
+  btnRefreshUser.addEventListener('click', async () => {
+    await checkActiveTab();
+    await loadPagesList();
+  });
+
   btnStart.addEventListener('click', handleStart);
   btnPause.addEventListener('click', handlePause);
   btnStop.addEventListener('click', handleStop);
@@ -95,6 +150,11 @@ function setupEventListeners() {
       renderProgress(msg.data);
     }
   });
+}
+
+function setFilterButtonActive(activeBtn) {
+  [btnFilterMissingOnly, btnFilterSelectAll, btnFilterDeselectAll].forEach((b) => b.classList.remove('active'));
+  if (activeBtn) activeBtn.classList.add('active');
 }
 
 // Kiểm tra tab Facebook hiện tại
@@ -124,7 +184,6 @@ async function checkActiveTab() {
         setConnectionStatus(false, 'Cần F5 tab Facebook');
         userNameEl.textContent = 'Chưa tải được Script';
         userUidEl.textContent = 'Hãy F5 lại tab Facebook và mở lại extension';
-        btnStart.disabled = false; // Vẫn cho phép thử lại
         return;
       }
 
@@ -136,12 +195,10 @@ async function checkActiveTab() {
         if (res.avatarUrl) {
           userAvatarEl.innerHTML = `<img src="${res.avatarUrl}" alt="avatar">`;
         }
-        btnStart.disabled = false;
       } else {
         setConnectionStatus(false, 'Chưa đăng nhập FB');
         userNameEl.textContent = 'Chưa đăng nhập Facebook';
         userUidEl.textContent = 'Hãy đăng nhập vào Facebook trên tab này';
-        btnStart.disabled = true;
       }
     });
   } catch (e) {
@@ -155,6 +212,187 @@ function setConnectionStatus(connected, text) {
     fbStatusPill.className = 'status-pill status-connected';
   } else {
     fbStatusPill.className = 'status-pill status-disconnected';
+  }
+}
+
+// =========================================================================
+// QUẢN LÝ TẢI VÀ CHỌN DANH SÁCH FANPAGE
+// =========================================================================
+
+async function loadPagesList() {
+  pagesListEl.innerHTML = '<div class="empty-pages-msg">⏳ Đang nạp danh sách Fanpage...</div>';
+  const source = pageSourceSelect.value;
+  let pages = [];
+
+  // 1. Tự nhập danh sách ID / Link
+  if (source === 'custom_list') {
+    const rawText = customPagesInput ? customPagesInput.value : '';
+    const lines = rawText.split('\n').map((l) => l.trim()).filter(Boolean);
+    const seen = new Set();
+    for (const line of lines) {
+      const m = line.match(/(?:id=|\/)?([0-9]{12,})/);
+      const id = m ? m[1] : line.replace(/[^0-9]/g, '');
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        pages.push({
+          id,
+          name: `Fanpage ${id.slice(-4)}`,
+          hasAvatar: false, // Tự nhập mặc định xem là cần đổi
+          isSilhouette: true,
+          avatarUrl: '',
+        });
+      }
+    }
+  }
+
+  // 2. Nạp từ VIPLIKE RADIANT (:3100)
+  if (source === 'viplike_backend') {
+    try {
+      const uidQuery = fbUser && fbUser.uid ? `?uid=${fbUser.uid}` : '';
+      const res = await fetch(`${BACKEND_URL}/api/buff-cached-pages${uidQuery}`);
+      const data = await res.json();
+      if (data?.pages && data.pages.length > 0) {
+        pages = data.pages;
+      } else {
+        const resAll = await fetch(`${BACKEND_URL}/api/buff-cached-pages`);
+        const dataAll = await resAll.json();
+        if (dataAll?.pages && dataAll.pages.length > 0) {
+          pages = dataAll.pages;
+        }
+      }
+    } catch (e) {
+      console.warn('Backend không phản hồi khi lấy pages');
+    }
+  }
+
+  // 3. Quét từ tab Facebook hiện tại
+  if (source === 'fb_tab' || (pages.length === 0 && currentTabId)) {
+    try {
+      const resScan = await new Promise((resolve) => {
+        chrome.tabs.sendMessage(currentTabId, { action: 'SCAN_DOM_PAGES' }, resolve);
+      });
+      if (resScan && Array.isArray(resScan.pages) && resScan.pages.length > 0) {
+        pages = resScan.pages.map((p) => ({
+          ...p,
+          hasAvatar: false,
+          isSilhouette: true,
+          avatarUrl: '',
+        }));
+      }
+    } catch (e) {}
+  }
+
+  allLoadedPages = pages;
+
+  // QUY TẮC AN TOÀN TUYỆT ĐỐI THEO YÊU CẦU:
+  // MẶC ĐỊNH CHỈ TÍCH CHỌN CÁC PAGE CHƯA CÓ AVATAR (!p.hasAvatar)
+  // Các nick đã có avatar để trống (không được đổi bậy)
+  selectedPageIds.clear();
+  allLoadedPages.forEach((p) => {
+    if (!p.hasAvatar) {
+      selectedPageIds.add(p.id);
+    }
+  });
+
+  renderPagesList();
+}
+
+function renderPagesList() {
+  const missingCount = allLoadedPages.filter((p) => !p.hasAvatar).length;
+  const hasCount = allLoadedPages.filter((p) => p.hasAvatar).length;
+
+  pillMissingCount.textContent = `${missingCount} chưa có`;
+  pillHasCount.textContent = `${hasCount} đã có`;
+  totalPagesCountEl.textContent = allLoadedPages.length;
+
+  // Lọc theo từ khóa tìm kiếm
+  let displayPages = allLoadedPages;
+  if (searchQuery) {
+    displayPages = allLoadedPages.filter((p) => {
+      return (p.name || '').toLowerCase().includes(searchQuery) || (p.id || '').includes(searchQuery);
+    });
+  }
+
+  if (displayPages.length === 0) {
+    pagesListEl.innerHTML = `
+      <div class="empty-pages-msg">
+        ${allLoadedPages.length === 0 ? 'Chưa tìm thấy Fanpage nào.' : 'Không có Fanpage nào khớp tìm kiếm.'}
+      </div>
+    `;
+    updateSelectedCountUI();
+    return;
+  }
+
+  pagesListEl.innerHTML = '';
+
+  for (const page of displayPages) {
+    const isSelected = selectedPageIds.has(page.id);
+    const row = document.createElement('div');
+    row.className = `page-row ${isSelected ? 'selected' : ''}`;
+    row.dataset.id = page.id;
+
+    // Mini avatar
+    let thumbHtml = '<div class="page-thumb-placeholder">👤</div>';
+    if (page.avatarUrl) {
+      thumbHtml = `<img src="${page.avatarUrl}" class="page-thumb-img" alt="avatar" onerror="this.outerHTML='<div class=\\'page-thumb-placeholder\\'>👤</div>'">`;
+    }
+
+    // Status tag
+    const statusTag = page.hasAvatar
+      ? '<span class="page-status-tag tag-has">🟢 Đã có Avatar</span>'
+      : '<span class="page-status-tag tag-missing">🔴 Chưa có Avatar</span>';
+
+    row.innerHTML = `
+      <input type="checkbox" class="page-checkbox" ${isSelected ? 'checked' : ''}>
+      <div class="page-thumb-box">${thumbHtml}</div>
+      <div class="page-details">
+        <div class="page-row-name" title="${page.name}">${page.name}</div>
+        <div class="page-row-id">${page.id}</div>
+      </div>
+      ${statusTag}
+    `;
+
+    // Click checkbox hoặc click hàng để chọn/bỏ chọn
+    const cb = row.querySelector('.page-checkbox');
+    cb.addEventListener('change', (e) => {
+      e.stopPropagation();
+      togglePageSelection(page.id, cb.checked, row);
+    });
+
+    row.addEventListener('click', (e) => {
+      if (e.target !== cb) {
+        cb.checked = !cb.checked;
+        togglePageSelection(page.id, cb.checked, row);
+      }
+    });
+
+    pagesListEl.appendChild(row);
+  }
+
+  updateSelectedCountUI();
+}
+
+function togglePageSelection(pageId, isChecked, rowEl) {
+  if (isChecked) {
+    selectedPageIds.add(pageId);
+    rowEl.classList.add('selected');
+  } else {
+    selectedPageIds.delete(pageId);
+    rowEl.classList.remove('selected');
+  }
+  updateSelectedCountUI();
+}
+
+function updateSelectedCountUI() {
+  const count = selectedPageIds.size;
+  selectedCountEl.textContent = count;
+
+  if (count === 0) {
+    btnStart.disabled = true;
+    btnStart.innerHTML = '<span>⚠️</span> Hãy chọn ít nhất 1 Page cần đổi';
+  } else {
+    btnStart.disabled = false;
+    btnStart.innerHTML = `<span>🚀</span> Bắt đầu đổi Avatar (Đã chọn ${count} Page)`;
   }
 }
 
@@ -189,68 +427,18 @@ async function syncJobStateFromStorage() {
 // Bắt đầu tiến trình cập nhật Avatar
 async function handleStart() {
   const preset = avatarPresetSelect.value;
-  const source = pageSourceSelect.value;
   const delaySec = parseFloat(delaySlider.value);
 
-  currentPageStatus.textContent = '⏳ Đang chuẩn bị danh sách Fanpage...';
-  btnStart.disabled = true;
+  // CHỈ LẤY CÁC PAGE ĐƯỢC NGƯỜI DÙNG TÍCH CHỌN
+  const pagesToRun = allLoadedPages.filter((p) => selectedPageIds.has(p.id));
 
-  let pages = [];
-
-  // 1. Tự nhập ID / Link
-  if (source === 'custom_list') {
-    const rawText = customPagesInput ? customPagesInput.value : '';
-    const lines = rawText.split('\n').map((l) => l.trim()).filter(Boolean);
-    const seen = new Set();
-    for (const line of lines) {
-      const m = line.match(/(?:id=|\/)?([0-9]{12,})/);
-      const id = m ? m[1] : line.replace(/[^0-9]/g, '');
-      if (id && !seen.has(id)) {
-        seen.add(id);
-        pages.push({ id, name: `Fanpage ${id.slice(-4)}` });
-      }
-    }
-  }
-
-  // 2. Nạp từ VIPLIKE RADIANT (:3100)
-  if (source === 'viplike_backend') {
-    try {
-      const uidQuery = fbUser && fbUser.uid ? `?uid=${fbUser.uid}` : '';
-      const res = await fetch(`${BACKEND_URL}/api/buff-cached-pages${uidQuery}`);
-      const data = await res.json();
-      if (data?.pages && data.pages.length > 0) {
-        pages = data.pages;
-      } else {
-        // Fallback lấy toàn bộ
-        const resAll = await fetch(`${BACKEND_URL}/api/buff-cached-pages`);
-        const dataAll = await resAll.json();
-        if (dataAll?.pages && dataAll.pages.length > 0) {
-          pages = dataAll.pages;
-        }
-      }
-    } catch (e) {
-      console.warn('Backend không phản hồi, thử quét từ tab');
-    }
-  }
-
-  // 3. Quét trực tiếp từ Tab Facebook nếu chưa có danh sách
-  if (pages.length === 0 && currentTabId) {
-    try {
-      const resScan = await new Promise((resolve) => {
-        chrome.tabs.sendMessage(currentTabId, { action: 'SCAN_DOM_PAGES' }, resolve);
-      });
-      if (resScan && Array.isArray(resScan.pages) && resScan.pages.length > 0) {
-        pages = resScan.pages;
-      }
-    } catch (e) {}
-  }
-
-  if (pages.length === 0) {
-    btnStart.disabled = false;
-    alert('Không tìm thấy Fanpage nào! Vui lòng chọn "Tự nhập danh sách ID" hoặc mở tab Facebook có Fanpage.');
-    currentPageStatus.textContent = '⚠️ Không có danh sách Fanpage để thực thi.';
+  if (pagesToRun.length === 0) {
+    alert('Vui lòng tích chọn ít nhất một Fanpage cần đổi ảnh đại diện!');
     return;
   }
+
+  currentPageStatus.textContent = `⏳ Đang chuẩn bị chạy cho ${pagesToRun.length} Fanpage đã chọn...`;
+  btnStart.disabled = true;
 
   // Lưu Job mới vào chrome.storage.local
   const newJob = {
@@ -259,17 +447,17 @@ async function handleStart() {
     completed: false,
     preset,
     delaySeconds: delaySec,
-    pages,
-    total: pages.length,
+    pages: pagesToRun,
+    total: pagesToRun.length,
     currentIndex: 0,
     success: 0,
     failed: 0,
     phase: 'INIT',
-    currentPageName: pages[0].name,
-    statusMessage: `Chuẩn bị cập nhật ${pages.length} Fanpage...`,
+    currentPageName: pagesToRun[0].name,
+    statusMessage: `Bắt đầu cập nhật ${pagesToRun.length} Fanpage đã chọn...`,
     logs: [{
       time: new Date().toLocaleTimeString(),
-      text: `🚀 Bắt đầu cập nhật ${pages.length} Fanpage (Kho: ${preset}, Chờ: ${delaySec}s)`,
+      text: `🚀 Bắt đầu đổi Avatar cho ${pagesToRun.length} Fanpage (Kho: ${preset}, Chờ: ${delaySec}s)`,
       type: 'info'
     }],
     startedAt: Date.now(),
@@ -284,9 +472,9 @@ async function handleStart() {
     success: 0,
     failed: 0,
     percent: 0,
-    pageName: pages[0].name,
+    pageName: pagesToRun[0].name,
     status: 'RUNNING',
-    message: `Đã khởi động tiến trình ${pages.length} Page`,
+    message: `Đã khởi động tiến trình ${pagesToRun.length} Page`,
   });
 
   // Đánh thức Content Script trong tab Facebook

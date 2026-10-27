@@ -738,10 +738,11 @@ app.post('/api/buff-get-pages', async (req, res) => {
   }
 });
 
-// Lấy danh sách Fanpage đã cache từ trước
+// Lấy danh sách Fanpage đã cache từ trước (kèm trạng thái Avatar chuẩn)
 app.get('/api/buff-cached-pages', (req, res) => {
   try {
     const { uid } = req.query;
+    const avatarCache = avatarTool.loadAvatarCache() || {};
     let pages = [];
 
     if (uid) {
@@ -764,17 +765,34 @@ app.get('/api/buff-cached-pages', (req, res) => {
           }
         } catch (e) {}
       }
-      return res.json({ success: true, uid, count: pages.length, pages });
+
+      // Gắn trạng thái Avatar chi tiết cho từng Page
+      const enrichedPages = pages.map((p) => {
+        const id = String(p.id || p.pageId || p.platformAccountId);
+        const av = avatarCache[id];
+        const hasAvatar = Boolean(av && av.hasAvatar && !av.isSilhouette);
+        return {
+          id,
+          name: p.name || p.pageName || `Fanpage ${id.slice(-4)}`,
+          url: p.url || `https://www.facebook.com/${id}`,
+          hasAvatar,
+          isSilhouette: Boolean(!av || av.isSilhouette || !av.hasAvatar),
+          avatarUrl: av?.avatarUrl || '',
+        };
+      });
+
+      return res.json({ success: true, uid, count: enrichedPages.length, pages: enrichedPages });
     }
 
-    // Nếu không truyền UID, trả về toàn bộ cache từ avatar_status_cache & accounts_cache
+    // Nếu không truyền UID, trả về toàn bộ cache từ avatar_status_cache
     try {
-      const avatarCache = avatarTool.loadAvatarCache() || {};
       const pageList = Object.values(avatarCache).map((p) => ({
-        id: p.pageId,
-        name: p.name || p.pageName || `Fanpage ${p.pageId}`,
+        id: String(p.pageId),
+        name: p.name || p.pageName || `Fanpage ${String(p.pageId).slice(-4)}`,
         url: `https://www.facebook.com/${p.pageId}`,
-        hasAvatar: p.hasAvatar,
+        hasAvatar: Boolean(p.hasAvatar && !p.isSilhouette),
+        isSilhouette: Boolean(p.isSilhouette || !p.hasAvatar),
+        avatarUrl: p.avatarUrl || '',
       }));
       if (pageList.length > 0) {
         return res.json({ success: true, count: pageList.length, pages: pageList });
