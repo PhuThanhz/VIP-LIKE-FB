@@ -101,19 +101,25 @@
     notifyPopup(job);
 
     // Kiểm tra xem chúng ta đã ở đúng trang Fanpage này chưa
-    const onTargetPage =
+    const activeProfileId = getActiveProfileId();
+    const isSwitchedToPage = activeProfileId === String(targetPage.id);
+    const onTargetPageUrl =
       window.location.href.includes(targetPage.id) ||
       document.documentElement.innerHTML.includes(`"page_id":"${targetPage.id}"`) ||
-      document.documentElement.innerHTML.includes(`"entity_id":"${targetPage.id}"`) ||
-      job.switchedToId === targetPage.id;
+      document.documentElement.innerHTML.includes(`"entity_id":"${targetPage.id}"`);
 
-    if (!onTargetPage) {
+    const readyToUpload = isSwitchedToPage || (job.switchedToId === targetPage.id && onTargetPageUrl);
+
+    if (!readyToUpload) {
       // 1. Chuyển sang danh tính Fanpage (Profile Switch)
       job.statusMessage = `🔄 Đang chuyển sang: ${targetPage.name}...`;
       job.switchedToId = targetPage.id;
       job.phase = 'SWITCHING';
       await chrome.storage.local.set({ activeJob: job });
       updateFloatingHud(job);
+
+      // Thử xác nhận hộp thoại nếu đang ở trang có nút Chuyển
+      await autoConfirmSwitchDialog();
 
       await sleep(800);
       const switchUrl = `https://www.facebook.com/profile/switch/?target_id=${targetPage.id}`;
@@ -131,7 +137,8 @@
     updateFloatingHud(job);
 
     try {
-      await sleep(2000);
+      await autoConfirmSwitchDialog();
+      await sleep(2500);
       await dismissFacebookPopups();
 
       // KIỂM TRA BẢO VỆ AN TOÀN TRƯỚC KHI TẢI:
@@ -305,19 +312,96 @@
     return true;
   }
 
+  // Lấy ID danh tính đang hoạt động (i_user: ID Fanpage nếu đã switch, c_user: nick mẹ)
+  function getActiveProfileId() {
+    const m = document.cookie.match(/(?:^|;\s*)i_user=([^;]+)/);
+    if (m) return m[1];
+    const c = document.cookie.match(/(?:^|;\s*)c_user=([^;]+)/);
+    return c ? c[1] : null;
+  }
+
+  // Tự động click xác nhận Chuyển trang nếu Facebook hiện hộp thoại xác nhận
+  async function autoConfirmSwitchDialog() {
+    for (let r = 0; r < 4; r++) {
+      const btns = Array.from(
+        document.querySelectorAll(
+          'div[role="dialog"] div[role="button"], div[role="button"], button, [aria-label*="Chuyển"], [aria-label*="Switch"]'
+        )
+      );
+      const confirmBtn = btns.find((b) => {
+        const txt = (b.innerText || b.getAttribute('aria-label') || '').trim().toLowerCase();
+        return (
+          txt === 'chuyển' ||
+          txt === 'chuyển ngay' ||
+          txt === 'dùng trang' ||
+          txt === 'switch' ||
+          txt === 'switch now'
+        );
+      });
+      if (confirmBtn && confirmBtn.offsetParent !== null) {
+        console.log('[VIPLIKE Avatar] 🔄 Tự động click xác nhận Chuyển trang...');
+        confirmBtn.click();
+        await sleep(1500);
+        break;
+      }
+      await sleep(500);
+    }
+  }
+
   function findCameraBtn() {
-    const candidates = Array.from(
+    // 1. Tìm trực tiếp bằng các nhãn aria-label phổ biến của Facebook tiếng Việt & Anh
+    const directCandidates = Array.from(
       document.querySelectorAll(
-        'div[aria-label*="ảnh đại diện"], div[aria-label*="profile picture" i], div[aria-label*="Avatar" i], div[aria-label*="Chỉnh sửa ảnh"], div[aria-label*="Hành động với ảnh"]'
+        'div[aria-label*="ảnh đại diện"], div[aria-label*="Hành động với ảnh đại diện"], div[aria-label*="Cập nhật ảnh đại diện"], div[aria-label*="Chỉnh sửa ảnh đại diện"], div[aria-label*="Profile picture" i], div[aria-label*="Update profile picture" i], div[aria-label*="Avatar" i]'
       )
     );
 
-    return candidates.find((el) => {
-      // Loại trừ ảnh đại diện của nick mẹ trên góc phải thanh điều hướng
+    for (const el of directCandidates) {
       const rect = el.getBoundingClientRect();
       const isTopRightNav = rect.top < 60 && rect.right > window.innerWidth - 150;
-      return !isTopRightNav && rect.width > 0 && rect.height > 0;
-    });
+      if (!isTopRightNav && rect.width > 0 && rect.height > 0) {
+        return el;
+      }
+    }
+
+    // 2. Tìm qua icon camera bên trong nút hành động
+    const cameraIcons = Array.from(document.querySelectorAll('i, svg'));
+    for (const ic of cameraIcons) {
+      const label = (ic.getAttribute('aria-label') || '').toLowerCase();
+      if (label.includes('camera') || label.includes('ảnh đại diện') || label.includes('đại diện')) {
+        const btn = ic.closest('div[role="button"], button');
+        if (btn) {
+          const rect = btn.getBoundingClientRect();
+          const isTopRightNav = rect.top < 60 && rect.right > window.innerWidth - 150;
+          if (!isTopRightNav && rect.width > 0 && rect.height > 0) {
+            return btn;
+          }
+        }
+      }
+    }
+
+    // 3. Tìm nút tròn nhỏ đè ngay trên khung Avatar chính của Fanpage
+    const mainAvatarImg = document.querySelector('svg[role="img"] image, a[href*="/photo"] img, a[href*="profile"] img');
+    if (mainAvatarImg) {
+      const avatarRect = mainAvatarImg.getBoundingClientRect();
+      if (avatarRect.width >= 50 && avatarRect.height >= 50 && avatarRect.top < 450) {
+        const nearbyBtns = Array.from(document.querySelectorAll('div[role="button"]')).filter((b) => {
+          const r = b.getBoundingClientRect();
+          return (
+            Math.abs(r.left - avatarRect.left) < 180 &&
+            Math.abs(r.top - avatarRect.top) < 180 &&
+            r.width > 0 &&
+            r.width < 90
+          );
+        });
+        if (nearbyBtns.length > 0) {
+          const camBtn = nearbyBtns.find((b) => (b.getAttribute('aria-label') || '').includes('ảnh') || b.querySelector('i, svg'));
+          return camBtn || nearbyBtns[0];
+        }
+      }
+    }
+
+    return null;
   }
 
   // Phát hiện xem Page hiện tại trên Facebook đã có avatar thật hay chỉ là silhouette mặc định
