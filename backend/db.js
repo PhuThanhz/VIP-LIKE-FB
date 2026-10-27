@@ -42,9 +42,15 @@ const dbConfig = {
   password: process.env.DB_PASSWORD || '26082003',
   database: process.env.DB_NAME || 'autopost_saas',
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 15,
+  maxIdle: 10,
+  idleTimeout: 60000,
   queueLimit: 0,
-  connectTimeout: 5000,
+  connectTimeout: 8000,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
+  timezone: '+07:00',
+  charset: 'utf8mb4_unicode_ci',
 };
 
 let pool = null;
@@ -575,7 +581,9 @@ async function ensureBuffLogsTable(p) {
       comment_count INT DEFAULT 0,
       details LONGTEXT,
       created_at DATETIME(3) NOT NULL,
-      INDEX idx_buff_logs_created (created_at)
+      INDEX idx_buff_logs_created (created_at),
+      INDEX idx_buff_logs_user_created (user_id, created_at),
+      INDEX idx_buff_logs_type_created (run_type, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   buffLogsTableReady = true;
