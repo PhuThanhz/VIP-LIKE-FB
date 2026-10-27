@@ -49,6 +49,7 @@ import {
   SafetyCertificateOutlined,
   SendOutlined,
   BellOutlined,
+  RocketFilled,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
@@ -413,16 +414,42 @@ function isPersonalCookieAccount(account: any) {
   return account?.accountType === 'PERSONAL_COOKIE' || account?.accountType === 'PERSONAL_PROFILE_COOKIE';
 }
 
-const REACTIONS = [
-  { key: 'LIKE', label: 'Thích (Like)', emoji: '👍', color: '#1877f2' },
-  { key: 'LOVE', label: 'Yêu thích (Love)', emoji: '❤️', color: '#f33e58' },
-  { key: 'CARE', label: 'Thương thương (Care)', emoji: '🥰', color: '#f7b125' },
-  { key: 'RANDOM_POSITIVE', label: 'Ngẫu nhiên Tích Cực (Like/Love/Care)', emoji: '🎲', color: '#ec4899' },
-  { key: 'RANDOM_ALL', label: 'Ngẫu nhiên Đa Dạng (Like/Love/Care/Haha/Wow)', emoji: '🎲', color: '#8b5cf6' },
-  { key: 'HAHA', label: 'Haha', emoji: '😆', color: '#f7b125' },
-  { key: 'WOW', label: 'Wow', emoji: '😮', color: '#f7b125' },
-  { key: 'SAD', label: 'Buồn (Sad)', emoji: '😢', color: '#f7b125' },
-  { key: 'ANGRY', label: 'Phẫn nộ (Angry)', emoji: '😡', color: '#e9710f' },
+interface ReactionOption {
+  key: string;
+  label: string;
+  shortLabel: string;
+  emoji: string;
+  color: string;
+  isRandom: boolean;
+  desc?: string;
+}
+
+const REACTIONS: ReactionOption[] = [
+  { key: 'LIKE', label: 'Thích (Like)', shortLabel: 'Thích', emoji: '👍', color: '#1877f2', isRandom: false },
+  { key: 'LOVE', label: 'Yêu thích (Love)', shortLabel: 'Thả Tim', emoji: '❤️', color: '#f33e58', isRandom: false },
+  { key: 'CARE', label: 'Thương thương (Care)', shortLabel: 'Thương', emoji: '🥰', color: '#f7b125', isRandom: false },
+  { key: 'HAHA', label: 'Haha (Cười vui)', shortLabel: 'Haha', emoji: '😆', color: '#f7b125', isRandom: false },
+  { key: 'WOW', label: 'Wow (Bất ngờ)', shortLabel: 'Wow', emoji: '😮', color: '#f7b125', isRandom: false },
+  { key: 'SAD', label: 'Buồn (Sad)', shortLabel: 'Buồn', emoji: '😢', color: '#f7b125', isRandom: false },
+  { key: 'ANGRY', label: 'Phẫn nộ (Angry)', shortLabel: 'Phẫn nộ', emoji: '😡', color: '#e9710f', isRandom: false },
+  {
+    key: 'RANDOM_POSITIVE',
+    label: 'Trộn Cảm Xúc Tự Nhiên (Like • Tim • Thương)',
+    shortLabel: 'Trộn Tự Nhiên (Like/Tim)',
+    emoji: '🎲',
+    color: '#ec4899',
+    isRandom: true,
+    desc: '65% Thích + 25% Thả Tim + 10% Thương Thương (Khuyên dùng cho bài bán hàng)',
+  },
+  {
+    key: 'RANDOM_ALL',
+    label: 'Trộn Đa Dạng (Tất cả cảm xúc Facebook)',
+    shortLabel: 'Trộn Đa Dạng',
+    emoji: '🌈',
+    color: '#8b5cf6',
+    isRandom: true,
+    desc: 'Bao gồm cả Haha & Wow xen kẽ cho bài viết viral, giải trí',
+  },
 ];
 
 export function cleanPageName(raw: string): string {
@@ -536,6 +563,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [concurrency, setConcurrency] = useState<number>(1);
   const [dripFeedMode, setDripFeedMode] = useState<boolean>(false);
   const [dripDurationMinutes, setDripDurationMinutes] = useState<number>(30);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState<boolean>(false);
   const [aiPostPrompt, setAiPostPrompt] = useState<string>('');
   const [aiTone, setAiTone] = useState<string>('customer_inquiry');
   const [aiCount, setAiCount] = useState<number>(10);
@@ -2355,14 +2383,53 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             label: 'Like & bình luận',
             children: (
               <div className="space-y-5">
+                {/* 3-STEP QUICK GUIDED FLOW FOR UNTRAINED USERS */}
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-purple-950/40 border border-blue-500/30 shadow-md">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold text-sm shrink-0">
+                        💡
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-white flex items-center gap-2">
+                          <span>Quy trình 3 bước tăng tương tác tự động</span>
+                          <Tag color="cyan" className="text-[10px] px-1.5 py-0 border-0 rounded-md">Dễ sử dụng 100%</Tag>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          Hệ thống đã tự động kết nối sẵn dàn Page con &amp; cấu hình an toàn chống quét. Bạn chỉ cần làm theo 3 bước:
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-300 overflow-x-auto pb-1 md:pb-0">
+                      <span className="px-2.5 py-1 rounded-lg bg-blue-950/80 border border-blue-500/40 text-blue-300 flex items-center gap-1.5 shrink-0">
+                        <span className="w-4 h-4 rounded-full bg-blue-500 text-[10px] text-white flex items-center justify-center font-bold">1</span>
+                        <span>Dán Link bài viết</span>
+                      </span>
+                      <span className="text-slate-600">➔</span>
+                      <span className="px-2.5 py-1 rounded-lg bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 flex items-center gap-1.5 shrink-0">
+                        <span className="w-4 h-4 rounded-full bg-indigo-500 text-[10px] text-white flex items-center justify-center font-bold">2</span>
+                        <span>Chọn Cảm xúc &amp; Seeding</span>
+                      </span>
+                      <span className="text-slate-600">➔</span>
+                      <span className="px-2.5 py-1 rounded-lg bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 flex items-center gap-1.5 shrink-0">
+                        <span className="w-4 h-4 rounded-full bg-emerald-500 text-[10px] text-white flex items-center justify-center font-bold">3</span>
+                        <span>Bấm Bắt đầu</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* TOP HERO COMMAND BAR: DÁN LINK & QUICK PRESETS */}
                 <div className="app-surface p-5 space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
                     <div className="flex items-center gap-3">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-sm sm:text-base font-semibold text-white">
-                            Bài viết cần tăng tương tác
+                          <span className="w-6 h-6 rounded-lg bg-blue-600/30 border border-blue-500/50 text-blue-400 font-bold flex items-center justify-center text-xs shrink-0">
+                            1
+                          </span>
+                          <span className="text-sm sm:text-base font-bold text-white">
+                            Bước 1: Link bài viết cần tăng tương tác
                           </span>
                           {targetPostUrl && (
                             <span className="px-2.5 py-0.5 rounded-md text-[10px] font-mono font-bold bg-blue-950/90 text-blue-300 border border-blue-700/60 shadow-sm">
@@ -2374,7 +2441,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-slate-400 mt-0.5">
+                        <p className="text-xs text-slate-400 mt-1">
                           Dán link bài viết Group (kín/công khai), Fanpage, Profile cá nhân hoặc Reels để hệ thống tự động nhận diện.
                         </p>
                       </div>
@@ -2495,8 +2562,10 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                       {/* Card Header */}
                       <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
                         <div className="flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-100">
-                          <IdcardOutlined className="text-blue-400 text-base" />
-                          <span>Tài khoản & Page</span>
+                          <span className="w-5 h-5 rounded-md bg-emerald-600/30 border border-emerald-500/50 text-emerald-400 font-bold flex items-center justify-center text-xs shrink-0">
+                            3
+                          </span>
+                          <span>Bước 3: Chọn dàn nick thực hiện</span>
                         </div>
                         <div className="flex items-center gap-2">
                           <Button
@@ -2727,7 +2796,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                     onClick={() => handleSelectRandomPages(num)}
                                     className="bg-slate-900 border-slate-700/80 hover:border-cyan-500 text-slate-200 text-[11px] font-semibold rounded-lg px-2 h-6"
                                   >
-                                    🎲 {num} Page
+                                    ⚡ {num} Page
                                   </Button>
                                 ))}
                               <Button
@@ -2958,9 +3027,11 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                       <div className="p-4 sm:p-5 app-surface space-y-4">
                         <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
                           <span className="text-xs sm:text-sm font-bold text-slate-100 flex items-center gap-2">
-                            <SettingOutlined className="text-blue-400" /> Cài đặt tương tác
+                            <span className="w-5 h-5 rounded-md bg-indigo-600/30 border border-indigo-500/50 text-indigo-400 font-bold flex items-center justify-center text-xs shrink-0">
+                              2
+                            </span>
+                            <span>Bước 2: Chọn cảm xúc &amp; Bình luận Seeding</span>
                           </span>
-                          
                         </div>
 
                         {/* 1. Hình thức tương tác: Combo / Like / Comment */}
@@ -2974,60 +3045,102 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               onClick={() => setEngagementMode('LIKE_ONLY')}
                               className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
                                 engagementMode === 'LIKE_ONLY'
-                                  ? 'border-blue-500 bg-blue-600/30 text-white font-bold'
+                                  ? 'border-blue-500 bg-blue-600/30 text-white font-bold shadow-md shadow-blue-500/20'
                                   : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                               }`}
                             >
-                              <span className="text-xs font-bold">Chỉ like</span>
+                              <span className="text-base">👍</span>
+                              <span className="text-xs font-bold">Chỉ Thả Like/Tim</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => setEngagementMode('LIKE_AND_COMMENT')}
                               className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
                                 engagementMode === 'LIKE_AND_COMMENT'
-                                  ? 'border-blue-500 bg-blue-600/30 text-white font-bold'
+                                  ? 'border-blue-500 bg-blue-600/30 text-white font-bold shadow-md shadow-blue-500/20'
                                   : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                               }`}
                             >
-                              <span className="text-xs font-bold">Like + bình luận</span>
+                              <span className="text-base">💬</span>
+                              <span className="text-xs font-bold">Like + Bình luận</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => setEngagementMode('COMMENT_ONLY')}
                               className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
                                 engagementMode === 'COMMENT_ONLY'
-                                  ? 'border-blue-500 bg-blue-600/30 text-white font-bold'
+                                  ? 'border-blue-500 bg-blue-600/30 text-white font-bold shadow-md shadow-blue-500/20'
                                   : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                               }`}
                             >
-                              <span className="text-xs font-bold">Chỉ bình luận</span>
+                              <span className="text-base">✍️</span>
+                              <span className="text-xs font-bold">Chỉ Bình luận</span>
                             </button>
                           </div>
                         </div>
 
-                        {/* 2. Reaction Picker (Floating Dock Style) */}
+                        {/* 2. Reaction Picker: 7 Cảm xúc Facebook + 2 Thẻ Trộn Tự Nhiên */}
                         {engagementMode !== 'COMMENT_ONLY' && (
-                          <div>
-                            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                              Chọn cảm xúc (Reaction):
-                            </label>
-                            <div className="flex items-center justify-between gap-1 p-1.5 rounded-xl bg-slate-950/80 border border-slate-800">
-                              {REACTIONS.map((r) => {
+                          <div className="space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                                <span>Cảm xúc tăng (Reaction):</span>
+                              </label>
+                              <Tag color="cyan" className="m-0 text-[11px] font-semibold rounded-md border-0 px-2 py-0.5">
+                                Đang chọn:{' '}
+                                {(() => {
+                                  const cur = REACTIONS.find((r) => r.key === selectedReaction);
+                                  return cur ? `${cur.emoji} ${cur.shortLabel}` : selectedReaction;
+                                })()}
+                              </Tag>
+                            </div>
+
+                            {/* Hàng 1: 7 Cảm xúc chuẩn Facebook */}
+                            <div className="grid grid-cols-7 gap-1.5 p-2 rounded-xl bg-slate-950/80 border border-slate-800">
+                              {REACTIONS.filter((r) => !r.isRandom).map((r) => {
                                 const isSelected = selectedReaction === r.key;
                                 return (
                                   <button
                                     key={r.key}
                                     type="button"
                                     onClick={() => setSelectedReaction(r.key)}
-                                    className={`flex-1 py-1.5 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all cursor-pointer ${
+                                    className={`py-2 px-1 rounded-xl flex flex-col items-center justify-center gap-1 transition-all cursor-pointer border ${
                                       isSelected
-                                        ? 'bg-blue-600/40 text-white font-semibold '
-                                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                                        ? 'bg-blue-600/30 border-blue-500 text-white shadow-md shadow-blue-500/20'
+                                        : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
                                     }`}
                                     title={r.label}
                                   >
-                                    <span className="text-xl sm:text-2xl leading-none">{r.emoji}</span>
-                                    <span className="text-[10px] font-semibold">{r.label.split(' ')[0]}</span>
+                                    <span className="text-2xl leading-none">{r.emoji}</span>
+                                    <span className="text-[10px] sm:text-[11px] font-semibold">{r.shortLabel}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {/* Hàng 2: 2 Chế độ Trộn Cảm Xúc Thông Minh (Chống quét & Tự nhiên nhất) */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {REACTIONS.filter((r) => r.isRandom).map((r) => {
+                                const isSelected = selectedReaction === r.key;
+                                return (
+                                  <button
+                                    key={r.key}
+                                    type="button"
+                                    onClick={() => setSelectedReaction(r.key)}
+                                    className={`p-2.5 rounded-xl flex items-center gap-2.5 transition-all cursor-pointer border text-left ${
+                                      isSelected
+                                        ? 'bg-purple-950/40 border-purple-500 text-white shadow-md shadow-purple-500/20'
+                                        : 'bg-slate-950/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                                    }`}
+                                  >
+                                    <span className="text-2xl shrink-0">{r.emoji}</span>
+                                    <div className="min-w-0">
+                                      <div className="text-xs font-bold text-slate-200 flex items-center gap-1">
+                                        <span>{r.shortLabel}</span>
+                                        {isSelected && <Tag color="purple" className="text-[9px] px-1 py-0 m-0 border-0">Đang bật</Tag>}
+                                      </div>
+                                      <div className="text-[10px] text-slate-400 truncate mt-0.5">{r.desc}</div>
+                                    </div>
                                   </button>
                                 );
                               })}
@@ -3035,148 +3148,177 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           </div>
                         )}
 
-                        {/* 3. Tùy chọn Mô phỏng người dùng, Tốc độ & Chống Checkpoint */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-emerald-900/60 text-xs shadow-sm">
+                        {/* 3. Khối Cài Đặt Nâng Cao & Tốc Độ (Thu Gọn / Collapsible) */}
+                        <div className="rounded-xl border border-slate-800 bg-slate-950/60 overflow-hidden">
+                          <div
+                            onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                            className="p-3 flex items-center justify-between cursor-pointer hover:bg-slate-900/40 transition-colors"
+                          >
                             <div className="flex items-center gap-2">
-                              <div>
-                                <span className="text-slate-200 font-bold block">Mô phỏng người dùng</span>
-                                <span className="text-[10px] text-slate-400">Lướt xem bài tự nhiên</span>
+                              <SettingOutlined className="text-cyan-400 text-sm" />
+                              <span className="text-xs font-bold text-slate-200">
+                                ⚙️ Cài Đặt Nâng Cao &amp; Tốc Độ (Tùy chọn)
+                              </span>
+                              <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950/80 border border-cyan-800/60 px-2 py-0.5 rounded-full">
+                                {concurrency} luồng • {delayMs / 1000}s giãn cách • {dripFeedMode ? `${dripDurationMinutes}p Drip-feed` : 'Chạy ngay'}
+                              </span>
+                            </div>
+                            <span className="text-xs text-cyan-400 font-bold">
+                              {showAdvancedSettings ? 'Thu gọn ▲' : 'Mở rộng ▼'}
+                            </span>
+                          </div>
+
+                          {!showAdvancedSettings && (
+                            <div className="px-3 pb-2.5 text-[11px] text-slate-400 flex items-center gap-1.5">
+                              <CheckCircleFilled className="text-emerald-400 text-xs shrink-0" />
+                              <span>Hệ thống đã tự kích hoạt cấu hình an toàn nhất: 2 luồng song song, mô phỏng người thật &amp; chống checkpoint.</span>
+                            </div>
+                          )}
+
+                          {showAdvancedSettings && (
+                            <div className="p-3 pt-0 border-t border-slate-800/80 space-y-2.5 mt-1">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+                                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-emerald-900/60 text-xs shadow-sm">
+                                  <div>
+                                    <span className="text-slate-200 font-bold block">Mô phỏng người dùng</span>
+                                    <span className="text-[10px] text-slate-400">Lướt xem bài tự nhiên</span>
+                                  </div>
+                                  <Checkbox
+                                    checked={enableHumanBehavior}
+                                    onChange={(e) => setEnableHumanBehavior(e.target.checked)}
+                                    className="text-emerald-400 font-bold"
+                                  >
+                                    Bật
+                                  </Checkbox>
+                                </div>
+
+                                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs shadow-sm">
+                                  <div>
+                                    <span className="text-slate-200 font-bold block">Giãn cách:</span>
+                                    <span className="text-[10px] text-slate-400">Nghỉ giữa 2 nick</span>
+                                  </div>
+                                  <Select
+                                    size="small"
+                                    value={delayMs}
+                                    onChange={(val) => setDelayMs(val)}
+                                    className="w-32"
+                                    options={
+                                      engagementMode !== 'LIKE_ONLY'
+                                        ? [
+                                            { value: 12000, label: '12-18s (Chuẩn)' },
+                                            { value: 20000, label: '20-28s (Siêu an toàn)' },
+                                            { value: 8000, label: '8-12s (Nhanh)' },
+                                          ]
+                                        : [
+                                            { value: 3800, label: '3.8-6s (Chuẩn an toàn)' },
+                                            { value: 5000, label: '5.0-8s (Siêu an toàn)' },
+                                            { value: 2500, label: '2.5s (Nhanh)' },
+                                          ]
+                                    }
+                                  />
+                                </div>
+
+                                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-blue-900/60 text-xs shadow-sm">
+                                  <div>
+                                    <span className="text-blue-300 font-bold block flex items-center gap-1">
+                                      <span>Chế độ Siêu Tốc</span>
+                                    </span>
+                                    <span className="text-[10px] text-slate-400">Đổi Page ngay trên bài (tiết kiệm 15s)</span>
+                                  </div>
+                                  <Checkbox
+                                    checked={fastSwitch}
+                                    onChange={(e) => setFastSwitch(e.target.checked)}
+                                    className="text-blue-400 font-bold"
+                                  >
+                                    Bật
+                                  </Checkbox>
+                                </div>
+
+                                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-cyan-900/60 text-xs shadow-sm">
+                                  <div>
+                                    <span className="text-cyan-300 font-bold block flex items-center gap-1">
+                                      <ThunderboltFilled className="text-cyan-400" /> Luồng chạy song song
+                                    </span>
+                                    <span className="text-[10px] text-slate-400">Tăng tốc độ buff gấp 2-3 lần</span>
+                                  </div>
+                                  <Segmented
+                                    size="small"
+                                    value={concurrency}
+                                    onChange={(val) => setConcurrency(Number(val))}
+                                    options={[
+                                      { label: '1 Luồng', value: 1 },
+                                      { label: '⚡ 2 Luồng (x2)', value: 2 },
+                                      { label: '🚀 3 Luồng (x3)', value: 3 },
+                                    ]}
+                                    className="bg-slate-900 border border-slate-700 text-slate-200"
+                                  />
+                                </div>
+
+                                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-indigo-900/60 text-xs shadow-sm">
+                                  <div>
+                                    <span className="text-indigo-300 font-bold block flex items-center gap-1">
+                                      <SafetyCertificateOutlined className="text-indigo-400" /> Buff rải đều (Drip-feed)
+                                    </span>
+                                    <span className="text-[10px] text-slate-400">Rải đều theo thời gian chống quét</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {dripFeedMode && (
+                                      <Select
+                                        size="small"
+                                        value={dripDurationMinutes}
+                                        onChange={(val) => setDripDurationMinutes(val)}
+                                        className="w-24 text-xs"
+                                        options={[
+                                          { value: 15, label: '15 phút' },
+                                          { value: 30, label: '30 phút' },
+                                          { value: 60, label: '1 giờ' },
+                                          { value: 120, label: '2 giờ' },
+                                          { value: 240, label: '4 giờ' },
+                                        ]}
+                                      />
+                                    )}
+                                    <Switch
+                                      checked={dripFeedMode}
+                                      onChange={(val) => setDripFeedMode(val)}
+                                      checkedChildren="Bật"
+                                      unCheckedChildren="Tắt"
+                                      className="bg-slate-800"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-amber-900/60 text-xs shadow-sm">
+                                  <div>
+                                    <span className="text-amber-300 font-bold block flex items-center gap-1">
+                                      <span>Bảo vệ BM &amp; Via</span>
+                                    </span>
+                                    <span className="text-[10px] text-slate-400">Batch Cooldown &amp; dừng khi bị chặn</span>
+                                  </div>
+                                  <Checkbox
+                                    checked={antiCheckpointGuard}
+                                    onChange={(e) => setAntiCheckpointGuard(e.target.checked)}
+                                    className="text-amber-400 font-bold"
+                                  >
+                                    Bật
+                                  </Checkbox>
+                                </div>
+                              </div>
+
+                              {/* Checkbox Tránh like trùng */}
+                              <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-800/80 bg-slate-950/60 text-xs">
+                                <Checkbox
+                                  checked={autoSkipAlreadyLiked}
+                                  onChange={(e) => setAutoSkipAlreadyLiked(e.target.checked)}
+                                  className="text-slate-200 font-medium"
+                                >
+                                  Tự động bỏ qua nick/page đã like bài viết này trước đó
+                                </Checkbox>
+                                <span className="text-amber-400 font-semibold text-[11px] hidden sm:inline">
+                                  Chống trùng lặp
+                                </span>
                               </div>
                             </div>
-                            <Checkbox
-                              checked={enableHumanBehavior}
-                              onChange={(e) => setEnableHumanBehavior(e.target.checked)}
-                              className="text-emerald-400 font-bold"
-                            >
-                              Bật
-                            </Checkbox>
-                          </div>
-
-                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs shadow-sm">
-                            <div>
-                              <span className="text-slate-200 font-bold block">Giãn cách:</span>
-                              <span className="text-[10px] text-slate-400">Nghỉ giữa 2 nick</span>
-                            </div>
-                            <Select
-                              size="small"
-                              value={delayMs}
-                              onChange={(val) => setDelayMs(val)}
-                              className="w-32"
-                              options={
-                                engagementMode !== 'LIKE_ONLY'
-                                  ? [
-                                      { value: 12000, label: '12-18s (Chuẩn)' },
-                                      { value: 20000, label: '20-28s (Siêu an toàn)' },
-                                      { value: 8000, label: '8-12s (Nhanh)' },
-                                    ]
-                                  : [
-                                      { value: 3800, label: '3.8-6s (Chuẩn an toàn)' },
-                                      { value: 5000, label: '5.0-8s (Siêu an toàn)' },
-                                      { value: 2500, label: '2.5s (Nhanh)' },
-                                    ]
-                              }
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-blue-900/60 text-xs shadow-sm">
-                            <div>
-                              <span className="text-blue-300 font-bold block flex items-center gap-1">
-                                <span>Chế độ Siêu Tốc</span>
-                              </span>
-                              <span className="text-[10px] text-slate-400">Đổi Page ngay trên bài (tiết kiệm 15s)</span>
-                            </div>
-                            <Checkbox
-                              checked={fastSwitch}
-                              onChange={(e) => setFastSwitch(e.target.checked)}
-                              className="text-blue-400 font-bold"
-                            >
-                              Bật
-                            </Checkbox>
-                          </div>
-
-                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-cyan-900/60 text-xs shadow-sm">
-                            <div>
-                              <span className="text-cyan-300 font-bold block flex items-center gap-1">
-                                <ThunderboltFilled className="text-cyan-400" /> Luồng chạy song song
-                              </span>
-                              <span className="text-[10px] text-slate-400">Tăng tốc độ buff gấp 2-3 lần</span>
-                            </div>
-                            <Segmented
-                              size="small"
-                              value={concurrency}
-                              onChange={(val) => setConcurrency(Number(val))}
-                              options={[
-                                { label: '1 Luồng', value: 1 },
-                                { label: '⚡ 2 Luồng (x2)', value: 2 },
-                                { label: '🚀 3 Luồng (x3)', value: 3 },
-                              ]}
-                              className="bg-slate-900 border border-slate-700 text-slate-200"
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-indigo-900/60 text-xs shadow-sm">
-                            <div>
-                              <span className="text-indigo-300 font-bold block flex items-center gap-1">
-                                <SafetyCertificateOutlined className="text-indigo-400" /> Buff rải đều (Drip-feed)
-                              </span>
-                              <span className="text-[10px] text-slate-400">Rải đều theo thời gian chống quét</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {dripFeedMode && (
-                                <Select
-                                  size="small"
-                                  value={dripDurationMinutes}
-                                  onChange={(val) => setDripDurationMinutes(val)}
-                                  className="w-24 text-xs"
-                                  options={[
-                                    { value: 15, label: '15 phút' },
-                                    { value: 30, label: '30 phút' },
-                                    { value: 60, label: '1 giờ' },
-                                    { value: 120, label: '2 giờ' },
-                                    { value: 240, label: '4 giờ' },
-                                  ]}
-                                />
-                              )}
-                              <Switch
-                                checked={dripFeedMode}
-                                onChange={(val) => setDripFeedMode(val)}
-                                checkedChildren="Bật"
-                                unCheckedChildren="Tắt"
-                                className="bg-slate-800"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-amber-900/60 text-xs shadow-sm">
-                            <div>
-                              <span className="text-amber-300 font-bold block flex items-center gap-1">
-                                <span>Bảo vệ BM & Via</span>
-                              </span>
-                              <span className="text-[10px] text-slate-400">Batch Cooldown & dừng khi bị chặn</span>
-                            </div>
-                            <Checkbox
-                              checked={antiCheckpointGuard}
-                              onChange={(e) => setAntiCheckpointGuard(e.target.checked)}
-                              className="text-amber-400 font-bold"
-                            >
-                              Bật
-                            </Checkbox>
-                          </div>
-                        </div>
-
-                        {/* Checkbox Tránh like trùng */}
-                        <div className="flex items-center justify-between p-2.5 rounded-xl border border-slate-800/80 bg-slate-950/60 text-xs">
-                          <Checkbox
-                            checked={autoSkipAlreadyLiked}
-                            onChange={(e) => setAutoSkipAlreadyLiked(e.target.checked)}
-                            className="text-slate-200 font-medium"
-                          >
-                            Tự động bỏ qua nick/page đã like bài viết này trước đó
-                          </Checkbox>
-                          <span className="text-amber-400 font-semibold text-[11px] hidden sm:inline">
-                            Chống trùng lặp
-                          </span>
+                          )}
                         </div>
 
                         {/* 4. Khối Bình Luận Seeding Studio (Nếu bật Comment) */}
@@ -3233,6 +3375,110 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               placeholder={`Nhập hoặc dán các câu bình luận (mỗi câu 1 dòng):\nBài viết hay và rất ý nghĩa ạ! \nThông tin rất bổ ích, cảm ơn bạn đã chia sẻ \n...`}
                               className="font-sans text-xs bg-slate-900 text-slate-100 border-slate-700 rounded-xl placeholder:text-slate-500 focus:border-blue-400"
                             />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* BƯỚC 3.5: NÚT BẮT ĐẦU BUFF VÀ TỔNG KẾT HÀNH ĐỘNG (HERO EXECUTION CARD) */}
+                      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-950/70 via-slate-900 to-indigo-950/70 border-2 border-blue-500/40 space-y-3.5 shadow-2xl">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+                          <div className="text-xs text-slate-200 flex items-center gap-2">
+                            <RocketFilled className="text-blue-400 text-base" />
+                            <span className="font-bold text-sm text-white">Tổng kết thiết lập trước khi bấm:</span>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap text-xs">
+                            <span className="text-slate-400">
+                              Cảm xúc:{' '}
+                              <b className="text-white">
+                                {(() => {
+                                  const r = REACTIONS.find((x) => x.key === selectedReaction);
+                                  return r ? `${r.emoji} ${r.shortLabel}` : selectedReaction;
+                                })()}
+                              </b>
+                            </span>
+                            <span className="text-slate-600">•</span>
+                            <span className="text-slate-400">
+                              Số lượng: <b className="text-emerald-400 font-mono text-sm">{selectedPageIds.length} Page/Via</b>
+                            </span>
+                            <span className="text-slate-600">•</span>
+                            <span className="text-slate-400">
+                              Tốc độ: <b className="text-cyan-400">{concurrency} luồng</b>
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Nút bấm Bắt đầu / Dừng khẩn cấp */}
+                        {buffMode === 'SINGLE' && autoBuffMutation.isPending ? (
+                          <Button
+                            danger
+                            type="primary"
+                            size="large"
+                            icon={<StopOutlined />}
+                            onClick={handleStopAutoBuff}
+                            className="w-full h-12 rounded-xl text-base font-bold shadow-lg shadow-rose-500/20"
+                          >
+                            Dừng khẩn cấp ({autoBuffProgress.percent}%)
+                          </Button>
+                        ) : buffMode === 'SINGLE' ? (
+                          <Button
+                            type="primary"
+                            size="large"
+                            icon={<RocketFilled className="text-xl" />}
+                            loading={autoBuffMutation.isPending}
+                            disabled={selectedPageIds.length === 0 || !targetPostUrl}
+                            onClick={handleStartAutoBuff}
+                            className="w-full h-13 rounded-xl text-sm sm:text-base font-black bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-xl shadow-blue-500/40 border-none transition-all cursor-pointer flex items-center justify-center gap-2"
+                          >
+                            {autoBuffMutation.isPending
+                              ? 'Đang thực thi tương tác...'
+                              : !targetPostUrl
+                              ? '⚠️ Vui lòng dán link bài viết ở Bước 1'
+                              : selectedPageIds.length === 0
+                              ? '⚠️ Vui lòng chọn số lượng Page ở Bước 3'
+                              : actorMode === 'VIAS'
+                              ? `🚀 BẮT ĐẦU TĂNG TƯƠNG TÁC VỚI ${selectedPageIds.length} NICK CÁ NHÂN`
+                              : `🚀 BẮT ĐẦU BUFF VỚI ${selectedPageIds.length} FANPAGE CON`}
+                          </Button>
+                        ) : (
+                          <div>
+                            {!isBatchRunning ? (
+                              <Button
+                                type="primary"
+                                size="large"
+                                icon={<RocketFilled />}
+                                disabled={parsedBatchLinks.length === 0 || selectedPageIds.length === 0}
+                                onClick={handleStartBatchBuff}
+                                className="w-full h-13 rounded-xl text-sm sm:text-base font-black bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xl shadow-blue-500/40 border-none transition-all cursor-pointer"
+                              >
+                                {parsedBatchLinks.length === 0
+                                  ? 'Chưa có link hợp lệ'
+                                  : `🚀 CHẠY ${parsedBatchLinks.length} BÀI (${selectedPageIds.length} TÀI KHOẢN MỖI BÀI)`}
+                              </Button>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-2">
+                                <Button
+                                  size="large"
+                                  icon={isBatchPaused ? <CaretRightOutlined /> : <PauseCircleOutlined />}
+                                  onClick={handlePauseBatchBuff}
+                                  className={`font-bold h-12 rounded-xl text-xs sm:text-sm ${
+                                    isBatchPaused
+                                      ? 'bg-emerald-600 text-on-accent hover:bg-emerald-500 border-none'
+                                      : 'bg-amber-600 text-on-accent hover:bg-amber-500 border-none'
+                                  }`}
+                                >
+                                  {isBatchPaused ? 'Tiếp tục' : 'Tạm dừng'}
+                                </Button>
+                                <Button
+                                  danger
+                                  size="large"
+                                  icon={<StopOutlined />}
+                                  onClick={handleStopBatchBuff}
+                                  className="font-bold h-12 rounded-xl text-xs sm:text-sm"
+                                >
+                                  Dừng hẳn
+                                </Button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -3504,7 +3750,22 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             key: 'buff-view',
             label: 'Tăng view video',
             children: (
-              <Row gutter={[20, 20]}>
+              <div className="space-y-4">
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-purple-950/20 border border-purple-500/20 text-xs flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 text-lg">
+                    <PlayCircleOutlined />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-200">
+                      Cơ chế Buff View Reels / Video Ẩn Danh (An Toàn Tuyệt Đối)
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      Lượt xem được chạy mô phỏng qua trình duyệt tự động đa luồng Playwright, hoàn toàn không cần đăng nhập nick Facebook. Không sợ checkpoint, không lo khóa tài khoản và không ảnh hưởng đến dàn Via của bạn.
+                    </div>
+                  </div>
+                </div>
+
+                <Row gutter={[20, 20]}>
                 <Col xs={24} lg={12}>
                   <Card
                     title={
@@ -3634,6 +3895,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                   </Card>
                 </Col>
               </Row>
+              </div>
             ),
           },
           {
@@ -3983,7 +4245,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           { value: 'ALL', label: 'Tất cả cảm xúc' },
                           ...REACTIONS.map((r) => ({
                             value: r.key,
-                            label: `${r.emoji} ${r.label.split(' ')[0]}`,
+                            label: `${r.emoji} ${r.shortLabel}`,
                           })),
                         ]}
                       />
@@ -4083,7 +4345,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   {log.type === 'BATCH' ? 'Hàng loạt' : 'Đơn lẻ'}
                                 </Tag>
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-800 text-slate-200 border border-slate-700/60">
-                                  {reactionObj.emoji} {reactionObj.label.split(' ')[0]}
+                                  {reactionObj.emoji} {reactionObj.shortLabel}
                                 </span>
                                 {log.accountName && (
                                   <span className="text-xs text-slate-400">

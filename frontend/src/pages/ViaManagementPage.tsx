@@ -1267,6 +1267,50 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
   return (
     <div className="space-y-6 max-w-[1440px] mx-auto pb-20">
+      {/* 💡 INTUITIVE HOW-IT-WORKS BANNER FOR UNTRAINED USERS */}
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-cyan-950/40 border border-blue-500/30 shadow-md">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold text-base shrink-0 mt-0.5">
+              💡
+            </div>
+            <div>
+              <div className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Cách thức hoạt động: Tài khoản Mẹ (Via) quản lý dàn Fanpage vệ tinh</span>
+                <Tag color="cyan" className="text-[10px] px-1.5 py-0 border-0 rounded-md">Tự Động Nhận Diện</Tag>
+              </div>
+              <p className="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                Bạn chỉ cần thêm Cookie của <b>Tài Khoản Mẹ (Via)</b>. Hệ thống sẽ tự động quét và nhận diện toàn bộ <b>500+ Fanpage con</b> trực thuộc để phục vụ việc buff like, thả tim và bình luận seeding. Không cần đăng nhập mật khẩu từng Page!
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                const el = document.getElementById('add-via-section');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="bg-blue-600 hover:bg-blue-500 text-on-accent font-bold text-xs h-9 px-3.5 rounded-xl border-none shadow-md cursor-pointer"
+            >
+              + Thêm Via Mẹ Mới
+            </Button>
+            <Button
+              icon={<ReloadOutlined spin={loading} />}
+              onClick={() => {
+                onRefresh();
+                loadCachedPages();
+                message.success('Đã làm mới danh sách dàn Via');
+              }}
+              className="bg-slate-900 border-slate-700 text-slate-200 hover:border-cyan-500 text-xs h-9 px-3 rounded-xl font-semibold cursor-pointer"
+            >
+              Quét Lại Toàn Bộ
+            </Button>
+          </div>
+        </div>
+      </div>
+
       {/* 1. TOP STATS OVERVIEW CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Tổng số Via Mẹ */}
@@ -1383,7 +1427,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       </div>
 
       {/* 2. BƯỚC 1: NHẬP & KÍCH HOẠT VIA MỚI (CHUYÊN BIỆT ADD VIA MẸ - KHÔNG LẪN LỘN FANPAGE) */}
-      <div className="app-surface p-5 border border-cyan-500/30 shadow-xl shadow-cyan-950/20 rounded-2xl relative overflow-hidden">
+      <div id="add-via-section" className="app-surface p-5 border border-cyan-500/30 shadow-xl shadow-cyan-950/20 rounded-2xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-80 h-36 bg-gradient-to-bl from-cyan-500/10 via-blue-500/5 to-transparent blur-2xl pointer-events-none" />
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-800/80">

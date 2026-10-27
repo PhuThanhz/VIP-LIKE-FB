@@ -190,14 +190,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
 
           <div className="flex items-center justify-center gap-2">
-            <Tag color={currentUser.role === 'ADMIN' ? 'gold' : 'blue'} className="px-2 py-0.5">
+            <Tag color={currentUser.role === 'ADMIN' ? 'gold' : 'blue'} className="px-2 py-0.5 font-semibold">
               {currentUser.role === 'ADMIN' ? '👑 QUẢN TRỊ VIÊN' : 'BÊN THUÊ TOOL'}
             </Tag>
-            {isTauri() ? (
-              <Tag color="cyan">🦀 Tauri Native</Tag>
-            ) : (
-              <Tag color="geekblue">🌐 Web Client</Tag>
-            )}
           </div>
 
           <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 text-left text-xs space-y-1">

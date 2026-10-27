@@ -14,6 +14,7 @@ import {
   MenuFoldOutlined,
   UserOutlined,
   LogoutOutlined,
+  PictureOutlined,
 } from '@ant-design/icons';
 import AuthModal, { CurrentUser } from './auth/AuthModal';
 
@@ -71,14 +72,19 @@ const TAB_TITLES: Record<string, { title: string; subtitle: string; icon: React.
     subtitle: 'Thêm tài khoản Facebook, quản lý Cookie/Proxy và cấu hình dàn Fanpage tương tác',
     icon: <IdcardOutlined className="text-sky-400 text-base" />,
   },
+  'avatar-studio': {
+    title: 'Studio Cập Nhật Avatar & Ảnh Bìa Fanpage',
+    subtitle: 'Đổi ảnh chân dung người thật và ảnh bìa hàng loạt cho dàn Fanpage vệ tinh',
+    icon: <PictureOutlined className="text-pink-400 text-base" />,
+  },
   'system-settings': {
     title: 'Cấu Hình Vận Hành & Giám Sát Hệ Thống',
     subtitle: 'Bot Telegram báo cáo tức thời, cảnh báo checkpoint và chính sách an toàn dàn nick',
     icon: <SettingOutlined className="text-blue-400 text-base" />,
   },
   'license-management': {
-    title: 'Hệ Thống Cho Thuê & Bản Quyền Phần Mềm (SaaS)',
-    subtitle: 'Quản lý thời hạn thuê, mã máy HWID, cấp key bản quyền và khóa/mở từ xa',
+    title: 'Bản Quyền & Cho Thuê Phần Mềm',
+    subtitle: 'Quản lý thời hạn bản quyền, kích hoạt mã máy và quản lý khách thuê tool',
     icon: <IdcardOutlined className="text-amber-400 text-base" />,
   },
 };

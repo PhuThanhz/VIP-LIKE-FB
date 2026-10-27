@@ -20,6 +20,7 @@ import {
   Row,
   Col,
   Statistic,
+  Segmented,
 } from 'antd';
 import {
   KeyOutlined,
@@ -79,6 +80,7 @@ export const LicenseManagementPage: React.FC = () => {
   const [createForm] = Form.useForm();
 
   const [hardwareHwid, setHardwareHwid] = useState<string>('Đang đọc mã máy...');
+  const [activeLicenseTab, setActiveLicenseTab] = useState<'CLIENT' | 'ADMIN'>('CLIENT');
   const isDesktop = isTauri();
 
   useEffect(() => {
@@ -347,32 +349,28 @@ export const LicenseManagementPage: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-slate-900 via-surface-2 to-slate-900 p-5 rounded-2xl border border-slate-800/80 shadow-xl">
         <div>
           <div className="flex items-center gap-2 text-cyan-400 font-semibold text-xs tracking-wider uppercase mb-1">
-            <CrownOutlined /> Mô Hình Cho Thuê Phần Mềm (Tauri SaaS Licensing)
-            {isDesktop ? (
-              <Tag color="cyan" className="ml-2 font-mono">🦀 Tauri Rust Native</Tag>
-            ) : (
-              <Tag color="blue" className="ml-2 font-mono">🌐 React JS + Tauri Rust Ready</Tag>
-            )}
+            <CrownOutlined /> Cấp Phép & Bản Quyền Phần Mềm
           </div>
           <Title level={3} className="!text-white !m-0">
-
-            Quản Lý Bản Quyền & Hệ Thống Cho Thuê Tool
+            Quản Lý Bản Quyền & Hệ Thống Thuê Dịch Vụ
           </Title>
           <Text className="text-slate-400 text-sm">
-            Đóng gói bằng Tauri (Rust) + React JS. Khóa theo mã máy phần cứng (HWID), cấp key theo tháng và tự động ngắt khi hết hạn.
+            Kích hoạt mã bản quyền để sử dụng toàn bộ tính năng tương tác tự động. Khóa an toàn theo từng thiết bị và tự động cập nhật thời hạn.
           </Text>
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            size="large"
-            onClick={() => setIsCreateModalOpen(true)}
-            className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 font-medium shadow-lg shadow-cyan-500/20"
-          >
-            Cấp Mã Thuê Mới Cho Khách
-          </Button>
+          {activeLicenseTab === 'ADMIN' && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              size="large"
+              onClick={() => setIsCreateModalOpen(true)}
+              className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 font-medium shadow-lg shadow-cyan-500/20"
+            >
+              Cấp Mã Thuê Mới Cho Khách
+            </Button>
+          )}
           <Button
             icon={<ReloadOutlined />}
             size="large"
@@ -387,155 +385,218 @@ export const LicenseManagementPage: React.FC = () => {
         </div>
       </div>
 
-      {/* THẺ TRẠNG THÁI BẢN QUYỀN MÁY NÀY */}
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={15}>
-          <Card
-            className="bg-card/90 border-slate-800 shadow-xl rounded-2xl h-full"
-            title={
-              <div className="flex items-center gap-2 text-white">
-                <SafetyCertificateOutlined className="text-emerald-400 text-lg" />
-                <span>Trạng Thái Bản Quyền Trên Thiết Bị Này</span>
-              </div>
-            }
-          >
-            {currentLicense ? (
-              <div className="space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/80 p-4 rounded-xl border border-slate-800">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Tag color="success" className="px-2 py-0.5 font-semibold">
-                        {currentLicense.status === 'ACTIVE' ? 'ĐÃ KÍCH HOẠT HỢP LỆ' : currentLicense.status}
-                      </Tag>
-                      <Tag color="cyan">{currentLicense.packageType}</Tag>
-                    </div>
-                    <Title level={4} className="!text-white !mt-2 !mb-0">
-                      {currentLicense.customerName}
-                    </Title>
-                    <Text className="text-xs text-slate-400">
-                      Mã Key: <span className="font-mono text-cyan-300">{currentLicense.licenseKey}</span>
-                    </Text>
-                  </div>
-
-                  <div className="text-right">
-                    <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Thời Hạn Thuê</div>
-                    <div className="text-2xl font-bold text-emerald-400 mt-1">
-                      {currentLicense.daysRemaining} <span className="text-sm font-normal text-slate-300">ngày</span>
-                    </div>
-                    <Text className="text-[11px] text-slate-400">
-                      Hết hạn: {new Date(currentLicense.expiresAt).toLocaleDateString('vi-VN')}
-                    </Text>
-                  </div>
+      {/* SEGMENTED TAB SWITCHER */}
+      <div className="flex justify-start">
+        <Segmented
+          size="large"
+          value={activeLicenseTab}
+          onChange={(val) => setActiveLicenseTab(val as 'CLIENT' | 'ADMIN')}
+          options={[
+            {
+              label: (
+                <div className="flex items-center gap-2 px-3 py-1 font-bold">
+                  <SafetyCertificateOutlined className="text-emerald-400" />
+                  <span>Kích Hoạt & Bản Quyền Thiết Bị Này</span>
                 </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/80">
-                    <Text className="text-slate-400 text-xs block">Giới Hạn Nick</Text>
-                    <Text className="text-white font-bold text-base">{currentLicense.maxVias} Via</Text>
-                  </div>
-                  <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/80">
-                    <Text className="text-slate-400 text-xs block">Mã Máy Tính (HWID)</Text>
-                    <Text className="text-cyan-300 font-mono text-xs block truncate">{hardwareHwid}</Text>
-                  </div>
-                  <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/80">
-                    <Text className="text-slate-400 text-xs block">Chống Gian Lận</Text>
-                    <Text className="text-emerald-400 font-medium text-xs">🔒 Khóa 1 Máy / 1 Key</Text>
-                  </div>
+              ),
+              value: 'CLIENT',
+            },
+            {
+              label: (
+                <div className="flex items-center gap-2 px-3 py-1 font-bold">
+                  <CrownOutlined className="text-amber-400" />
+                  <span>Dành Cho Quản Trị Viên (Quản Lý {adminLicenses.length} Khách Thuê)</span>
                 </div>
-              </div>
-            ) : (
-              <Alert
-                message="Chưa có bản quyền hoạt động"
-                description="Thiết bị này chưa kích hoạt mã bản quyền hoặc key đã hết hạn. Hãy nhập mã key bạn được cấp để mở khóa toàn bộ tính năng nuôi và tương tác."
-                type="warning"
-                showIcon
-                className="bg-amber-950/20 border-amber-900/50 text-slate-300"
-              />
-            )}
-          </Card>
-        </Col>
-
-        {/* Ô KÍCH HOẠT KEY CHO MÁY KHÁCH */}
-        <Col xs={24} lg={9}>
-          <Card
-            className="bg-card/90 border-slate-800 shadow-xl rounded-2xl h-full flex flex-col justify-between"
-            title={
-              <div className="flex items-center gap-2 text-white">
-                <KeyOutlined className="text-cyan-400 text-lg" />
-                <span>Kích Hoạt / Nhập Mã Bản Quyền Mới</span>
-              </div>
-            }
-          >
-            <div className="space-y-4">
-              <div>
-                <Text className="text-slate-300 text-xs block mb-1 font-medium">Mã Thiết Bị Máy Tính Này (HWID):</Text>
-                <div className="flex items-center gap-2">
-                  <Input
-                    readOnly
-                    value={hardwareHwid}
-                    className="bg-slate-900 border-slate-700 text-cyan-300 font-mono text-xs"
-                  />
-                  <Tooltip title="Sao chép mã máy gửi cho Admin cấp key">
-                    <Button
-                      icon={<CopyOutlined />}
-                      onClick={() => copyToClipboard(hardwareHwid, 'Mã Thiết Bị (HWID)')}
-                      className="border-slate-700 bg-slate-800 text-slate-300"
-                    />
-                  </Tooltip>
-                </div>
-              </div>
-
-              <div>
-                <Text className="text-slate-300 text-xs block mb-1 font-medium">Nhập Mã License Key Bạn Được Cấp:</Text>
-                <Input
-                  size="large"
-                  placeholder="VD: VIP-PRO-2026-TRIAL-8888"
-                  value={licenseInput}
-                  onChange={(e) => setLicenseInput(e.target.value)}
-                  className="bg-slate-900 border-slate-700 text-white font-mono placeholder:text-slate-600"
-                  prefix={<KeyOutlined className="text-cyan-400 mr-1" />}
-                />
-              </div>
-
-              <Button
-                type="primary"
-                size="large"
-                block
-                loading={activating}
-                onClick={handleActivate}
-                className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 font-semibold shadow-lg shadow-emerald-500/20"
-              >
-                Kích Hoạt Bản Quyền Ngay
-              </Button>
-            </div>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* DANH SÁCH KHÁCH THUÊ DÀNH CHO ADMIN */}
-      <Card
-        className="bg-card/90 border-slate-800 shadow-xl rounded-2xl"
-        title={
-          <div className="flex items-center justify-between w-full">
-            <div className="flex items-center gap-2 text-white">
-              <UserOutlined className="text-cyan-400 text-lg" />
-              <span>Sổ Quản Lý Các Bên Đang Thuê Tool ({adminLicenses.length} Khách)</span>
-            </div>
-            <Tag color="blue" className="text-xs">
-              Chỉ Admin Nhìn Thấy
-            </Tag>
-          </div>
-        }
-      >
-        <Table
-          dataSource={adminLicenses}
-          columns={adminColumns}
-          rowKey="id"
-          pagination={{ pageSize: 6 }}
-          className="ant-table-dark-custom"
-          scroll={{ x: 1000 }}
+              ),
+              value: 'ADMIN',
+            },
+          ]}
+          className="bg-slate-900 border border-slate-800 text-slate-300 p-1 rounded-xl"
         />
-      </Card>
+      </div>
+
+      {/* NỘI DUNG TAB 1: KÍCH HOẠT & BẢN QUYỀN THIẾT BỊ NÀY */}
+      {activeLicenseTab === 'CLIENT' && (
+        <div className="space-y-6">
+          {/* Hướng dẫn 3 bước cho người mới */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 to-slate-950 border border-slate-800 shadow-lg flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 font-black text-sm flex items-center justify-center border border-cyan-500/30 shrink-0">1</div>
+              <div>
+                <div className="font-bold text-slate-200">1. Lấy Mã Máy Tính (HWID)</div>
+                <div className="text-[11px] text-slate-400">Bấm icon copy mã HWID bên dưới để gửi cho bên cấp Tool</div>
+              </div>
+            </div>
+            <div className="hidden md:block text-slate-600 font-bold text-base">➔</div>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 font-black text-sm flex items-center justify-center border border-purple-500/30 shrink-0">2</div>
+              <div>
+                <div className="font-bold text-slate-200">2. Nhận Mã License Key</div>
+                <div className="text-[11px] text-slate-400">Bên cấp Tool sẽ gửi lại mã bản quyền theo thời hạn gói thuê</div>
+              </div>
+            </div>
+            <div className="hidden md:block text-slate-600 font-bold text-base">➔</div>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 font-black text-sm flex items-center justify-center border border-emerald-500/30 shrink-0">3</div>
+              <div>
+                <div className="font-bold text-slate-200">3. Dán Mã Key & Kích Hoạt</div>
+                <div className="text-[11px] text-slate-400">Bấm "Kích Hoạt Bản Quyền Ngay" để mở khóa toàn bộ tính năng</div>
+              </div>
+            </div>
+          </div>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={15}>
+              <Card
+                className="bg-card/90 border-slate-800 shadow-xl rounded-2xl h-full"
+                title={
+                  <div className="flex items-center gap-2 text-white">
+                    <SafetyCertificateOutlined className="text-emerald-400 text-lg" />
+                    <span>Trạng Thái Bản Quyền Trên Thiết Bị Này</span>
+                  </div>
+                }
+              >
+                {currentLicense ? (
+                  <div className="space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/80 p-4 rounded-xl border border-slate-800">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Tag color="success" className="px-2 py-0.5 font-semibold">
+                            {currentLicense.status === 'ACTIVE' ? 'ĐÃ KÍCH HOẠT HỢP LỆ' : currentLicense.status}
+                          </Tag>
+                          <Tag color="cyan">{currentLicense.packageType}</Tag>
+                        </div>
+                        <Title level={4} className="!text-white !mt-2 !mb-0">
+                          {currentLicense.customerName}
+                        </Title>
+                        <Text className="text-xs text-slate-400">
+                          Mã Key: <span className="font-mono text-cyan-300">{currentLicense.licenseKey}</span>
+                        </Text>
+                      </div>
+
+                      <div className="text-right">
+                        <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Thời Hạn Thuê</div>
+                        <div className="text-2xl font-bold text-emerald-400 mt-1">
+                          {currentLicense.daysRemaining} <span className="text-sm font-normal text-slate-300">ngày</span>
+                        </div>
+                        <Text className="text-[11px] text-slate-400">
+                          Hết hạn: {new Date(currentLicense.expiresAt).toLocaleDateString('vi-VN')}
+                        </Text>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/80">
+                        <Text className="text-slate-400 text-xs block">Giới Hạn Nick</Text>
+                        <Text className="text-white font-bold text-base">{currentLicense.maxVias} Via</Text>
+                      </div>
+                      <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/80">
+                        <Text className="text-slate-400 text-xs block">Mã Máy Tính (HWID)</Text>
+                        <Text className="text-cyan-300 font-mono text-xs block truncate">{hardwareHwid}</Text>
+                      </div>
+                      <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/80">
+                        <Text className="text-slate-400 text-xs block">Chống Gian Lận</Text>
+                        <Text className="text-emerald-400 font-medium text-xs">🔒 Khóa 1 Máy / 1 Key</Text>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <Alert
+                    message="Chưa có bản quyền hoạt động"
+                    description="Thiết bị này chưa kích hoạt mã bản quyền hoặc key đã hết hạn. Hãy nhập mã key bạn được cấp để mở khóa toàn bộ tính năng nuôi và tương tác."
+                    type="warning"
+                    showIcon
+                    className="bg-amber-950/20 border-amber-900/50 text-slate-300"
+                  />
+                )}
+              </Card>
+            </Col>
+
+            {/* Ô KÍCH HOẠT KEY CHO MÁY KHÁCH */}
+            <Col xs={24} lg={9}>
+              <Card
+                className="bg-card/90 border-slate-800 shadow-xl rounded-2xl h-full flex flex-col justify-between"
+                title={
+                  <div className="flex items-center gap-2 text-white">
+                    <KeyOutlined className="text-cyan-400 text-lg" />
+                    <span>Kích Hoạt / Nhập Mã Bản Quyền Mới</span>
+                  </div>
+                }
+              >
+                <div className="space-y-4">
+                  <div>
+                    <Text className="text-slate-300 text-xs block mb-1 font-medium">Mã Thiết Bị Máy Tính Này (HWID):</Text>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        readOnly
+                        value={hardwareHwid}
+                        className="bg-slate-900 border-slate-700 text-cyan-300 font-mono text-xs"
+                      />
+                      <Tooltip title="Sao chép mã máy gửi cho Admin cấp key">
+                        <Button
+                          icon={<CopyOutlined />}
+                          onClick={() => copyToClipboard(hardwareHwid, 'Mã Thiết Bị (HWID)')}
+                          className="border-slate-700 bg-slate-800 text-slate-300"
+                        />
+                      </Tooltip>
+                    </div>
+                  </div>
+
+                  <div>
+                    <Text className="text-slate-300 text-xs block mb-1 font-medium">Nhập Mã License Key Bạn Được Cấp:</Text>
+                    <Input
+                      size="large"
+                      placeholder="VD: VIP-PRO-2026-TRIAL-8888"
+                      value={licenseInput}
+                      onChange={(e) => setLicenseInput(e.target.value)}
+                      className="bg-slate-900 border-slate-700 text-white font-mono placeholder:text-slate-600"
+                      prefix={<KeyOutlined className="text-cyan-400 mr-1" />}
+                    />
+                  </div>
+
+                  <Button
+                    type="primary"
+                    size="large"
+                    block
+                    loading={activating}
+                    onClick={handleActivate}
+                    className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 font-semibold shadow-lg shadow-emerald-500/20"
+                  >
+                    Kích Hoạt Bản Quyền Ngay
+                  </Button>
+                </div>
+              </Card>
+            </Col>
+          </Row>
+        </div>
+      )}
+
+      {/* NỘI DUNG TAB 2: QUẢN LÝ KHÁCH THUÊ DÀNH CHO ADMIN */}
+      {activeLicenseTab === 'ADMIN' && (
+        <Card
+          className="bg-card/90 border-slate-800 shadow-xl rounded-2xl"
+          title={
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2 text-white">
+                <UserOutlined className="text-cyan-400 text-lg" />
+                <span>Sổ Quản Lý Các Bên Đang Thuê Tool ({adminLicenses.length} Khách)</span>
+              </div>
+              <Tag color="blue" className="text-xs">
+                Chỉ Admin Nhìn Thấy
+              </Tag>
+            </div>
+          }
+        >
+          <Table
+            dataSource={adminLicenses}
+            columns={adminColumns}
+            rowKey="id"
+            pagination={{ pageSize: 6 }}
+            className="ant-table-dark-custom"
+            scroll={{ x: 1000 }}
+          />
+        </Card>
+      )}
 
       {/* MODAL CẤP MÃ THUÊ MỚI CHO KHÁCH */}
       <Modal

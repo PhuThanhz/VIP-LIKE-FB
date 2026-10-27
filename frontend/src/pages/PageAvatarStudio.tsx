@@ -1070,6 +1070,39 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
         </div>
       </div>
 
+      {/* Hướng Dẫn 3 Bước Rõ Ràng Cho Người Dùng Mới */}
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900/90 to-pink-950/20 border border-slate-800 shadow-xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-pink-500/20 text-pink-400 font-black text-sm flex items-center justify-center border border-pink-500/30 shrink-0">
+            1
+          </div>
+          <div>
+            <div className="font-bold text-slate-200">1. Chọn Nick Mẹ (Via)</div>
+            <div className="text-[11px] text-slate-400">Chọn nick quản lý dàn Fanpage vệ tinh</div>
+          </div>
+        </div>
+        <div className="hidden md:block text-slate-600 font-bold text-base">➔</div>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 font-black text-sm flex items-center justify-center border border-cyan-500/30 shrink-0">
+            2
+          </div>
+          <div>
+            <div className="font-bold text-slate-200">2. Chọn Kho Ảnh Mẫu (AI)</div>
+            <div className="text-[11px] text-slate-400">Ảnh chân dung người thật hoặc tải ảnh của bạn</div>
+          </div>
+        </div>
+        <div className="hidden md:block text-slate-600 font-bold text-base">➔</div>
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 font-black text-sm flex items-center justify-center border border-emerald-500/30 shrink-0">
+            3
+          </div>
+          <div>
+            <div className="font-bold text-slate-200">3. Bấm "Tất cả chưa có" & Bắt đầu</div>
+            <div className="text-[11px] text-slate-400">Hệ thống đổi lần lượt từng Page an toàn 100%</div>
+          </div>
+        </div>
+      </div>
+
       {/* 2. BƯỚC 1: CHỌN VIA CHÍNH (THÀNH AN HOẶC HUỲNH THẠNH PHÚ) */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
