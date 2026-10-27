@@ -744,6 +744,9 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     comments = [],         // Mảng danh sách nội dung bình luận
     proxyUrl = '',         // URL Proxy riêng biệt cho Via (http://user:pass@host:port)
     maxActionsPerPageToday = getDailyPageActionLimit(), // Giới hạn lượt tương tác/ngày cho mỗi Page (Cài đặt hệ thống)
+    concurrency = 1,       // Số luồng worker song song (1 - 3 luồng)
+    dripFeedMode = false,  // Chế độ rải đều lượt like theo thời gian chống thuật toán quét
+    dripDurationMinutes = 30, // Thời gian rải đều (phút)
     onProgress,            // Callback nhận tiến trình: onProgress(event)
     shouldStop,            // () => boolean: người gọi yêu cầu dừng (client ngắt kết nối, dừng khẩn cấp...)
   } = options;
@@ -1524,10 +1527,16 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         await new Promise((r) => setTimeout(r, batchRest));
       }
 
-      // Độ trễ an toàn giữa các page với Dynamic Jitter
+      // Độ trễ an toàn giữa các page với Dynamic Jitter & Chế độ Drip-Feed
       if (i < pages.length - 1) {
         let waitTime = delayMs > 0 ? delayMs : 3800;
-        if (enableComment) {
+        if (dripFeedMode && dripDurationMinutes > 0) {
+          const totalDurationMs = dripDurationMinutes * 60 * 1000;
+          const dripBaseWait = Math.max(delayMs, Math.floor(totalDurationMs / pages.length));
+          const dripJitter = Math.floor(dripBaseWait * 0.2 * (Math.random() * 2 - 1));
+          waitTime = Math.max(3000, dripBaseWait + dripJitter);
+          console.log(`[FB-Buff] 🛡️ [DRIP-FEED] Rải đều thời gian: Chờ ${(waitTime / 1000).toFixed(1)}s trước khi Page tiếp theo tương tác...`);
+        } else if (enableComment) {
           // Khi bình luận, BẮT BUỘC giãn cách tối thiểu 12-25 giây để không bị bot nhóm & Meta AI quét spam hành động liên tiếp
           const safeMin = Math.max(delayMs, 12000);
           waitTime = safeMin + Math.floor(Math.random() * 6000);

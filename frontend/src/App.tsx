@@ -7,6 +7,7 @@ import Sidebar, { SidebarStats, SidebarDbStatus } from './components/Sidebar';
 import BuffEngagement from './pages/BuffEngagement';
 import api from './config/axios';
 import { ThemeProvider, useThemeMode } from './theme/ThemeContext';
+import LoginPage, { CurrentUser } from './components/auth/LoginPage';
 
 const { Content } = Layout;
 
@@ -19,7 +20,12 @@ const queryClient = new QueryClient({
   },
 });
 
-const MainDashboard: React.FC = () => {
+interface MainDashboardProps {
+  currentUser: CurrentUser;
+  onLogout: () => void;
+}
+
+const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) => {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       return window.innerWidth < 1024;
@@ -148,6 +154,8 @@ const MainDashboard: React.FC = () => {
           onToggleCollapse={handleToggleCollapse}
           dbStatus={dbStatus}
           onCheckDb={checkDb}
+          currentUser={currentUser}
+          onLogout={onLogout}
         />
 
         <Content className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto">
@@ -177,31 +185,35 @@ const DARK_THEME: ThemeConfig = {
   algorithm: theme.darkAlgorithm,
   token: {
     colorPrimary: '#38bdf8',
-    colorBgBase: '#070b13',
-    colorBgContainer: '#0c1220',
-    colorBorder: 'rgba(255, 255, 255, 0.08)',
+    colorBgBase: '#0f172a',
+    colorBgContainer: '#1e293b',
+    colorBgElevated: '#1e293b',
+    colorBorder: 'rgba(255, 255, 255, 0.12)',
+    colorBorderSecondary: 'rgba(255, 255, 255, 0.08)',
+    colorText: '#f8fafc',
+    colorTextSecondary: '#94a3b8',
     borderRadius: 12,
     fontFamily: "'Plus Jakarta Sans', sans-serif",
   },
   components: {
     Menu: {
       itemBg: 'transparent',
-      itemSelectedBg: 'rgba(56, 189, 248, 0.14)',
+      itemSelectedBg: 'rgba(56, 189, 248, 0.16)',
       itemSelectedColor: '#38bdf8',
-      itemHoverBg: 'rgba(255, 255, 255, 0.045)',
+      itemHoverBg: 'rgba(255, 255, 255, 0.06)',
       itemHoverColor: '#f8fafc',
       itemActiveBg: 'transparent',
       itemMarginInline: 6,
       itemBorderRadius: 12,
       darkItemBg: 'transparent',
-      darkItemSelectedBg: 'rgba(56, 189, 248, 0.14)',
+      darkItemSelectedBg: 'rgba(56, 189, 248, 0.16)',
       darkItemSelectedColor: '#38bdf8',
-      darkItemHoverBg: 'rgba(255, 255, 255, 0.045)',
+      darkItemHoverBg: 'rgba(255, 255, 255, 0.06)',
     },
     Layout: {
-      siderBg: '#070b13',
-      bodyBg: '#070b13',
-      headerBg: '#070b13',
+      siderBg: '#0f172a',
+      bodyBg: '#0b1329',
+      headerBg: '#0f172a',
     },
   },
 };
@@ -209,32 +221,36 @@ const DARK_THEME: ThemeConfig = {
 const LIGHT_THEME: ThemeConfig = {
   algorithm: theme.defaultAlgorithm,
   token: {
-    colorPrimary: '#2563eb',
-    colorBgBase: '#f5f7fb',
+    colorPrimary: '#0284c7',
+    colorBgBase: '#f8fafc',
     colorBgContainer: '#ffffff',
     colorBgElevated: '#ffffff',
     colorBorder: '#e2e8f0',
-    colorBorderSecondary: '#eef2f7',
+    colorBorderSecondary: '#f1f5f9',
     colorText: '#0f172a',
     colorTextSecondary: '#475569',
     borderRadius: 12,
     fontFamily: "'Plus Jakarta Sans', sans-serif",
   },
   components: {
+    Card: {
+      colorBgContainer: '#ffffff',
+      colorBorderSecondary: '#e2e8f0',
+    },
     Menu: {
       itemBg: 'transparent',
-      itemSelectedBg: '#eff6ff',
-      itemSelectedColor: '#2563eb',
+      itemSelectedBg: '#e0f2fe',
+      itemSelectedColor: '#0284c7',
       itemHoverBg: '#f1f5f9',
       itemHoverColor: '#0f172a',
       itemActiveBg: 'transparent',
-      itemColor: '#475569',
+      itemColor: '#334155',
       itemMarginInline: 6,
       itemBorderRadius: 12,
     },
     Layout: {
       siderBg: '#ffffff',
-      bodyBg: '#f5f7fb',
+      bodyBg: '#f8fafc',
       headerBg: '#ffffff',
     },
   },
@@ -242,10 +258,29 @@ const LIGHT_THEME: ThemeConfig = {
 
 const ThemedApp: React.FC = () => {
   const { isLight } = useThemeMode();
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('viplike_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('viplike_token');
+    localStorage.removeItem('viplike_user');
+    setCurrentUser(null);
+  }, []);
+
   return (
     <ConfigProvider theme={isLight ? LIGHT_THEME : DARK_THEME}>
       <AntdApp>
-        <MainDashboard />
+        {!currentUser ? (
+          <LoginPage onLoginSuccess={setCurrentUser} />
+        ) : (
+          <MainDashboard currentUser={currentUser} onLogout={handleLogout} />
+        )}
       </AntdApp>
     </ConfigProvider>
   );

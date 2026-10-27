@@ -1,12 +1,18 @@
 <!doctype html>
-<html lang="vi" class="dark">
+<html lang="vi" class="light">
   <head>
     <meta charset="UTF-8" />
     <script>
-      // Gán chế độ Sáng/Tối trước khi React chạy để tránh nháy màu
+      // Gán chế độ Sáng/Tối trước khi React chạy: MẶC ĐỊNH LÀ SÁNG (LIGHT RADIANT)
       try {
-        if (localStorage.getItem('viplike-theme') === 'light') {
-          document.documentElement.classList.replace('dark', 'light');
+        const theme = localStorage.getItem('viplike-theme');
+        if (theme === 'dark') {
+          document.documentElement.classList.remove('light');
+          document.documentElement.classList.add('dark');
+          document.documentElement.style.colorScheme = 'dark';
+        } else {
+          document.documentElement.classList.remove('dark');
+          document.documentElement.classList.add('light');
           document.documentElement.style.colorScheme = 'light';
         }
       } catch (e) {}

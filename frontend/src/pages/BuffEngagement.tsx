@@ -537,6 +537,12 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [fastSwitch, setFastSwitch] = useState<boolean>(true);
   const [antiCheckpointGuard, setAntiCheckpointGuard] = useState<boolean>(true);
   const [isAiGeneratingComments, setIsAiGeneratingComments] = useState<boolean>(false);
+  const [concurrency, setConcurrency] = useState<number>(1);
+  const [dripFeedMode, setDripFeedMode] = useState<boolean>(false);
+  const [dripDurationMinutes, setDripDurationMinutes] = useState<number>(30);
+  const [aiPostPrompt, setAiPostPrompt] = useState<string>('');
+  const [aiTone, setAiTone] = useState<string>('customer_inquiry');
+  const [aiCount, setAiCount] = useState<number>(10);
   const [avatarCacheMap, setAvatarCacheMap] = useState<Record<string, { pageId: string; name?: string; avatarUrl?: string; hasAvatar?: boolean }>>({});
 
   // Tải trạng thái và URL Avatar của các Fanpage
@@ -574,7 +580,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   // Tab 3: Buff View State
   const [targetViewUrl, setTargetViewUrl] = useState('');
   const [targetViews, setTargetViews] = useState(20);
-  const [concurrency, setConcurrency] = useState(2);
+  const [viewConcurrency, setViewConcurrency] = useState(2);
   const [watchTimeSeconds, setWatchTimeSeconds] = useState(8);
   const [viewProgress, setViewProgress] = useState<{ total: number; done: number; status: 'IDLE' | 'RUNNING' | 'DONE' }>({
     total: 0,
@@ -1034,20 +1040,24 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
   // Gọi Gemini AI tạo bình luận tự nhiên theo bài viết
   const handleGenerateAiComments = async () => {
-    if (!targetPostUrl.trim()) {
-      message.warning('Vui lòng dán link bài viết Facebook trước để AI đọc và phân tích nội dung!');
+    if (!targetPostUrl.trim() && !aiPostPrompt.trim()) {
+      message.warning('Vui lòng dán link bài viết hoặc nhập chủ đề bài viết để AI phân tích tạo bình luận!');
       return;
     }
     setIsAiGeneratingComments(true);
     try {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-ai-generate-comments`, {
         topic: selectedNiche || 'GENERAL',
-        postUrl: targetPostUrl.trim(),
-        count: 10,
-        tone: 'natural',
+        postContent: aiPostPrompt.trim() || undefined,
+        postUrl: targetPostUrl.trim() || undefined,
+        count: aiCount || 10,
+        tone: aiTone || 'natural',
       });
       if (res.data?.success && Array.isArray(res.data.comments) && res.data.comments.length > 0) {
         setCommentListText(res.data.comments.join('\n'));
+        if (engagementMode === 'LIKE_ONLY') {
+          setEngagementMode('LIKE_AND_COMMENT');
+        }
         message.success(`Gemini AI đã sinh ${res.data.comments.length} bình luận tự nhiên theo ngữ cảnh bài viết!`);
       } else {
         message.warning('Không nhận được bình luận từ AI, vui lòng thử lại.');
@@ -1810,6 +1820,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           cooldownEvery: antiCheckpointGuard ? 15 : 9999,
           cooldownDurationMs: 3500,
           comments: commentLines,
+          concurrency,
+          dripFeedMode,
+          dripDurationMinutes,
         };
 
         const applyFinalDetails = (details: AutoBuffResultDetail[]) => {
@@ -1935,7 +1948,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-view`, {
         targetUrl: targetViewUrl,
         targetViews,
-        concurrency,
+        concurrency: viewConcurrency,
         watchTimeSeconds,
       });
       return res.data;
@@ -2113,6 +2126,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               cooldownEvery: antiCheckpointGuard ? 15 : 9999,
               cooldownDurationMs: 3500,
               comments: commentLines,
+              concurrency,
+              dripFeedMode,
+              dripDurationMinutes,
             },
             (ev) => {
               if (ev.type === 'PAGE_START') {
@@ -3083,6 +3099,59 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                             </Checkbox>
                           </div>
 
+                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-cyan-900/60 text-xs shadow-sm">
+                            <div>
+                              <span className="text-cyan-300 font-bold block flex items-center gap-1">
+                                <ThunderboltFilled className="text-cyan-400" /> Luồng chạy song song
+                              </span>
+                              <span className="text-[10px] text-slate-400">Tăng tốc độ buff gấp 2-3 lần</span>
+                            </div>
+                            <Segmented
+                              size="small"
+                              value={concurrency}
+                              onChange={(val) => setConcurrency(Number(val))}
+                              options={[
+                                { label: '1 Luồng', value: 1 },
+                                { label: '⚡ 2 Luồng (x2)', value: 2 },
+                                { label: '🚀 3 Luồng (x3)', value: 3 },
+                              ]}
+                              className="bg-slate-900 border border-slate-700 text-slate-200"
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-indigo-900/60 text-xs shadow-sm">
+                            <div>
+                              <span className="text-indigo-300 font-bold block flex items-center gap-1">
+                                <SafetyCertificateOutlined className="text-indigo-400" /> Buff rải đều (Drip-feed)
+                              </span>
+                              <span className="text-[10px] text-slate-400">Rải đều theo thời gian chống quét</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {dripFeedMode && (
+                                <Select
+                                  size="small"
+                                  value={dripDurationMinutes}
+                                  onChange={(val) => setDripDurationMinutes(val)}
+                                  className="w-24 text-xs"
+                                  options={[
+                                    { value: 15, label: '15 phút' },
+                                    { value: 30, label: '30 phút' },
+                                    { value: 60, label: '1 giờ' },
+                                    { value: 120, label: '2 giờ' },
+                                    { value: 240, label: '4 giờ' },
+                                  ]}
+                                />
+                              )}
+                              <Switch
+                                checked={dripFeedMode}
+                                onChange={(val) => setDripFeedMode(val)}
+                                checkedChildren="Bật"
+                                unCheckedChildren="Tắt"
+                                className="bg-slate-800"
+                              />
+                            </div>
+                          </div>
+
                           <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-amber-900/60 text-xs shadow-sm">
                             <div>
                               <span className="text-amber-300 font-bold block flex items-center gap-1">
@@ -3485,8 +3554,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           </label>
                           <Select
                             className="w-full"
-                            value={concurrency}
-                            onChange={(v) => setConcurrency(v)}
+                            value={viewConcurrency}
+                            onChange={(v) => setViewConcurrency(v)}
                             options={[
                               { value: 1, label: '1 Luồng (Máy yếu)' },
                               { value: 2, label: '2 Luồng (Khuyên dùng)' },
@@ -4688,11 +4757,63 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                         : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                     }`}
                   >
-                    
                     <span className="font-bold text-xs truncate">{item.label}</span>
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* 1.1 Nhập ngữ cảnh bài viết & Phong cách AI */}
+          <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2.5">
+            <div>
+              <label className="font-bold text-slate-300 block mb-1">
+                Nội dung / Tóm tắt bài viết (AI đọc ngữ cảnh):
+              </label>
+              <Input.TextArea
+                rows={2}
+                placeholder="Dán tiêu đề, giá bán, hoặc thông tin bài viết (VD: Áo polo nam cotton 199k freeship toàn quốc)..."
+                value={aiPostPrompt}
+                onChange={(e) => setAiPostPrompt(e.target.value)}
+                className="bg-slate-950/70 border-slate-700 text-slate-100 text-xs rounded-xl"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className="font-semibold text-slate-400 block mb-1 text-xs">
+                  Phong cách bình luận (Tone):
+                </label>
+                <Select
+                  size="small"
+                  value={aiTone}
+                  onChange={setAiTone}
+                  className="w-full text-xs"
+                  options={[
+                    { value: 'customer_inquiry', label: '🛍️ Khách hỏi mua / Tư vấn (Size, ship, giá)' },
+                    { value: 'enthusiastic', label: '⭐ Khen ngợi / Đánh giá 5 sao (Đẹp, ưng ý)' },
+                    { value: 'expert', label: '💬 Hào hứng / Thảo luận (Đồng tình, chia sẻ)' },
+                    { value: 'natural', label: '🍀 Tự nhiên tổng hợp (Đa góc nhìn)' },
+                  ]}
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-400 block mb-1 text-xs">
+                  Số lượng bình luận cần tạo:
+                </label>
+                <Select
+                  size="small"
+                  value={aiCount}
+                  onChange={setAiCount}
+                  className="w-full text-xs"
+                  options={[
+                    { value: 10, label: '10 bình luận' },
+                    { value: 15, label: '15 bình luận' },
+                    { value: 20, label: '20 bình luận' },
+                    { value: 30, label: '30 bình luận' },
+                  ]}
+                />
+              </div>
             </div>
           </div>
 

@@ -453,6 +453,9 @@ app.post('/api/buff-like', async (req, res) => {
     cooldownDurationMs = 3500,
     comments = [],
     proxyUrl: explicitProxy = '',
+    concurrency = 1,
+    dripFeedMode = false,
+    dripDurationMinutes = 30,
   } = req.body;
 
   if (!cookieString || !targetUrl) {
@@ -475,6 +478,9 @@ app.post('/api/buff-like', async (req, res) => {
         cooldownDurationMs,
         comments,
         proxyUrl,
+        concurrency: Math.max(1, Math.min(3, parseInt(concurrency, 10) || 1)),
+        dripFeedMode: Boolean(dripFeedMode),
+        dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
       })
     );
     return res.json({ success: true, result });
@@ -500,6 +506,9 @@ app.post('/api/buff-like-stream', async (req, res) => {
     cooldownDurationMs = 3500,
     comments = [],
     proxyUrl: explicitProxy = '',
+    concurrency = 1,
+    dripFeedMode = false,
+    dripDurationMinutes = 30,
   } = req.body;
 
   if (!cookieString || !targetUrl) {
@@ -546,6 +555,9 @@ app.post('/api/buff-like-stream', async (req, res) => {
         cooldownDurationMs,
         comments,
         proxyUrl,
+        concurrency: Math.max(1, Math.min(3, parseInt(concurrency, 10) || 1)),
+        dripFeedMode: Boolean(dripFeedMode),
+        dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
         shouldStop: () => clientGone || isEmergencyStopped(),
         onProgress: (evt) => {
           sendEvent('progress', evt);
@@ -1888,6 +1900,141 @@ app.post('/api/avatars/update-stream', async (req, res) => {
   }
 });
 
+// =============================================================================
+// CẬP NHẬT ẢNH BÌA HÀNG LOẠT CHO FANPAGE (COVER PHOTO STUDIO)
+// =============================================================================
+
+let activeCoverUpdateCancel = null;
+
+// Lấy danh sách Preset ảnh bìa mẫu
+app.get('/api/covers/presets', (req, res) => {
+  try {
+    const presets = avatarTool.getCoverPresets();
+    return res.json({ success: true, ...presets });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Lấy cache trạng thái ảnh bìa đã lưu
+app.get('/api/covers/cached-status', (req, res) => {
+  try {
+    const cache = avatarTool.loadCoverCache();
+    const items = Object.values(cache);
+    return res.json({
+      success: true,
+      results: cache,
+      stats: {
+        total: items.length,
+        hasCover: items.filter((i) => i.hasCover).length,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Dừng cập nhật ảnh bìa
+app.post('/api/covers/stop', (req, res) => {
+  if (activeCoverUpdateCancel) {
+    activeCoverUpdateCancel();
+    activeCoverUpdateCancel = null;
+    return res.json({ success: true, message: 'Đã gửi lệnh dừng cập nhật Ảnh Bìa' });
+  }
+  return res.json({ success: true, message: 'Không có tác vụ nào đang chạy' });
+});
+
+// Cập nhật Ảnh Bìa hàng loạt qua SSE Stream
+app.post('/api/covers/update-stream', async (req, res) => {
+  const {
+    motherViaId,
+    cookieString: providedCookie,
+    pages = [],
+    presetCategory = 'RANDOM_COVER',
+    customImages = [],
+    delaySeconds = 4,
+    proxyUrl: providedProxy,
+  } = req.body;
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const sendEvent = (eventData) => {
+    res.write(`data: ${JSON.stringify(eventData)}\n\n`);
+  };
+
+  let isCancelled = false;
+  activeCoverUpdateCancel = () => {
+    isCancelled = true;
+    sendEvent({ type: 'STOPPED', message: 'Tác vụ đã được người dùng bấm dừng.' });
+  };
+
+  req.on('close', () => {
+    isCancelled = true;
+    activeCoverUpdateCancel = null;
+  });
+
+  try {
+    let finalCookie = providedCookie;
+    let finalProxy = providedProxy;
+
+    if (!finalCookie && motherViaId) {
+      const allAccounts = await db.getSocialAccounts();
+      const viaAcc = allAccounts.find(
+        (a) => String(a.id) === String(motherViaId) || a.platformAccountId === String(motherViaId)
+      );
+      if (viaAcc) {
+        finalCookie = viaAcc.cookieString || viaAcc.accessToken;
+        if (!finalProxy) finalProxy = viaAcc.proxyUrl;
+      }
+    }
+
+    if (!finalCookie) {
+      sendEvent({ type: 'ERROR', error: 'Không tìm thấy Cookie của tài khoản Mẹ để thao tác!' });
+      return res.end();
+    }
+
+    sendEvent({
+      type: 'INIT',
+      total: pages.length,
+      message: `Bắt đầu cập nhật Ảnh Bìa cho ${pages.length} trang Facebook...`,
+    });
+
+    const result = await avatarTool.bulkUpdateFanpageCovers(
+      finalCookie,
+      pages,
+      {
+        presetCategory,
+        customImages,
+        delaySeconds: Number(delaySeconds) || 4,
+        proxyUrl: finalProxy || '',
+        shouldStop: () => isCancelled,
+      },
+      (progressEvt) => {
+        sendEvent(progressEvt);
+      }
+    );
+
+    sendEvent({
+      type: 'DONE',
+      success: true,
+      total: result.total,
+      updatedCount: result.updatedCount,
+      details: result.details,
+    });
+  } catch (err) {
+    console.error('[API /covers/update-stream] ❌ Lỗi:', err.message);
+    sendEvent({ type: 'ERROR', error: err.message });
+  } finally {
+    activeCoverUpdateCancel = null;
+    res.end();
+  }
+});
+
 // 4. API upload ảnh đại diện tùy chỉnh (Base64)
 app.post('/api/avatars/upload-custom', (req, res) => {
   try {
@@ -1921,6 +2068,139 @@ app.get('/api/avatars/custom-image/:filename', (req, res) => {
   }
   return res.status(404).send('Không tìm thấy ảnh');
 });
+
+// =============================================================================
+// 6. AUTHENTICATION & USER MANAGEMENT
+// =============================================================================
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+const DEFAULT_USERS = [
+  {
+    id: 1,
+    username: 'thanhan',
+    email: 'thanhan@viplike.vn',
+    fullName: 'Thành An (Quản Trị)',
+    role: 'ADMIN',
+  },
+  {
+    id: 2,
+    username: 'admin',
+    email: 'admin@viplike.vn',
+    fullName: 'Quản Trị Viên VIPLIKE',
+    role: 'ADMIN',
+  },
+  {
+    id: 3,
+    username: 'huynhthanhphu',
+    email: 'phu@viplike.vn',
+    fullName: 'Huỳnh Thạnh Phú',
+    role: 'ADMIN',
+  },
+];
+
+function loadUsers() {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
+      if (Array.isArray(data) && data.length > 0) return data;
+    }
+  } catch (e) {}
+  saveUsers(DEFAULT_USERS);
+  return DEFAULT_USERS;
+}
+
+function saveUsers(users) {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
+  } catch (e) {}
+}
+
+const authHandler = {
+  login: (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username) {
+        return res.status(400).json({ success: false, error: 'Vui lòng nhập tên đăng nhập hoặc email' });
+      }
+      const users = loadUsers();
+      const u = username.trim().toLowerCase();
+      let user = users.find((x) => x.username.toLowerCase() === u || x.email.toLowerCase() === u);
+
+      if (!user) {
+        user = {
+          id: Date.now(),
+          username: username.trim(),
+          email: `${username.trim().toLowerCase()}@viplike.vn`,
+          fullName: username.trim().toLowerCase().includes('thanh') ? 'Thành An (Quản Trị)' : username.trim(),
+          role: 'ADMIN',
+        };
+        users.push(user);
+        saveUsers(users);
+      }
+
+      const token = `viplike_jwt_${Buffer.from(JSON.stringify({ id: user.id, username: user.username })).toString('base64')}_${Date.now()}`;
+      return res.json({
+        success: true,
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          fullName: user.fullName || user.username,
+          role: user.role || 'ADMIN',
+        },
+        data: {
+          token,
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          fullName: user.fullName || user.username,
+          role: user.role || 'ADMIN',
+        },
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  },
+  register: (req, res) => {
+    try {
+      const { username, email, fullName } = req.body;
+      if (!username) return res.status(400).json({ success: false, error: 'Vui lòng nhập tên đăng nhập' });
+      const users = loadUsers();
+      const exists = users.find((x) => x.username.toLowerCase() === username.trim().toLowerCase());
+      if (exists) return res.status(400).json({ success: false, error: 'Tên đăng nhập đã tồn tại' });
+      const newUser = {
+        id: Date.now(),
+        username: username.trim(),
+        email: email || `${username.trim()}@viplike.vn`,
+        fullName: fullName || username.trim(),
+        role: 'USER',
+      };
+      users.push(newUser);
+      saveUsers(users);
+      const token = `viplike_jwt_${Buffer.from(JSON.stringify({ id: newUser.id, username: newUser.username })).toString('base64')}_${Date.now()}`;
+      return res.json({
+        success: true,
+        token,
+        user: newUser,
+        data: { token, ...newUser },
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  },
+  me: (req, res) => {
+    const users = loadUsers();
+    return res.json({ success: true, user: users[0] });
+  },
+};
+
+app.post('/api/auth/login', authHandler.login);
+app.post('/auth/login', authHandler.login);
+app.post('/api/auth/register', authHandler.register);
+app.post('/auth/register', authHandler.register);
+app.get('/api/auth/me', authHandler.me);
+app.get('/auth/me', authHandler.me);
 
 // Khởi động server
 

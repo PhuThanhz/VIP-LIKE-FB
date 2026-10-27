@@ -242,6 +242,10 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     return currentMotherVia?.pages || [];
   }, [currentMotherVia]);
 
+  // Chế độ Studio: AVATAR hoặc COVER (Ảnh Bìa)
+  const [studioMode, setStudioMode] = useState<'AVATAR' | 'COVER'>('AVATAR');
+  const [coverStatusMap, setCoverStatusMap] = useState<Record<string, any>>({});
+
   // 2. Avatar Status (Trạng thái Avatar thực tế từ Facebook)
   const [avatarStatusMap, setAvatarStatusMap] = useState<Record<string, PageAvatarStatus>>({});
   const [scanningStatus, setScanningStatus] = useState(false);
@@ -277,16 +281,32 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
   const [isExecutionModalOpen, setIsExecutionModalOpen] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  // Khởi động: Tải presets, cached pages & cached avatar status
+  // Tải presets theo chế độ (Avatar hoặc Ảnh Bìa)
   useEffect(() => {
+    const endpoint = studioMode === 'COVER' ? '/covers/presets' : '/avatars/presets';
     api
-      .get('/avatars/presets')
+      .get(endpoint)
       .then((res) => {
         if (res.data?.categories) {
           setPresets(res.data.categories);
+          setSelectedPresetId(res.data.categories[res.data.categories.length - 1]?.id || res.data.categories[0]?.id || '');
         }
       })
       .catch(() => {});
+  }, [studioMode]);
+
+  // Tải cache ảnh bìa
+  useEffect(() => {
+    api
+      .get('/covers/cached-status')
+      .then((res) => {
+        if (res.data?.results) setCoverStatusMap(res.data.results);
+      })
+      .catch(() => {});
+  }, [studioMode]);
+
+  // Khởi động: Tải cached pages & cached avatar status
+  useEffect(() => {
 
     // Tải danh sách Fanpage từ cache (512 page của Thành An, 25 page của Huỳnh Thạnh Phú)
     api
@@ -367,10 +387,38 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     }
   };
 
-  // Quét trạng thái Avatar (Quét Nhanh từ Cache hoặc Quét Sâu trực tiếp từ Facebook)
+  // Quét trạng thái Avatar hoặc Ảnh Bìa (Quét Nhanh từ Cache hoặc Quét Sâu trực tiếp từ Facebook)
   const handleScanAvatarStatus = async (deepScan: boolean = false) => {
     if (currentPages.length === 0) {
       antMessage.warning('Không có Fanpage nào để quét');
+      return;
+    }
+
+    if (studioMode === 'COVER') {
+      setScanningStatus(true);
+      try {
+        const res = await api.get('/covers/cached-status');
+        if (res.data?.results) {
+          setCoverStatusMap(res.data.results);
+          const missingIds = currentPages
+            .filter((p) => {
+              const st = res.data.results[p.platformAccountId];
+              return st ? !st.hasCover : true;
+            })
+            .map((p) => p.platformAccountId);
+
+          setSelectedPageIds(missingIds);
+          antMessage.success({
+            content: `Đã nạp trạng thái ảnh bìa! ${currentPages.length - missingIds.length} trang đã có ảnh bìa, ${missingIds.length} trang chưa có.`,
+            key: 'scanning_avatar',
+            duration: 4,
+          });
+        }
+      } catch (err: any) {
+        antMessage.error(`Lỗi tải trạng thái ảnh bìa: ${err.message}`);
+      } finally {
+        setScanningStatus(false);
+      }
       return;
     }
 
@@ -421,18 +469,19 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     }
   };
 
-  // Thống kê nhanh theo Via đang chọn
+  // Thống kê nhanh theo Via đang chọn (Hỗ trợ cả Avatar & Ảnh Bìa)
   const stats = useMemo(() => {
     const total = currentPages.length;
     let missing = 0;
     let has = 0;
     let uninspected = 0;
+    const isCover = studioMode === 'COVER';
 
     for (const p of currentPages) {
-      const st = avatarStatusMap[p.platformAccountId];
+      const st = isCover ? coverStatusMap[p.platformAccountId] : avatarStatusMap[p.platformAccountId];
       if (!st) {
         uninspected++;
-      } else if (st.hasAvatar) {
+      } else if (isCover ? st.hasCover : st.hasAvatar) {
         has++;
       } else {
         missing++;
@@ -440,11 +489,12 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     }
 
     return { total, missing, has, uninspected };
-  }, [currentPages, avatarStatusMap]);
+  }, [currentPages, avatarStatusMap, coverStatusMap, studioMode]);
 
-  // Lọc trang hiển thị trên bảng
+  // Lọc trang hiển thị trên bảng (Hỗ trợ cả Avatar & Ảnh Bìa)
   const filteredPages = useMemo(() => {
     let list = currentPages;
+    const isCover = studioMode === 'COVER';
 
     // Lọc theo search text
     if (searchText.trim()) {
@@ -457,13 +507,13 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     // Lọc theo filter mode chuẩn xác
     if (filterMode === 'MISSING') {
       list = list.filter((p) => {
-        const st = avatarStatusMap[p.platformAccountId];
-        return st ? !st.hasAvatar : true;
+        const st = isCover ? coverStatusMap[p.platformAccountId] : avatarStatusMap[p.platformAccountId];
+        return st ? !(isCover ? st.hasCover : st.hasAvatar) : true;
       });
     } else if (filterMode === 'HAS') {
       list = list.filter((p) => {
-        const st = avatarStatusMap[p.platformAccountId];
-        return st && st.hasAvatar;
+        const st = isCover ? coverStatusMap[p.platformAccountId] : avatarStatusMap[p.platformAccountId];
+        return st && (isCover ? st.hasCover : st.hasAvatar);
       });
     } else if (filterMode === 'SELECTED') {
       const selSet = new Set(selectedPageIds);
@@ -471,20 +521,21 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     }
 
     return list;
-  }, [currentPages, searchText, filterMode, avatarStatusMap, selectedPageIds]);
+  }, [currentPages, searchText, filterMode, avatarStatusMap, coverStatusMap, studioMode, selectedPageIds]);
 
   // Hành động chọn nhanh chuẩn xác
   const handleSelectAllMissing = () => {
+    const isCover = studioMode === 'COVER';
     const missing = currentPages
       .filter((p) => {
-        const st = avatarStatusMap[p.platformAccountId];
-        return st ? !st.hasAvatar : true;
+        const st = isCover ? coverStatusMap[p.platformAccountId] : avatarStatusMap[p.platformAccountId];
+        return st ? !(isCover ? st.hasCover : st.hasAvatar) : true;
       })
       .map((p) => p.platformAccountId);
 
     setSelectedPageIds(missing);
     antMessage.info(
-      `Đã chọn ${missing.length} trang chưa có ảnh đại diện (đã tự động bỏ qua các trang đã có ảnh thật)`
+      `Đã chọn ${missing.length} trang chưa có ${isCover ? 'ảnh bìa' : 'ảnh đại diện'} (đã tự động bỏ qua các trang đã có ảnh)`
     );
   };
 
@@ -534,10 +585,11 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
     return false;
   };
 
-  // Bắt đầu cập nhật Avatar hàng loạt (SSE Stream)
+  // Bắt đầu cập nhật Avatar hoặc Ảnh Bìa hàng loạt (SSE Stream)
   const handleStartUpdate = async () => {
+    const isCover = studioMode === 'COVER';
     if (selectedPageIds.length === 0) {
-      antMessage.warning('Vui lòng chọn ít nhất 1 Fanpage cần cập nhật Avatar!');
+      antMessage.warning(`Vui lòng chọn ít nhất 1 Fanpage cần cập nhật ${isCover ? 'Ảnh Bìa' : 'Avatar'}!`);
       return;
     }
 
@@ -563,12 +615,14 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       });
 
     modal.confirm({
-      title: 'Xác nhận Bắt đầu Cập Nhật Avatar Hàng Loạt?',
+      title: isCover
+        ? 'Xác nhận Bắt đầu Cập Nhật Ảnh Bìa Hàng Loạt?'
+        : 'Xác nhận Bắt đầu Cập Nhật Avatar Hàng Loạt?',
       icon: <FireOutlined className="text-pink-500 text-xl" />,
       content: (
         <div className="space-y-2 text-sm text-slate-300">
           <p>
-            Bạn sắp tự động đổi ảnh đại diện cho{' '}
+            Bạn sắp tự động đổi {isCover ? 'ảnh bìa' : 'ảnh đại diện'} cho{' '}
             <strong className="text-pink-400 font-bold">{pagesToUpdate.length} Fanpage</strong> thuộc nick Mẹ{' '}
             <strong className="text-cyan-400 font-bold">"{currentMotherVia.viaName}"</strong>.
           </p>
@@ -605,6 +659,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
 
   // Chạy cập nhật qua SSE Stream
   const runAvatarStream = async (pagesToUpdate: { id: string; name: string; imageUrl?: string }[]) => {
+    const isCover = studioMode === 'COVER';
     setIsExecuting(true);
     setIsExecutionModalOpen(true);
     setExecProgress({
@@ -618,12 +673,16 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
         id: `init_${Date.now()}`,
         time: new Date().toLocaleTimeString(),
         type: 'INFO',
-        message: `Khởi tạo tiến trình cập nhật Avatar cho ${pagesToUpdate.length} Fanpage thuộc nick "${currentMotherVia?.viaName}"...`,
+        message: `Khởi tạo tiến trình cập nhật ${isCover ? 'Ảnh Bìa' : 'Avatar'} cho ${pagesToUpdate.length} Fanpage thuộc nick "${currentMotherVia?.viaName}"...`,
       },
     ]);
 
     try {
-      const response = await fetch(`${WORKER_BASE_URL}/api/avatars/update-stream`, {
+      const endpoint = isCover
+        ? `${WORKER_BASE_URL}/api/covers/update-stream`
+        : `${WORKER_BASE_URL}/api/avatars/update-stream`;
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -685,17 +744,28 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
                   failed: isSuccess ? prev.failed : prev.failed + 1,
                 }));
 
-                // Cập nhật trạng thái avatar của page vừa xong
+                // Cập nhật trạng thái avatar hoặc ảnh bìa của page vừa xong
                 if (isSuccess) {
-                  setAvatarStatusMap((prev) => ({
-                    ...prev,
-                    [evt.pageId]: {
-                      pageId: evt.pageId,
-                      isSilhouette: false,
-                      hasAvatar: true,
-                      avatarUrl: `https://graph.facebook.com/${evt.pageId}/picture?type=large&t=${Date.now()}`,
-                    },
-                  }));
+                  if (isCover) {
+                    setCoverStatusMap((prev) => ({
+                      ...prev,
+                      [evt.pageId]: {
+                        pageId: evt.pageId,
+                        hasCover: true,
+                        coverUrl: evt.imageUrl,
+                      },
+                    }));
+                  } else {
+                    setAvatarStatusMap((prev) => ({
+                      ...prev,
+                      [evt.pageId]: {
+                        pageId: evt.pageId,
+                        isSilhouette: false,
+                        hasAvatar: true,
+                        avatarUrl: `https://graph.facebook.com/${evt.pageId}/picture?type=large&t=${Date.now()}`,
+                      },
+                    }));
+                  }
                 }
 
                 setExecutionLogs((prev) => [
@@ -727,7 +797,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
                     message: `🏁 Hoàn thành toàn bộ: Thành công ${evt.updatedCount}/${evt.total} Fanpage!`,
                   },
                 ]);
-                antMessage.success(`Hoàn thành! Đã cập nhật Avatar cho ${evt.updatedCount}/${evt.total} Fanpage!`);
+                antMessage.success(`Hoàn thành! Đã cập nhật ${isCover ? 'Ảnh Bìa' : 'Avatar'} cho ${evt.updatedCount}/${evt.total} Fanpage!`);
               } else if (evt.type === 'ERROR') {
                 setExecutionLogs((prev) => [
                   ...prev,
@@ -744,7 +814,7 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
         }
       }
     } catch (err: any) {
-      antMessage.error(`Lỗi cập nhật Avatar: ${err.message}`);
+      antMessage.error(`Lỗi cập nhật ${isCover ? 'Ảnh Bìa' : 'Avatar'}: ${err.message}`);
       setExecutionLogs((prev) => [
         ...prev,
         {
@@ -762,7 +832,8 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
   // Dừng tác vụ đang chạy
   const handleStopExecution = async () => {
     try {
-      await api.post('/avatars/stop');
+      const stopEndpoint = studioMode === 'COVER' ? '/covers/stop' : '/avatars/stop';
+      await api.post(stopEndpoint);
       antMessage.info('Đang gửi tín hiệu dừng khẩn cấp...');
     } catch (err) {
       console.warn('Lỗi gửi stop:', err);
@@ -772,10 +843,52 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
   // Table columns definition
   const columns: ColumnsType<ChildPageItem> = [
     {
-      title: 'Ảnh Hiện Tại (Facebook)',
-      key: 'currentAvatar',
-      width: 150,
+      title: studioMode === 'COVER' ? 'Ảnh Bìa (Facebook)' : 'Ảnh Hiện Tại (Facebook)',
+      key: 'currentMedia',
+      width: studioMode === 'COVER' ? 180 : 150,
       render: (_, record) => {
+        if (studioMode === 'COVER') {
+          const status = coverStatusMap[record.platformAccountId];
+          const hasCover = Boolean(status?.hasCover);
+          const coverSrc = status?.coverUrl;
+
+          return (
+            <div className="flex items-center gap-2">
+              <div className="relative w-16 h-9 rounded-lg overflow-hidden bg-slate-800 border border-slate-700/80 flex items-center justify-center shrink-0 shadow-sm">
+                {coverSrc ? (
+                  <img
+                    src={coverSrc}
+                    alt={record.pageName}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="text-[10px] text-slate-500 font-medium flex items-center justify-center h-full">
+                    Chưa có
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/10 hover:bg-transparent transition-colors" />
+              </div>
+              <div>
+                {status ? (
+                  hasCover ? (
+                    <Tag color="success" className="text-[10px] rounded-md px-1 py-0 border-0 font-medium leading-tight">
+                      Đã có
+                    </Tag>
+                  ) : (
+                    <Tag color="error" className="text-[10px] rounded-md px-1 py-0 border-0 font-medium leading-tight">
+                      Chưa có
+                    </Tag>
+                  )
+                ) : (
+                  <Tag color="default" className="text-[10px] rounded-md px-1 py-0 border-0 text-slate-400 leading-tight">
+                    Chưa quét
+                  </Tag>
+                )}
+              </div>
+            </div>
+          );
+        }
+
         const status = avatarStatusMap[record.platformAccountId];
         const avatarSrc =
           status?.avatarUrl ||
@@ -910,22 +1023,54 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-pink-950/40 p-6 border border-pink-500/20 shadow-2xl backdrop-blur-xl">
         <div className="absolute top-0 right-0 -mt-10 -mr-10 w-72 h-72 bg-gradient-to-br from-pink-500/10 via-purple-500/10 to-transparent rounded-full blur-3xl pointer-events-none" />
 
-        <div className="space-y-1.5 relative z-10">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center shadow-lg shadow-pink-500/30">
-              <PictureOutlined className="text-on-accent text-xl" />
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-500 to-rose-600 flex items-center justify-center shadow-lg shadow-pink-500/30">
+                <PictureOutlined className="text-on-accent text-xl" />
+              </div>
+              <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-pink-300 tracking-tight">
+                {studioMode === 'COVER' ? 'Studio Cập Nhật Ảnh Bìa (Cover Photo)' : 'Studio Cập Nhật Avatar Fanpage'}
+              </h1>
+              <Tag color={studioMode === 'COVER' ? 'cyan' : 'magenta'} className="rounded-full px-2 py-0.5 text-[10px] font-bold border-0 tracking-wider">
+                {studioMode === 'COVER' ? 'COVER 16:9' : 'AVATAR 1:1'}
+              </Tag>
             </div>
-            <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-pink-300 tracking-tight">
-              Studio Cập Nhật Avatar Fanpage
-            </h1>
-            <Tag color="magenta" className="rounded-full px-2 py-0.5 text-[10px] font-bold border-0 tracking-wider">
-              PRO 2026
-            </Tag>
+            <p className="text-sm text-slate-400 max-w-3xl">
+              {studioMode === 'COVER'
+                ? 'Đổi ảnh bìa 16:9 sắc nét hàng loạt cho dàn Fanpage để tăng Trust Score và độ uy tín cao nhất.'
+                : 'Cập nhật avatar chân dung người thật tự động cho toàn bộ dàn Fanpage con, giúp nick buff tương tác trông thật 100%.'}
+            </p>
           </div>
-          <p className="text-sm text-slate-400 max-w-3xl">
-            Chọn Via chính (Thành An hoặc Huỳnh Thạnh Phú) để nạp toàn bộ dàn Fanpage con. Hệ thống tự động phát hiện
-            chính xác 100% trang nào đã có avatar và trang nào chưa có để bạn đổi ảnh hàng loạt an toàn.
-          </p>
+
+          <div className="shrink-0">
+            <Segmented
+              size="large"
+              value={studioMode}
+              onChange={(val) => setStudioMode(val as 'AVATAR' | 'COVER')}
+              options={[
+                {
+                  label: (
+                    <div className="flex items-center gap-2 px-3 py-1 font-bold">
+                      <UserOutlined />
+                      <span>Avatar Chân Dung</span>
+                    </div>
+                  ),
+                  value: 'AVATAR',
+                },
+                {
+                  label: (
+                    <div className="flex items-center gap-2 px-3 py-1 font-bold">
+                      <PictureOutlined />
+                      <span>Ảnh Bìa Hàng Loạt</span>
+                    </div>
+                  ),
+                  value: 'COVER',
+                },
+              ]}
+              className="bg-slate-950/80 border border-slate-700/80 text-slate-200 rounded-xl"
+            />
+          </div>
         </div>
       </div>
 
@@ -1025,16 +1170,18 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
         </div>
       </div>
 
-      {/* 3. BƯỚC 2: QUÉT TRẠNG THÁI AVATAR & THỐNG KÊ NHANH */}
+      {/* 3. BƯỚC 2: QUÉT TRẠNG THÁI AVATAR / ẢNH BÌA & THỐNG KÊ NHANH */}
       <div className="p-5 rounded-2xl bg-surface border border-slate-800/90 shadow-xl space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2 text-sm font-black text-slate-200 uppercase tracking-wider">
               <ScanOutlined className="text-cyan-400 text-base" />
-              <span>BƯỚC 2: QUÉT & PHÂN LOẠI AVATAR (NICK "{currentMotherVia?.viaName}")</span>
+              <span>{studioMode === 'COVER' ? 'BƯỚC 2: QUÉT & PHÂN LOẠI ẢNH BÌA' : 'BƯỚC 2: QUÉT & PHÂN LOẠI AVATAR'} (NICK "{currentMotherVia?.viaName}")</span>
             </div>
             <p className="text-xs text-slate-400">
-              Kiểm tra toàn bộ dàn Fanpage để nhận diện chính xác trang nào đã có avatar và trang nào đang thiếu
+              {studioMode === 'COVER'
+                ? 'Kiểm tra toàn bộ dàn Fanpage để nhận diện chính xác trang nào đã có ảnh bìa và trang nào đang thiếu'
+                : 'Kiểm tra toàn bộ dàn Fanpage để nhận diện chính xác trang nào đã có avatar và trang nào đang thiếu'}
             </p>
           </div>
 
@@ -1071,13 +1218,15 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
           </div>
           <div className="p-3.5 bg-rose-950/20 rounded-xl border border-rose-500/30">
             <div className="text-xs text-rose-300 font-medium flex items-center justify-between">
-              <span>Chưa Có Avatar</span>
+              <span>{studioMode === 'COVER' ? 'Chưa Có Ảnh Bìa' : 'Chưa Có Avatar'}</span>
               <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
             </div>
             <div className="text-2xl font-black text-rose-400 mt-1">{stats.missing}</div>
           </div>
           <div className="p-3.5 bg-emerald-950/20 rounded-xl border border-emerald-500/30">
-            <div className="text-xs text-emerald-300 font-medium">Đã Có Avatar Thật</div>
+            <div className="text-xs text-emerald-300 font-medium">
+              {studioMode === 'COVER' ? 'Đã Có Ảnh Bìa' : 'Đã Có Avatar Thật'}
+            </div>
             <div className="text-2xl font-black text-emerald-400 mt-1">{stats.has}</div>
           </div>
           <div className="p-3.5 bg-cyan-950/20 rounded-xl border border-cyan-500/30">
@@ -1095,7 +1244,8 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-bold text-slate-200 flex items-center gap-2">
-                  <PictureOutlined className="text-pink-400" /> BƯỚC 3: Nguồn Ảnh Mới
+                  <PictureOutlined className="text-pink-400" />{' '}
+                  {studioMode === 'COVER' ? 'BƯỚC 3: Nguồn Ảnh Bìa (16:9)' : 'BƯỚC 3: Nguồn Ảnh Mới'}
                 </span>
                 <Segmented
                   value={selectedPresetCategory}
@@ -1296,8 +1446,8 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
                   value={filterMode}
                   onChange={(v) => setFilterMode(v as any)}
                   options={[
-                    { label: `Chưa có Avatar (${stats.missing})`, value: 'MISSING' },
-                    { label: `Đã có Avatar (${stats.has})`, value: 'HAS' },
+                    { label: `${studioMode === 'COVER' ? 'Chưa có Ảnh Bìa' : 'Chưa có Avatar'} (${stats.missing})`, value: 'MISSING' },
+                    { label: `${studioMode === 'COVER' ? 'Đã có Ảnh Bìa' : 'Đã có Avatar'} (${stats.has})`, value: 'HAS' },
                     { label: `Tất cả (${stats.total})`, value: 'ALL' },
                     { label: `Đang chọn (${selectedPageIds.length})`, value: 'SELECTED' },
                   ]}
@@ -1423,8 +1573,12 @@ export const PageAvatarStudio: React.FC<PageAvatarStudioProps> = ({ accounts, on
               type="primary"
               onClick={() => {
                 setIsExecutionModalOpen(false);
-                api.get('/avatars/cached-status').then((res) => {
-                  if (res.data?.results) setAvatarStatusMap(res.data.results);
+                const cacheEndpoint = studioMode === 'COVER' ? '/covers/cached-status' : '/avatars/cached-status';
+                api.get(cacheEndpoint).then((res) => {
+                  if (res.data?.results) {
+                    if (studioMode === 'COVER') setCoverStatusMap(res.data.results);
+                    else setAvatarStatusMap(res.data.results);
+                  }
                 });
               }}
               className="bg-cyan-600 hover:bg-cyan-500 rounded-xl font-bold"

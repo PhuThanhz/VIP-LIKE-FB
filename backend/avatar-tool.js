@@ -38,6 +38,7 @@ const BROWSER_ARGS = [
 
 // =============================================================================
 const AVATAR_STATUS_CACHE_FILE = path.join(DATA_DIR, 'avatar_status_cache.json');
+const COVER_STATUS_CACHE_FILE = path.join(DATA_DIR, 'cover_status_cache.json');
 
 function loadAvatarCache() {
   try {
@@ -57,6 +58,27 @@ function saveAvatarCache(cacheObj) {
     fs.renameSync(tmp, AVATAR_STATUS_CACHE_FILE);
   } catch (e) {
     console.warn('[AvatarTool] ⚠️ Lỗi lưu avatar_status_cache.json:', e.message);
+  }
+}
+
+function loadCoverCache() {
+  try {
+    if (fs.existsSync(COVER_STATUS_CACHE_FILE)) {
+      return JSON.parse(fs.readFileSync(COVER_STATUS_CACHE_FILE, 'utf8'));
+    }
+  } catch (e) {
+    console.warn('[CoverTool] ⚠️ Lỗi đọc cover_status_cache.json:', e.message);
+  }
+  return {};
+}
+
+function saveCoverCache(cacheObj) {
+  try {
+    const tmp = `${COVER_STATUS_CACHE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(cacheObj, null, 2), 'utf8');
+    fs.renameSync(tmp, COVER_STATUS_CACHE_FILE);
+  } catch (e) {
+    console.warn('[CoverTool] ⚠️ Lỗi lưu cover_status_cache.json:', e.message);
   }
 }
 
@@ -658,12 +680,293 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
   };
 }
 
+/**
+ * Kho Ảnh Bìa mẫu độ phân giải cao tỉ lệ 16:9
+ */
+function getCoverPresets() {
+  const nature = [
+    'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1511884642898-4c92249e20b6?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1426604966848-d7adac402bff?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1472214103451-9374bd1c798e?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=1200&h=675&fit=crop',
+  ];
+  const architecture = [
+    'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1513694203232-719a280e022f?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1497215728101-856f4ea42174?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1497366811353-6870744d04b2?w=1200&h=675&fit=crop',
+  ];
+  const tech = [
+    'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1200&h=675&fit=crop',
+  ];
+  const business = [
+    'https://images.unsplash.com/photo-1497366754035-f200968a6e72?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=1200&h=675&fit=crop',
+    'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=1200&h=675&fit=crop',
+  ];
+  return {
+    categories: [
+      { id: 'NATURE_COVER', name: 'Thiên Nhiên & Phong Cảnh HD (16:9)', desc: 'Ảnh thiên nhiên, núi rừng, biển xanh nghệ thuật', icon: '🌿', items: nature },
+      { id: 'MINIMAL_ARCH', name: 'Kiến Trúc & Tối Giản', desc: 'Không gian kiến trúc hiện đại, sang trọng', icon: '🏛️', items: architecture },
+      { id: 'TECH_CYBER', name: 'Công Nghệ & Cyber', desc: 'Đồ họa công nghệ số, ánh sáng hiện đại', icon: '💻', items: tech },
+      { id: 'BUSINESS_OFFICE', name: 'Văn Phòng & Doanh Nghiệp', desc: 'Không gian làm việc chuyên nghiệp chuẩn doanh nghiệp', icon: '🏢', items: business },
+      { id: 'RANDOM_COVER', name: 'Ngẫu Nhiên Toàn Bộ (Khuyên Dùng)', desc: 'Tự động luân phiên ngẫu nhiên mỗi page một ảnh bìa độc bản', icon: '🎲', items: [...nature, ...architecture, ...tech, ...business] },
+    ],
+  };
+}
+
+/**
+ * Cập nhật Ảnh Bìa (Cover Photo) hàng loạt cho dàn Fanpage
+ */
+async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}, onProgress) {
+  const {
+    presetCategory = 'RANDOM_COVER',
+    customImages = [],
+    delaySeconds = 3,
+    proxyUrl = '',
+    shouldStop,
+  } = options;
+
+  const cookies = parseCookieString(cookieString);
+  if (!cookies.length) throw new Error('Cookie rỗng hoặc không đúng định dạng');
+
+  const proxy = parseProxy(proxyUrl);
+  const presets = getCoverPresets();
+  const selectedCat = presets.categories.find((c) => c.id === presetCategory) || presets.categories[presets.categories.length - 1];
+  const presetPool = selectedCat.items;
+
+  const uid = getUserIdFromCookie(cookieString);
+  const profileDir = uid ? path.join(__dirname, 'browser_profiles', `via_${uid}`) : null;
+  if (profileDir) fs.mkdirSync(profileDir, { recursive: true });
+
+  const browserOptions = {
+    headless: true,
+    args: BROWSER_ARGS,
+    proxy: proxy ? { server: proxy.server, username: proxy.username, password: proxy.password } : undefined,
+    viewport: { width: 1280, height: 800 },
+    locale: 'vi-VN',
+    timezoneId: 'Asia/Ho_Chi_Minh',
+  };
+
+  let context;
+  if (profileDir) {
+    context = await chromium.launchPersistentContext(profileDir, browserOptions);
+  } else {
+    const b = await chromium.launch(browserOptions);
+    context = await b.newContext(browserOptions);
+  }
+
+  await applyResourceOptimization(context, false);
+  await context.addCookies(cookies);
+
+  const tab = context.pages().length ? context.pages()[0] : await context.newPage();
+  const coverCache = loadCoverCache();
+  const details = [];
+  let updatedCount = 0;
+
+  try {
+    for (let i = 0; i < pagesToUpdate.length; i++) {
+      if (typeof shouldStop === 'function' && shouldStop()) {
+        console.warn(`[CoverStudio] 🛑 Dừng theo yêu cầu người dùng tại page ${i + 1}/${pagesToUpdate.length}`);
+        break;
+      }
+
+      const pageItem = pagesToUpdate[i];
+      const pageId = pageItem.id || pageItem.platformAccountId;
+      const pageName = pageItem.name || pageItem.pageName || `Fanpage ${pageId}`;
+
+      let localTempFile = null;
+      const startTime = Date.now();
+
+      if (typeof onProgress === 'function') {
+        onProgress({
+          type: 'PAGE_START',
+          index: i + 1,
+          total: pagesToUpdate.length,
+          pageId,
+          pageName,
+          status: 'RUNNING',
+          message: `[${i + 1}/${pagesToUpdate.length}] Đang tải ảnh bìa cho "${pageName}"...`,
+        });
+      }
+
+      try {
+        if (customImages.length > 0) {
+          const chosenCustom = customImages[i % customImages.length];
+          if (typeof chosenCustom === 'string' && chosenCustom.startsWith('data:image')) {
+            const base64Data = chosenCustom.replace(/^data:image\/\w+;base64,/, '');
+            const tmpFile = path.join(TEMP_AVATARS_DIR, `cover_b64_${Date.now()}_${i}.jpg`);
+            fs.writeFileSync(tmpFile, Buffer.from(base64Data, 'base64'));
+            localTempFile = tmpFile;
+          } else if (typeof chosenCustom === 'string' && chosenCustom.startsWith('http')) {
+            localTempFile = await downloadImageToTemp(chosenCustom, `cover_url_${pageId}`);
+          } else if (typeof chosenCustom === 'string' && fs.existsSync(chosenCustom)) {
+            localTempFile = chosenCustom;
+          }
+        }
+
+        if (!localTempFile) {
+          const chosenUrl = pageItem.imageUrl || presetPool[i % presetPool.length];
+          localTempFile = await downloadImageToTemp(chosenUrl, `cov_${pageId}`);
+        }
+
+        console.log(`[CoverStudio] 🔄 [${i + 1}/${pagesToUpdate.length}] Đổi Ảnh Bìa cho Page "${pageName}" (${pageId})...`);
+        await tab.goto(`https://www.facebook.com/profile.php?id=${pageId}`, {
+          waitUntil: 'domcontentloaded',
+          timeout: 25000,
+        }).catch(() => {});
+        await tab.waitForTimeout(2000);
+
+        // Chuyển sang danh tính Page nếu cần
+        const switchBtn = tab.locator('div[role="button"]:has-text("Chuyển ngay"), div[role="button"]:has-text("Chuyển"), [aria-label="Chuyển ngay"], [aria-label="Chuyển"]').first();
+        if (await switchBtn.isVisible().catch(() => false)) {
+          await switchBtn.click({ force: true }).catch(() => {});
+          await tab.waitForTimeout(2000);
+          const confirmBtn = tab.locator('div[role="dialog"] div[role="button"]:has-text("Chuyển")').first();
+          if (await confirmBtn.isVisible().catch(() => false)) {
+            await confirmBtn.click({ force: true }).catch(() => {});
+            await tab.waitForTimeout(2500);
+          }
+        }
+
+        await context.addCookies([{ name: 'i_user', value: pageId, domain: '.facebook.com', path: '/', secure: true, sameSite: 'Lax' }]);
+        await tab.waitForTimeout(1000);
+        await tab.keyboard.press('Escape').catch(() => {});
+
+        // Tìm nút Đổi ảnh bìa (Cover Button)
+        const coverBtn = tab.locator(
+          'div[aria-label*="ảnh bìa" i], div[aria-label*="cover photo" i], div[role="button"]:has-text("Chỉnh sửa ảnh bìa"), div[role="button"]:has-text("Edit cover photo"), div[role="button"]:has-text("Thêm ảnh bìa"), div[role="button"]:has-text("Add cover photo")'
+        ).first();
+
+        if ((await coverBtn.count().catch(() => 0)) === 0 || !(await coverBtn.isVisible().catch(() => false))) {
+          throw new Error('Không tìm thấy nút chỉnh sửa Ảnh Bìa trên Fanpage');
+        }
+
+        await coverBtn.click({ force: true });
+        await tab.waitForTimeout(1500);
+
+        // Trong popup menu, chọn "Tải ảnh lên"
+        let uploadSuccess = false;
+        const uploadMenuItem = tab.locator('div[role="menuitem"]:has-text("Tải ảnh lên"), div[role="menuitem"]:has-text("Upload photo"), div[role="button"]:has-text("Tải ảnh lên")').first();
+        if ((await uploadMenuItem.count().catch(() => 0)) > 0 && (await uploadMenuItem.isVisible().catch(() => false))) {
+          const [fileChooser] = await Promise.all([
+            tab.waitForEvent('filechooser', { timeout: 12000 }).catch(() => null),
+            uploadMenuItem.click({ force: true }).catch(() => {}),
+          ]);
+          if (fileChooser) {
+            await fileChooser.setFiles(localTempFile);
+            uploadSuccess = true;
+          }
+        }
+
+        if (!uploadSuccess) {
+          const fileInput = tab.locator('input[type="file"]').first();
+          if ((await fileInput.count().catch(() => 0)) > 0) {
+            await fileInput.setInputFiles(localTempFile);
+            uploadSuccess = true;
+          }
+        }
+
+        if (!uploadSuccess) {
+          throw new Error('Không thể kích hoạt hộp thoại chọn tệp Ảnh Bìa');
+        }
+
+        // Bấm "Lưu thay đổi" (Save changes)
+        await tab.waitForTimeout(3500);
+        const saveCoverBtn = tab.locator(
+          'div[role="button"]:has-text("Lưu thay đổi"), button:has-text("Lưu thay đổi"), div[role="button"]:has-text("Save changes"), button:has-text("Save changes")'
+        ).first();
+
+        if (await saveCoverBtn.isVisible().catch(() => false)) {
+          await saveCoverBtn.click({ force: true });
+          console.log(`[CoverStudio] 💾 Đã bấm "Lưu thay đổi" Ảnh Bìa cho Page "${pageName}"`);
+          await tab.waitForTimeout(3000);
+        }
+
+        const duration = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+        updatedCount++;
+        coverCache[pageId] = {
+          pageId,
+          pageName,
+          hasCover: true,
+          updatedAt: new Date().toISOString(),
+        };
+        saveCoverCache(coverCache);
+
+        const detail = {
+          pageId,
+          pageName,
+          status: 'SUCCESS',
+          duration,
+          message: `Đổi ảnh bìa thành công (${duration})`,
+        };
+        details.push(detail);
+
+        if (typeof onProgress === 'function') {
+          onProgress({
+            type: 'PAGE_FINISH',
+            index: i + 1,
+            total: pagesToUpdate.length,
+            percent: Math.round(((i + 1) / pagesToUpdate.length) * 100),
+            ...detail,
+          });
+        }
+      } catch (err) {
+        console.warn(`[CoverStudio] ⚠️ Lỗi khi đổi ảnh bìa "${pageName}": ${err.message}`);
+        const duration = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+        const detail = {
+          pageId,
+          pageName,
+          status: 'FAILED',
+          duration,
+          error: err.message,
+        };
+        details.push(detail);
+        if (typeof onProgress === 'function') {
+          onProgress({
+            type: 'PAGE_FINISH',
+            index: i + 1,
+            total: pagesToUpdate.length,
+            percent: Math.round(((i + 1) / pagesToUpdate.length) * 100),
+            ...detail,
+          });
+        }
+      } finally {
+        if (localTempFile && localTempFile.includes(TEMP_AVATARS_DIR)) {
+          fs.unlink(localTempFile, () => {});
+        }
+      }
+
+      if (i < pagesToUpdate.length - 1) {
+        const sleepMs = Math.max(1000, Number(delaySeconds) * 1000);
+        await new Promise((r) => setTimeout(r, sleepMs));
+      }
+    }
+  } finally {
+    if (context) await context.close().catch(() => {});
+  }
+
+  return { success: true, total: pagesToUpdate.length, updatedCount, details };
+}
+
 module.exports = {
   checkPagesAvatarStatus,
   getAvatarPresets,
+  getCoverPresets,
   downloadImageToTemp,
   bulkUpdateFanpageAvatars,
+  bulkUpdateFanpageCovers,
   loadAvatarCache,
   saveAvatarCache,
+  loadCoverCache,
+  saveCoverCache,
   scanLiveFanpageAvatars,
 };

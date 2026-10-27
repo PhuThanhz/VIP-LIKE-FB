@@ -13,12 +13,19 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-// index.html đã gán class lên <html> trước khi React chạy, đọc lại từ đó để khớp
+// Mặc định khởi động ở chế độ Sáng (Radiant Clean) trừ khi người dùng đã chọn Tối
 const readInitialMode = (): ThemeMode => {
-  if (typeof document !== 'undefined' && document.documentElement.classList.contains('light')) {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved === 'dark') return 'dark';
+    if (saved === 'light') return 'light';
+    if (typeof document !== 'undefined' && document.documentElement.classList.contains('dark')) {
+      return 'dark';
+    }
+    return 'light';
+  } catch {
     return 'light';
   }
-  return 'dark';
 };
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

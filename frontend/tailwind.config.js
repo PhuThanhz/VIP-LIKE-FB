@@ -47,10 +47,10 @@ const palette = (name) =>
 
 // Màu nền ngữ nghĩa: [Tối, Sáng]
 const SEMANTIC = {
-  app: ['#070b13', '#f5f7fb'],
-  surface: ['#0c1220', '#ffffff'],
-  card: ['#0b1325', '#ffffff'],
-  'surface-2': ['#0d1527', '#ffffff'],
+  app: ['#0f172a', '#f8fafc'],
+  surface: ['#1e293b', '#ffffff'],
+  card: ['#1e293b', '#ffffff'],
+  'surface-2': ['#243247', '#f1f5f9'],
   white: ['#ffffff', colors.slate[900]],
 };
 
