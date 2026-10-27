@@ -218,29 +218,31 @@
     // 1. Tắt popup quảng cáo / chào mừng nếu có
     await dismissFacebookPopups();
 
-    // 2. Tìm nút Camera trên Avatar Page
-    let cameraBtn = null;
-    for (let retry = 0; retry < 6; retry++) {
-      cameraBtn = findCameraBtn();
-      if (cameraBtn) break;
+    // 2. Tìm điểm kích hoạt đổi Avatar (Trigger: Nút Camera, Ảnh tròn đại diện, hoặc Nút Chỉnh sửa)
+    let trigger = null;
+    for (let retry = 0; retry < 8; retry++) {
+      trigger = findAvatarTrigger();
+      if (trigger) break;
       await sleep(1000);
       await dismissFacebookPopups();
     }
 
-    if (!cameraBtn) {
-      throw new Error('Không tìm thấy nút Camera đại diện (Hãy chắc chắn nick có quyền Admin Page)');
+    if (!trigger) {
+      throw new Error('Không tìm thấy điểm kích hoạt Avatar trên Fanpage này');
     }
 
-    console.log('[VIPLIKE Avatar] Đã tìm thấy nút Camera, đang click...');
-    cameraBtn.click();
-    await sleep(1800);
+    console.log('[VIPLIKE Avatar] 🎯 Đã tìm thấy điểm kích hoạt, đang click...', trigger);
+    trigger.click();
+    await sleep(2000);
 
-    // 3. Nhấp chọn "Chọn ảnh đại diện" hoặc "Tải ảnh lên" trong menu bật lên
+    // 3. Xử lý sau khi click trigger:
+    // 3a. Nếu mở Menu popup (Chọn ảnh đại diện / Cập nhật ảnh đại diện / Tải ảnh lên)
     const menuButtons = Array.from(document.querySelectorAll('div[role="menuitem"], div[role="button"], span'));
     const uploadOption = menuButtons.find((el) => {
-      const text = (el.innerText || el.textContent || '').trim().toLowerCase();
+      const text = (el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim().toLowerCase();
       return (
         text.includes('chọn ảnh đại diện') ||
+        text.includes('cập nhật ảnh đại diện') ||
         text.includes('tải ảnh lên') ||
         text.includes('choose profile picture') ||
         text.includes('upload photo')
@@ -248,43 +250,64 @@
     });
 
     if (uploadOption) {
+      console.log('[VIPLIKE Avatar] Click mục menu:', uploadOption.innerText || uploadOption.textContent);
       uploadOption.click();
-      await sleep(1500);
+      await sleep(1800);
+    }
+
+    // 3b. Nếu mở Modal "Chỉnh sửa trang cá nhân" (do click nút "Chỉnh sửa")
+    // Trong modal này có nút "Thêm" hoặc "Chỉnh sửa" dưới mục Ảnh đại diện
+    const dialogBtns = Array.from(document.querySelectorAll('div[role="dialog"] div[role="button"], div[role="dialog"] button'));
+    const modalAvatarEditBtn = dialogBtns.find((b) => {
+      const txt = (b.innerText || b.getAttribute('aria-label') || '').trim().toLowerCase();
+      return (
+        txt === 'chỉnh sửa' ||
+        txt === 'thêm' ||
+        txt.includes('chỉnh sửa ảnh') ||
+        txt.includes('thêm ảnh') ||
+        txt === 'add' ||
+        txt === 'edit'
+      );
+    });
+
+    if (modalAvatarEditBtn && !document.querySelector('div[role="dialog"] input[type="file"]')) {
+      console.log('[VIPLIKE Avatar] Click nút đổi ảnh trong Modal Chỉnh sửa trang cá nhân...');
+      modalAvatarEditBtn.click();
+      await sleep(1800);
     }
 
     // 4. Tìm thẻ input[type="file"]
     let fileInput = document.querySelector('div[role="dialog"] input[type="file"], input[type="file"]');
     if (!fileInput) {
       // Tìm nút "Tải ảnh lên" bên trong Dialog
-      const dialogBtns = Array.from(document.querySelectorAll('div[role="dialog"] div[role="button"], div[role="dialog"] button'));
-      const uploadDialogBtn = dialogBtns.find((b) => {
-        const txt = (b.innerText || '').toLowerCase();
+      const dialogUploadBtn = Array.from(document.querySelectorAll('div[role="dialog"] div[role="button"], div[role="dialog"] button')).find((b) => {
+        const txt = (b.innerText || b.getAttribute('aria-label') || '').toLowerCase();
         return txt.includes('tải ảnh') || txt.includes('upload');
       });
-      if (uploadDialogBtn) {
-        uploadDialogBtn.click();
-        await sleep(1200);
+      if (dialogUploadBtn) {
+        dialogUploadBtn.click();
+        await sleep(1500);
         fileInput = document.querySelector('div[role="dialog"] input[type="file"], input[type="file"]');
       }
     }
 
     if (!fileInput) {
-      throw new Error('Không tìm thấy input[type="file"] tải ảnh');
+      throw new Error('Không tìm thấy ô chọn tệp ảnh của Facebook');
     }
 
     // 5. Nạp file ảnh bằng DataTransfer
-    console.log('[VIPLIKE Avatar] Nạp file ảnh vào input[type="file"]...');
+    console.log('[VIPLIKE Avatar] 📁 Nạp file ảnh vào input[type="file"]...');
     const dt = new DataTransfer();
     dt.items.add(imageFile);
     fileInput.files = dt.files;
     fileInput.dispatchEvent(new Event('input', { bubbles: true }));
     fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 
-    // 6. Chờ nút "Lưu" (Save) xuất hiện và nhấp Lưu (tối đa 15s)
-    console.log('[VIPLIKE Avatar] Đang đợi nút "Lưu" xuất hiện...');
+    // 6. Chờ nút "Lưu" (Save) xuất hiện và nhấp Lưu (tối đa 18s)
+    console.log('[VIPLIKE Avatar] ⏳ Đang đợi nút "Lưu" xuất hiện...');
     let saveClicked = false;
 
-    for (let s = 0; s < 15; s++) {
+    for (let s = 0; s < 18; s++) {
       await sleep(1000);
       const allButtons = Array.from(
         document.querySelectorAll('div[role="dialog"] div[role="button"], div[role="dialog"] button, [aria-label="Lưu"], [aria-label="Save"]')
@@ -348,57 +371,60 @@
     }
   }
 
-  function findCameraBtn() {
-    // 1. Tìm trực tiếp bằng các nhãn aria-label phổ biến của Facebook tiếng Việt & Anh
-    const directCandidates = Array.from(
-      document.querySelectorAll(
-        'div[aria-label*="ảnh đại diện"], div[aria-label*="Hành động với ảnh đại diện"], div[aria-label*="Cập nhật ảnh đại diện"], div[aria-label*="Chỉnh sửa ảnh đại diện"], div[aria-label*="Profile picture" i], div[aria-label*="Update profile picture" i], div[aria-label*="Avatar" i]'
-      )
+  // Tìm điểm kích hoạt đổi Avatar với 3 chiến lược linh hoạt
+  function findAvatarTrigger() {
+    // Chiến lược 1: Quét tất cả các phần tử có aria-label liên quan đến Avatar (không phân biệt hoa thường)
+    const elementsWithAria = Array.from(
+      document.querySelectorAll('div[role="button"], button, [aria-label], svg, image')
     );
 
-    for (const el of directCandidates) {
+    for (const el of elementsWithAria) {
+      const label = (el.getAttribute('aria-label') || '').toLowerCase();
+      if (
+        label.includes('ảnh đại diện') ||
+        label.includes('đại diện') ||
+        label.includes('hành động với ảnh') ||
+        label.includes('cập nhật ảnh') ||
+        label.includes('chỉnh sửa ảnh') ||
+        label.includes('profile picture') ||
+        label.includes('update profile') ||
+        label.includes('avatar')
+      ) {
+        const rect = el.getBoundingClientRect();
+        const isTopRightNav = rect.top < 60 && rect.right > window.innerWidth - 150;
+        if (!isTopRightNav && rect.width > 0 && rect.height > 0) {
+          return el.closest('div[role="button"], button, a') || el;
+        }
+      }
+    }
+
+    // Chiến lược 2: Click trực tiếp vào khung tròn Avatar / Silhouette lớn trên Fanpage
+    const roundAvatars = Array.from(
+      document.querySelectorAll('svg[role="img"], div[role="img"], image, img')
+    ).filter((el) => {
       const rect = el.getBoundingClientRect();
-      const isTopRightNav = rect.top < 60 && rect.right > window.innerWidth - 150;
-      if (!isTopRightNav && rect.width > 0 && rect.height > 0) {
-        return el;
-      }
+      const isTopNav = rect.top < 60;
+      // Khung avatar chính lớn (kích thước >= 70px, nằm trong vùng header)
+      return !isTopNav && rect.width >= 70 && rect.height >= 70 && rect.top < 500 && rect.top > 80;
+    });
+
+    if (roundAvatars.length > 0) {
+      const avatarEl = roundAvatars[0];
+      return avatarEl.closest('div[role="button"], a, div[tabindex="0"]') || avatarEl;
     }
 
-    // 2. Tìm qua icon camera bên trong nút hành động
-    const cameraIcons = Array.from(document.querySelectorAll('i, svg'));
-    for (const ic of cameraIcons) {
-      const label = (ic.getAttribute('aria-label') || '').toLowerCase();
-      if (label.includes('camera') || label.includes('ảnh đại diện') || label.includes('đại diện')) {
-        const btn = ic.closest('div[role="button"], button');
-        if (btn) {
-          const rect = btn.getBoundingClientRect();
-          const isTopRightNav = rect.top < 60 && rect.right > window.innerWidth - 150;
-          if (!isTopRightNav && rect.width > 0 && rect.height > 0) {
-            return btn;
-          }
-        }
-      }
-    }
+    // Chiến lược 3: Click vào nút "Chỉnh sửa" (có icon bút chì kế bên tên Fanpage)
+    const editBtns = Array.from(
+      document.querySelectorAll('div[role="button"], button')
+    ).filter((b) => {
+      const txt = (b.innerText || b.getAttribute('aria-label') || '').trim().toLowerCase();
+      const isEdit = txt === 'chỉnh sửa' || txt === 'chỉnh sửa trang cá nhân' || txt === 'edit' || txt === 'edit profile';
+      const rect = b.getBoundingClientRect();
+      return isEdit && rect.top < 500 && rect.top > 120 && rect.width > 0;
+    });
 
-    // 3. Tìm nút tròn nhỏ đè ngay trên khung Avatar chính của Fanpage
-    const mainAvatarImg = document.querySelector('svg[role="img"] image, a[href*="/photo"] img, a[href*="profile"] img');
-    if (mainAvatarImg) {
-      const avatarRect = mainAvatarImg.getBoundingClientRect();
-      if (avatarRect.width >= 50 && avatarRect.height >= 50 && avatarRect.top < 450) {
-        const nearbyBtns = Array.from(document.querySelectorAll('div[role="button"]')).filter((b) => {
-          const r = b.getBoundingClientRect();
-          return (
-            Math.abs(r.left - avatarRect.left) < 180 &&
-            Math.abs(r.top - avatarRect.top) < 180 &&
-            r.width > 0 &&
-            r.width < 90
-          );
-        });
-        if (nearbyBtns.length > 0) {
-          const camBtn = nearbyBtns.find((b) => (b.getAttribute('aria-label') || '').includes('ảnh') || b.querySelector('i, svg'));
-          return camBtn || nearbyBtns[0];
-        }
-      }
+    if (editBtns.length > 0) {
+      return editBtns[0];
     }
 
     return null;
