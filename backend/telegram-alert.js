@@ -649,6 +649,19 @@ async function handleIncomingMessage(text, { getStatusText, onBuffRequested, get
     return sendTelegramMessage(body);
   }
 
+  if (cmd === '/queue') {
+    const body = getQueueText ? await getQueueText() : 'Chưa có thông tin hàng đợi.';
+    const replyMarkup = {
+      inline_keyboard: [
+        [
+          { text: '🛑 Dừng ngay', callback_data: 'stop' },
+          { text: '📊 Tình trạng hệ thống', callback_data: 'status' },
+        ],
+      ],
+    };
+    return sendTelegramMessage(body, 'HTML', replyMarkup);
+  }
+
   if (cmd === '/help' || cmd === '/start') {
     return sendTelegramMessage(
       [
@@ -662,7 +675,8 @@ async function handleIncomingMessage(text, { getStatusText, onBuffRequested, get
         `<i>(Hoặc chỉ cần dán mỗi link bài viết, Bot sẽ hiện menu chọn nhanh số like!)</i>`,
         ``,
         `🛠️ <b>CÁC LỆNH HỆ THỐNG:</b>`,
-        `/status — Xem tình trạng hàng đợi & dàn Via`,
+        `/status — Xem tình trạng tổng quan & dàn Via`,
+        `/queue — Xem chi tiết các bài đang chạy & chờ`,
         `/pages — Xem chi tiết số Fanpage khả dụng`,
         `/stop — Dừng khẩn cấp toàn bộ hệ thống`,
         `/resume — Khôi phục hoạt động hàng đợi`,

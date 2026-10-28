@@ -844,11 +844,12 @@ async function findLikeButtonOnTab(tab) {
         // Bỏ qua nút đếm số cảm xúc (ví dụ "Thích: 2 người")
         if (/^(?:Thích|Like):\s*\d+/i.test(aria)) return false;
 
-        // Khớp chính xác aria-label của nút Like
+        // Khớp chính xác aria-label của nút Like / Cảm xúc
         if (
           aria === 'Thích' || aria === 'Like' ||
           aria === 'Gỡ Thích' || aria === 'Unlike' ||
-          aria === 'Đã thích' || aria === 'Liked' ||
+          aria.startsWith('Gỡ ') || aria.startsWith('Remove ') ||
+          aria.includes('Đã thích') || aria.includes('Liked') ||
           aria === 'Thích bài viết' || aria === 'Like post' ||
           aria === 'Bày tỏ cảm xúc' || aria === 'React' ||
           aria === 'Reaction'
@@ -938,12 +939,31 @@ async function checkActionBlockedOnTab(tab) {
       'div[role="dialog"]:has-text("You’re Temporarily Blocked"), ' +
       'div[role="dialog"]:has-text("Action Blocked"), ' +
       'div[role="dialog"]:has-text("Thử lại sau"), ' +
-      'div[role="dialog"]:has-text("Try again later")'
+      'div[role="dialog"]:has-text("Try again later"), ' +
+      'div[role="dialog"]:has-text("Không thể bày tỏ cảm xúc"), ' +
+      'div[role="dialog"]:has-text("Tài khoản của bạn bị hạn chế"), ' +
+      'div[role="dialog"]:has-text("Your account is restricted")'
     ).first();
     return (await blocked.count().catch(() => 0)) > 0 && (await blocked.isVisible().catch(() => false));
   } catch (e) {
     return false;
   }
+}
+
+/** Tự động đóng các popup / overlay làm phiền của Facebook (Lúc khác, Not now, Đóng, v.v.) */
+async function dismissFacebookOverlays(tab) {
+  try {
+    await tab.evaluate(() => {
+      const dismissTexts = ['lúc khác', 'not now', 'để sau', 'đóng', 'close', 'hủy', 'cancel'];
+      const buttons = Array.from(document.querySelectorAll('div[role="dialog"] div[role="button"], div[role="dialog"] [aria-label="Đóng"], div[role="dialog"] [aria-label="Close"]'));
+      for (const btn of buttons) {
+        const t = (btn.innerText || btn.getAttribute('aria-label') || '').trim().toLowerCase();
+        if (dismissTexts.includes(t)) {
+          btn.click();
+        }
+      }
+    }).catch(() => {});
+  } catch (_) {}
 }
 
 async function dispatchSyntheticClick(el) {
@@ -1200,7 +1220,8 @@ async function executePageInteraction({
         '[aria-label*="Giọng nói hiện có"], [aria-label*="chuyển trang cá nhân"], [aria-label*="Voice switcher"], ' +
         '[aria-label*="Tương tác với tư cách"], [aria-label*="Bình chọn giọng nói"], [aria-label*="Bình luận dưới tên"], ' +
         '[aria-label*="Bình luận với tư cách"], [aria-label*="Comment as"], [aria-label*="Tương tác bằng"], ' +
-        '[aria-label*="Switch to profile"], [aria-label*="Interact as"], div[aria-haspopup="menu"][aria-label*="trang cá nhân"], ' +
+        '[aria-label*="Switch to profile"], [aria-label*="Interact as"], [aria-label*="Chọn cách tương tác"], ' +
+        '[aria-label*="Choose how to interact"], div[aria-haspopup="menu"][aria-label*="trang cá nhân"], ' +
         'div[aria-haspopup="menu"][aria-label*="profile" i]'
       ).first();
 
@@ -1326,6 +1347,9 @@ async function executePageInteraction({
 
     // BƯỚC 4: THẢ LIKE / REACTION
     if (enableLike) {
+      // 0. Đóng các popup quảng cáo / modal làm phiền của Facebook nếu có
+      await dismissFacebookOverlays(tab);
+
       // 1. Đóng cookie banner nếu xuất hiện che màn hình (không đóng dialog bài viết)
       const cookieBanner = tab.locator('div[role="dialog"]:has-text("Cookie"), div[role="dialog"]:has-text("Cookies")').first();
       if (await cookieBanner.isVisible({ timeout: 400 }).catch(() => false)) {
@@ -1910,6 +1934,13 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
               : Math.max(2500, cooldownDurationMs) + Math.floor(Math.random() * 1500);
             console.log(`[FB-Buff]${workerTag} 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. Nghỉ ngơi ${(batchRest / 1000).toFixed(1)}s...`);
             await new Promise((r) => setTimeout(r, batchRest));
+          }
+
+          // Giảm tải RAM cho Chromium khi chạy lô lớn (200 - 500 page)
+          if (i > 0 && i % 40 === 0) {
+            await workerTab.evaluate(() => {
+              if (window.gc) window.gc();
+            }).catch(() => {});
           }
 
           // Độ trễ tối ưu giữa các page

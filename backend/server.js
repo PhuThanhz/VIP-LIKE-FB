@@ -2846,11 +2846,87 @@ async function getPagesStatsForTelegram() {
   }
 }
 
-// Nhận lệnh /status /stop /resume và điều khiển 2 chiều từ Telegram
+// Báo cáo chi tiết các bài trong hàng đợi
+async function buildQueueText() {
+  const q = loadBuffQueue();
+  const items = q.items || [];
+  const queued = items.filter((it) => it.status === 'QUEUED');
+  const running = items.find((it) => it.status === 'RUNNING');
+
+  const lines = [
+    `📋 <b>[CHI TIẾT HÀNG ĐỢI XỬ LÝ]</b>`,
+    `━━━━━━━━━━━━━━━━━━`,
+  ];
+
+  if (running) {
+    const prog = running.progress || {};
+    const percent = prog.total > 0 ? Math.round(((prog.done || 0) / prog.total) * 100) : 0;
+    lines.push(`⚡ <b>Đang thực thi:</b>`);
+    lines.push(`• Link: <a href="${running.targetUrl}">${running.targetUrl}</a>`);
+    lines.push(`• Tiến độ: <b>${prog.success || 0}/${prog.total || running.targetLikes}</b> like (${percent}%)`);
+    lines.push(`• Cảm xúc: ${running.reactionType}`);
+    lines.push(`━━━━━━━━━━━━━━━━━━`);
+  } else {
+    lines.push(`🟢 <i>Hiện không có đơn nào đang chạy. Hệ thống sẵn sàng!</i>`);
+    lines.push(`━━━━━━━━━━━━━━━━━━`);
+  }
+
+  if (queued.length > 0) {
+    lines.push(`⏳ <b>Đang xếp hàng chờ (${queued.length} bài):</b>`);
+    queued.slice(0, 5).forEach((it, idx) => {
+      lines.push(`${idx + 1}. <a href="${it.targetUrl}">${it.targetUrl.slice(0, 42)}...</a> (${it.targetLikes} like - ${it.reactionType})`);
+    });
+    if (queued.length > 5) {
+      lines.push(`<i>... và còn ${queued.length - 5} bài nữa trong hàng đợi.</i>`);
+    }
+  } else {
+    lines.push(`⏳ Hàng đợi trống (0 bài chờ).`);
+  }
+
+  return lines.join('\n');
+}
+
+// Tự động dọn dẹp các file ảnh debug / ảnh nghiệm thu cũ (> 3 ngày) tránh đầy dung lượng đĩa
+function cleanOldScreenshots(maxAgeDays = 3) {
+  try {
+    const dirs = [
+      path.join(__dirname, 'data', 'screenshots'),
+      path.join(__dirname, 'data', 'debug_screens'),
+    ];
+    const maxAgeMs = maxAgeDays * 24 * 3600 * 1000;
+    let cleaned = 0;
+
+    for (const dir of dirs) {
+      if (!fs.existsSync(dir)) continue;
+      const files = fs.readdirSync(dir);
+      for (const file of files) {
+        if (!file.endsWith('.png') && !file.endsWith('.jpg')) continue;
+        const fp = path.join(dir, file);
+        try {
+          const stats = fs.statSync(fp);
+          if (Date.now() - stats.mtimeMs > maxAgeMs) {
+            fs.unlinkSync(fp);
+            cleaned++;
+          }
+        } catch (_) {}
+      }
+    }
+    if (cleaned > 0) {
+      console.log(`[StorageCleaner] 🧹 Đã dọn dẹp ${cleaned} file ảnh chụp debug/nghiệm thu cũ (> ${maxAgeDays} ngày)`);
+    }
+  } catch (err) {
+    console.warn('[StorageCleaner] ⚠️ Lỗi dọn dẹp ảnh cũ:', err.message);
+  }
+}
+cleanOldScreenshots(3);
+setInterval(() => cleanOldScreenshots(3), 6 * 3600 * 1000);
+
+// Nhận lệnh /status /queue /pages /stop /resume và điều khiển 2 chiều từ Telegram
 startCommandListener({
   getStatusText: buildStatusText,
   onBuffRequested: handleBuffRequestedFromTelegram,
   getPagesStats: getPagesStatsForTelegram,
+  getQueueText: buildQueueText,
 });
 
 // Lấy dữ liệu báo cáo tổng quan ngày (cho trang Săn bài & VIP Like)
