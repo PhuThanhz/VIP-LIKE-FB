@@ -54,6 +54,7 @@ import {
   SendOutlined,
   BellOutlined,
   RocketFilled,
+  ShareAltOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
@@ -85,6 +86,7 @@ interface AutoBuffResultDetail {
   status: 'WAITING' | 'RUNNING' | 'SUCCESS' | 'ALREADY_LIKED' | 'UNVERIFIED' | 'NO_BUTTON' | 'ERROR' | 'SKIPPED';
   likeStatus?: 'WAITING' | 'RUNNING' | 'SUCCESS' | 'ALREADY_LIKED' | 'UNVERIFIED' | 'NO_BUTTON' | 'ERROR' | 'SKIPPED';
   commentStatus?: 'WAITING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'ERROR';
+  shareStatus?: 'WAITING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'ERROR';
   commentText?: string;
   message?: string;
   error?: string;
@@ -791,6 +793,20 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     ].join('\n')
   );
 
+  // Buff Share: Tự động chia sẻ bài viết lên tường Fanpage
+  const [enableShare, setEnableShare] = useState<boolean>(false);
+  const [seedingPresets, setSeedingPresets] = useState<{ id: string; name: string; badge?: string; comments: string[] }[]>([]);
+
+  useEffect(() => {
+    api.get('/api/buff-seeding-presets')
+      .then((res) => {
+        if (res.data?.success && Array.isArray(res.data.presets)) {
+          setSeedingPresets(res.data.presets);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Auto-Buff Queue State (Hunter-Ready & Background Pipeline)
   const [queueItems, setQueueItems] = useState<any[]>([]);
   const [queueUrlInput, setQueueUrlInput] = useState<string>('');
@@ -850,6 +866,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       reactionType: selectedReaction,
       enableLike: engagementMode !== 'COMMENT_ONLY',
       enableComment: engagementMode !== 'LIKE_ONLY',
+      enableShare,
       comments:
         engagementMode !== 'LIKE_ONLY'
           ? commentListText.split('\n').map((c) => c.trim()).filter(Boolean)
@@ -2250,6 +2267,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           speedMode,
           enableLike: engagementMode !== 'COMMENT_ONLY',
           enableComment: engagementMode !== 'LIKE_ONLY',
+          enableShare,
           enableHumanBehavior,
           fastSwitch,
           cooldownEvery: antiCheckpointGuard ? 15 : 9999,
@@ -2565,6 +2583,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               speedMode,
               enableLike: engagementMode !== 'COMMENT_ONLY',
               enableComment: engagementMode !== 'LIKE_ONLY',
+              enableShare,
               enableHumanBehavior,
               fastSwitch,
               cooldownEvery: antiCheckpointGuard ? 15 : 9999,
@@ -3105,6 +3124,23 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           </div>
                         </div>
 
+                        {/* Tùy chọn Buff Share (Chia sẻ lên tường Fanpage) */}
+                        <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 transition-all flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-base shadow-sm shadow-emerald-500/10">
+                              <ShareAltOutlined />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-slate-200">Chia sẻ bài viết lên tường Fanpage (Buff Share)</span>
+                                <Tag color="green" className="m-0 text-[10px] font-bold border-0 px-1.5 py-0 rounded">MỚI • VIRAL</Tag>
+                              </div>
+                              <p className="text-[11px] text-slate-400 m-0 mt-0.5">Fanpage tự động bấm Chia sẻ ngay về dòng thời gian, kéo reach và tương tác chéo cực mạnh</p>
+                            </div>
+                          </div>
+                          <Switch checked={enableShare} onChange={setEnableShare} />
+                        </div>
+
                         {/* 2. Reaction Picker: 7 Cảm xúc Facebook + 2 Thẻ Trộn Tự Nhiên */}
                         {engagementMode !== 'COMMENT_ONLY' && (
                           <div className="space-y-2.5">
@@ -3431,10 +3467,23 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               </div>
                             </div>
 
-                            {/* Cảnh báo từ khóa spam */}
-                            {detectedSpamKeywords.length > 0 && (
-                              <div className="p-2 rounded-lg bg-rose-950/40 border border-rose-500/40 text-[11px] text-rose-300">
-                                <b>Từ khóa nhạy cảm "{detectedSpamKeywords.join(', ')}":</b> Bot nhóm có thể tự động chặn. Bấm <b>"Mẫu Seeding"</b> để dùng câu tự nhiên!
+                            {/* Kho kịch bản Seeding có sẵn (1-Click Apply) */}
+                            {seedingPresets.length > 0 && (
+                              <div className="flex items-center gap-1.5 flex-wrap p-2 rounded-lg bg-slate-900/60 border border-slate-800">
+                                <span className="text-[11px] font-semibold text-slate-400">⚡ Gợi ý kịch bản:</span>
+                                {seedingPresets.map((pr) => (
+                                  <button
+                                    key={pr.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setCommentListText(pr.comments.join('\n'));
+                                      message.success(`Đã nạp kho seeding: ${pr.name}`);
+                                    }}
+                                    className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-blue-950/60 hover:bg-blue-900/80 text-blue-300 border border-blue-800/50 transition-colors cursor-pointer"
+                                  >
+                                    {pr.badge ? `[${pr.badge}] ` : ''}{pr.name}
+                                  </button>
+                                ))}
                               </div>
                             )}
 

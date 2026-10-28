@@ -667,12 +667,14 @@ async function handleIncomingMessage(text, { getStatusText, onBuffRequested, get
       [
         `🤖 <b>HỆ THỐNG VIPLIKE RADIANT - ĐIỀU KHIỂN TELEGRAM</b>`,
         `━━━━━━━━━━━━━━━━━━`,
-        `👉 <b>CÁCH BUFF LIKE SIÊU TỐC ("CHAT LÀ BUFF"):</b>`,
-        `Chỉ cần gửi link Facebook kèm số like và cảm xúc:`,
-        `• <code>https://facebook.com/share/p/xxx 100 LIKE</code>`,
-        `• <code>https://facebook.com/share/p/xxx 200 LOVE</code>`,
-        `• <code>https://facebook.com/share/p/xxx 500 RANDOM</code>`,
-        `<i>(Hoặc chỉ cần dán mỗi link bài viết, Bot sẽ hiện menu chọn nhanh số like!)</i>`,
+        `👉 <b>CÁCH BUFF TƯƠNG TÁC ("CHAT LÀ BUFF"):</b>`,
+        `Chỉ cần gửi link Facebook kèm số lượng và loại tương tác:`,
+        `• <code>https://facebook.com/share/p/xxx 100 LIKE</code> (Buff 100 Like)`,
+        `• <code>https://facebook.com/share/p/xxx 200 LOVE</code> (Buff 200 Tim)`,
+        `• <code>https://facebook.com/share/p/xxx 500 RANDOM</code> (Buff 500 Cảm xúc)`,
+        `• <code>https://facebook.com/share/p/xxx 20 SHARE</code> (Chia sẻ bài viết lên Fanpage)`,
+        `• <code>/share https://facebook.com/share/p/xxx 30</code> (Lệnh chia sẻ nhanh)`,
+        `<i>(Hoặc chỉ cần dán mỗi link bài viết, Bot sẽ hiện menu nút bấm chọn nhanh!)</i>`,
         ``,
         `🛠️ <b>CÁC LỆNH HỆ THỐNG:</b>`,
         `/status — Xem tình trạng tổng quan & dàn Via`,
@@ -689,16 +691,20 @@ async function handleIncomingMessage(text, { getStatusText, onBuffRequested, get
   const fbMatch = clean.match(/(https?:\/\/(?:www\.|m\.|web\.|mbasic\.)?(?:facebook\.com|fb\.watch)\/[^\s]+)/i);
   if (fbMatch) {
     const rawUrl = fbMatch[1];
-    const restText = clean.replace(rawUrl, '').replace(/\/buff\s*/i, '').trim();
+    const restText = clean.replace(rawUrl, '').replace(/\/buff\s*/i, '').replace(/\/share\s*/i, '').trim();
 
-    // Tìm số like
+    // Tìm số like/share
     const numMatch = restText.match(/\b(\d{1,5})\b/);
     const targetLikes = numMatch ? parseInt(numMatch[1], 10) : null;
 
-    // Tìm cảm xúc
+    // Tìm loại tương tác (Like, Love, Care, Share...)
     let reactionType = 'LIKE';
     const upperRest = restText.toUpperCase();
-    if (upperRest.includes('LOVE') || upperRest.includes('TIM')) reactionType = 'LOVE';
+    const isShareOrder = cmd === '/share' || upperRest.includes('SHARE') || upperRest.includes('CHIA SẺ') || upperRest.includes('CHIASE');
+
+    if (isShareOrder) {
+      reactionType = 'SHARE';
+    } else if (upperRest.includes('LOVE') || upperRest.includes('TIM')) reactionType = 'LOVE';
     else if (upperRest.includes('CARE') || upperRest.includes('THƯƠNG')) reactionType = 'CARE';
     else if (upperRest.includes('HAHA')) reactionType = 'HAHA';
     else if (upperRest.includes('WOW')) reactionType = 'WOW';
@@ -708,6 +714,16 @@ async function handleIncomingMessage(text, { getStatusText, onBuffRequested, get
 
     if (targetLikes && targetLikes > 0) {
       if (typeof onBuffRequested === 'function') {
+        if (isShareOrder) {
+          return onBuffRequested({
+            targetUrl: rawUrl,
+            targetLikes,
+            reactionType: 'SHARE',
+            enableLike: false,
+            enableShare: true,
+            source: 'TELEGRAM_DIRECT_SHARE',
+          });
+        }
         return onBuffRequested({ targetUrl: rawUrl, targetLikes, reactionType, source: 'TELEGRAM_DIRECT' });
       }
     } else {
@@ -723,7 +739,7 @@ async function handleIncomingMessage(text, { getStatusText, onBuffRequested, get
           [
             { text: '❤️ 100 Tim', callback_data: `qb:${shortId}:100:LOVE` },
             { text: '🎲 200 Random', callback_data: `qb:${shortId}:200:RANDOM_POSITIVE` },
-            { text: '🚀 500 Max', callback_data: `qb:${shortId}:500:LIKE` },
+            { text: '🚀 20 Share', callback_data: `qb:${shortId}:20:SHARE` },
           ],
           [
             { text: '❌ Huỷ bỏ', callback_data: 'cancel_buff' },
@@ -736,7 +752,7 @@ async function handleIncomingMessage(text, { getStatusText, onBuffRequested, get
           `━━━━━━━━━━━━━━━━━━`,
           `🔗 <b>Link:</b> <a href="${rawUrl}">${rawUrl}</a>`,
           ``,
-          `👇 <i>Bấm chọn nhanh số lượng cảm xúc bạn muốn buff:</i>`,
+          `👇 <i>Bấm chọn nhanh gói tương tác bạn muốn buff:</i>`,
         ].join('\n'),
         'HTML',
         replyMarkup
@@ -788,6 +804,16 @@ async function handleCallbackQuery(cq, { getStatusText, onBuffRequested, getPage
     }
 
     if (typeof onBuffRequested === 'function') {
+      if (reaction === 'SHARE') {
+        return onBuffRequested({
+          targetUrl,
+          targetLikes: count,
+          reactionType: 'SHARE',
+          enableLike: false,
+          enableShare: true,
+          source: 'TELEGRAM_QUICK_SHARE',
+        });
+      }
       return onBuffRequested({ targetUrl, targetLikes: count, reactionType: reaction, source: 'TELEGRAM_QUICK' });
     }
   }

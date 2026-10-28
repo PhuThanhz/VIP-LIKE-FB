@@ -725,6 +725,52 @@ const NATURAL_VI_VARIATIONS = [
   ' nè bạn ơi!', ' nhé bạn 💖', ' ạ, cảm ơn bạn!', ' nè 🥰', ' nha! 🍀',
 ];
 
+/**
+ * Thư viện Mẫu Kịch Bản Seeding Thông Minh (Smart Seeding Presets)
+ * Hỗ trợ Spintax đa tầng, chia theo nhóm mục tiêu thực chiến: Bán hàng, Khen ngợi viral, Thảo luận tranh luận
+ */
+const SEEDING_PRESETS = [
+  {
+    id: 'sales',
+    name: 'Bán hàng & Chốt đơn',
+    badge: 'Kinh doanh',
+    description: 'Tạo hiệu ứng khách hỏi mua, xin giá, kích thích mua sắm',
+    comments: [
+      '{Shop ơi|Dạ shop|Shop yêu}|{cho em xin giá|inbox tư vấn em với ạ|sản phẩm này còn hàng không shop|ship về {Hà Nội|Sài Gòn|Đà Nẵng|Cần Thơ} mất mấy ngày ạ}?',
+      '{Chất lượng|Hàng|Mẫu này} {đẹp quá|nhìn xịn xò thật sự|chuẩn chỉ ghê|rất ưng mắt}, {báo giá em với|ib em nha shop|tư vấn em chi tiết nhé|cho em đặt 1 cái với}! 🔥',
+      '{Đã nhận được hàng|Vừa nhận hôm qua xong|Đã mua lần 2}, {dùng thích lắm|ưng ý lắm luôn|chất lượng tuyệt vời|shop tư vấn nhiệt tình ghê}. {Sẽ ủng hộ tiếp|Cho shop 5 sao nha|Chúc shop đắt hàng}! ⭐⭐⭐⭐⭐',
+      '{Có màu khác không shop|Còn size {M|L|XL} không ạ|Bảo hành bao lâu vậy shop|Có được kiểm tra hàng trước khi nhận không ạ}?',
+      '{Sản phẩm|Dịch vụ} bên mình {uy tín|chuyên nghiệp|chu đáo} thật, {bạn bè mình ai cũng khen|lần sau lại ghé ủng hộ tiếp nha}! ❤️',
+    ],
+  },
+  {
+    id: 'praise',
+    name: 'Khen ngợi & Viral tương tác',
+    badge: 'Viral',
+    description: 'Đẩy mạnh tương tác tự nhiên, khen ngợi nội dung bài viết',
+    comments: [
+      '{Quá tuyệt vời|Xuất sắc luôn|Đỉnh của chóp|Quá ý nghĩa|Chuẩn luôn}|{ạ|nha|bác ơi|mọi người ơi}! {Rất thích|Cực kỳ thích|Rất ấn tượng với} {nội dung|bài viết|video|chia sẻ} này. ❤️',
+      '{Tuyệt vời quá|Đẹp mê ly|Đẳng cấp thực sự|Không còn gì để chê}! {Mong chờ|Hóng|Chúc bạn|Chúc kênh} {các bài viết tiếp theo|ngày càng phát triển|luôn thành công}! 👏✨',
+      '{Cảm ơn bạn đã chia sẻ|Thông tin rất hữu ích và giá trị|Nội dung chất lượng quá|Đúng cái mình đang tìm kiếm}! {Thả tim|Ủng hộ|Like mạnh} nha! 👍💯',
+      '{Bài viết này|Chia sẻ này} {rất truyền cảm hứng|rất thiết thực|đọc thấm từng chữ luôn}. {Cảm ơn tác giả nhiều|Chúc bạn luôn tràn đầy năng lượng}! 🔥',
+      '{10 điểm không có nhưng|Quá xịn sò|Chuẩn không cần chỉnh|Hay quá bạn ơi}! {Lan tỏa năng lượng tích cực này nhé}! 🌟',
+    ],
+  },
+  {
+    id: 'discussion',
+    name: 'Thảo luận & Hỏi đáp',
+    badge: 'Hỏi đáp',
+    description: 'Kích thích bình luận tranh luận, giữ chân người xem lâu hơn',
+    comments: [
+      '{Bác|Bạn|Chủ thớt|Admin} cho mình hỏi {thêm chút kinh nghiệm về cái này với|chút xíu với ạ|đoạn này xử lý thế nào vậy ạ}? {Thấy hay quá|Nhìn cuốn thật sự|Tò mò ghê}! 🤔',
+      '{Ai đã trải nghiệm|Có ai thử|Đã có bác nào dùng} cái này chưa ạ? {Cho em xin|Chia sẻ chút} review chân thực với nha! 🙌',
+      '{Quan điểm này rất hay|Góc nhìn độc đáo ghê|Đúng là chuẩn không cần chỉnh}, {mình cũng đồng tình hoàn toàn|rất nhất trí với bạn}! 💡',
+      '{Theo mọi người thì|Theo anh em thì} {phương án này|cách làm này} có {hiệu quả lâu dài|tối ưu nhất} không? Thảo luận cùng vui nào! 🚀',
+      '{Có tài liệu hay nguồn tham khảo thêm không bạn|Chia sẻ thêm về phần này được không ạ}? Đang rất quan tâm chủ đề này! 📚',
+    ],
+  },
+];
+
 const REACTED_ARIA_RE = /(Gỡ|Remove|Đã thích|Liked|Thay đổi|Change)/i;
 // Sau khi thả cảm xúc khác Like, nút Like hiển thị tên cảm xúc đó thay cho "Thích"
 const REACTION_NAME_RE = /^(Yêu thích|Thương thương|Haha|Wow|Buồn|Phẫn nộ|Love|Care|Sad|Angry)$/i;
@@ -1164,7 +1210,115 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '') {
 }
 
 /**
- * Thực hiện chuỗi tương tác (đổi danh tính, thả like, viết bình luận) cho 1 Fanpage trên 1 Tab
+ * Thực hiện chia sẻ bài viết (Share to Feed / Chia sẻ ngay) bằng danh tính Fanpage hiện tại trên Tab
+ * Giúp tăng chỉ số Share thật trên bài viết của Facebook
+ */
+async function executePostShare(tab, workerTag = '') {
+  try {
+    // 1. Tìm nút Chia sẻ trên bài viết
+    const shareSelectors = [
+      'div[role="button"][aria-label*="Chia sẻ" i]',
+      'div[role="button"][aria-label*="Share" i]',
+      '[aria-label="Gửi nội dung này cho bạn bè hoặc đăng lên trang cá nhân của bạn."]',
+      'div[role="article"] div[role="button"]:has-text("Chia sẻ")',
+      'div[role="article"] div[role="button"]:has-text("Share")',
+      'div[role="dialog"] div[role="button"]:has-text("Chia sẻ")',
+      'div[role="dialog"] div[role="button"]:has-text("Share")',
+      'div[role="button"]:has-text("Chia sẻ")',
+      'div[role="button"]:has-text("Share")',
+    ];
+
+    let shareBtn = null;
+    for (const sel of shareSelectors) {
+      const loc = tab.locator(sel);
+      const count = await loc.count().catch(() => 0);
+      for (let i = 0; i < count; i++) {
+        const item = loc.nth(i);
+        if (await item.isVisible().catch(() => false)) {
+          const aria = (await item.getAttribute('aria-label').catch(() => '')) || '';
+          const text = (await item.innerText().catch(() => '')) || '';
+          const combined = `${aria} ${text}`.trim().toLowerCase();
+          if (combined.includes('chia sẻ') || combined.includes('share')) {
+            shareBtn = item;
+            break;
+          }
+        }
+      }
+      if (shareBtn) break;
+    }
+
+    if (!shareBtn) {
+      console.warn(`[FB-Buff]${workerTag} ⚠️ Không tìm thấy nút Chia sẻ trên bài viết.`);
+      return { success: false, error: 'Không tìm thấy nút Chia sẻ trên bài viết' };
+    }
+
+    await shareBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await shareBtn.click({ force: true }).catch(async () => {
+      await dispatchSyntheticClick(shareBtn);
+    });
+    await tab.waitForTimeout(650);
+
+    // 2. Tìm tùy chọn "Chia sẻ ngay" hoặc "Chia sẻ lên Bảng feed"
+    const shareOptions = [
+      'div[role="menuitem"]:has-text("Chia sẻ ngay")',
+      'div[role="menuitem"]:has-text("Share now")',
+      'div[role="menuitem"]:has-text("Chia sẻ lên Bảng feed")',
+      'div[role="menuitem"]:has-text("Chia sẻ lên Bảng tin")',
+      'div[role="menuitem"]:has-text("Share to Feed")',
+      'div[role="button"]:has-text("Chia sẻ ngay")',
+      'div[role="button"]:has-text("Share now")',
+      'div[role="button"]:has-text("Chia sẻ lên Bảng feed")',
+      'div[role="button"]:has-text("Chia sẻ lên Bảng tin")',
+      'div[role="button"]:has-text("Share to Feed")',
+      'div[role="dialog"] div[role="button"]:has-text("Chia sẻ ngay")',
+      'div[role="dialog"] div[role="button"]:has-text("Share now")',
+    ];
+
+    let optionClicked = false;
+    for (const optSel of shareOptions) {
+      const opt = tab.locator(optSel).first();
+      if ((await opt.count().catch(() => 0)) > 0 && (await opt.isVisible().catch(() => false))) {
+        await opt.click({ force: true }).catch(async () => {
+          await dispatchSyntheticClick(opt);
+        });
+        optionClicked = true;
+        await tab.waitForTimeout(900);
+        break;
+      }
+    }
+
+    // 3. Nếu Facebook mở modal/dialog soạn bài chia sẻ (có nút Đăng / Post)
+    const postModalBtn = tab.locator(
+      'div[role="dialog"] div[role="button"][aria-label="Đăng"], ' +
+      'div[role="dialog"] div[role="button"][aria-label="Post"], ' +
+      'div[role="dialog"] div[role="button"]:has-text("Đăng"), ' +
+      'div[role="dialog"] div[role="button"]:has-text("Post")'
+    ).first();
+
+    if ((await postModalBtn.count().catch(() => 0)) > 0 && (await postModalBtn.isVisible().catch(() => false))) {
+      await postModalBtn.click({ force: true }).catch(async () => {
+        await dispatchSyntheticClick(postModalBtn);
+      });
+      await tab.waitForTimeout(1000);
+      optionClicked = true;
+    }
+
+    if (optionClicked) {
+      console.log(`[FB-Buff]${workerTag} 🚀 Đã chia sẻ bài viết thành công lên tường Fanpage!`);
+      return { success: true };
+    }
+
+    // Đóng popover nếu không ấn được để tránh kẹt giao diện
+    await tab.keyboard.press('Escape').catch(() => {});
+    return { success: false, error: 'Không tìm thấy tùy chọn Chia sẻ ngay' };
+  } catch (err) {
+    console.warn(`[FB-Buff]${workerTag} ⚠️ Lỗi khi thực hiện Chia sẻ: ${err.message}`);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Thực hiện chuỗi tương tác (đổi danh tính, thả like, viết bình luận, chia sẻ) cho 1 Fanpage trên 1 Tab
  */
 async function executePageInteraction({
   tab,
@@ -1175,6 +1329,7 @@ async function executePageInteraction({
   normalizedPostUrl,
   enableLike,
   enableComment,
+  enableShare = false,
   enableHumanBehavior,
   fastSwitch,
   reactionType,
@@ -1201,6 +1356,8 @@ async function executePageInteraction({
   let likeError = '';
   let commentStatus = enableComment ? 'WAITING' : 'SKIPPED';
   let commentError = '';
+  let shareStatus = enableShare ? 'WAITING' : 'SKIPPED';
+  let shareError = '';
   let usedCommentText = '';
   let currentReaction = (reactionType || 'LIKE').toUpperCase();
 
@@ -1566,10 +1723,22 @@ async function executePageInteraction({
       }
     }
 
+    // BƯỚC 5.5: CHIA SẺ BÀI VIẾT LÊN TƯỜNG FANPAGE (NẾU BẬT)
+    if (enableShare) {
+      const shareResult = await executePostShare(tab, workerTag);
+      if (shareResult.success) {
+        shareStatus = 'SUCCESS';
+      } else {
+        shareStatus = 'FAILED';
+        shareError = shareResult.error || 'Không chia sẻ được';
+      }
+    }
+
     // BƯỚC 6: TỔNG HỢP KẾT QUẢ CHO PAGE NÀY
     const likeOk = !enableLike || likeStatus === 'SUCCESS';
     const cmtOk = !enableComment || commentStatus === 'SUCCESS';
-    const isAlready = enableLike && !enableComment && likeStatus === 'ALREADY_LIKED';
+    const shareOk = !enableShare || shareStatus === 'SUCCESS';
+    const isAlready = enableLike && !enableComment && !enableShare && likeStatus === 'ALREADY_LIKED';
 
     let finalStatus = 'SUCCESS';
     const msgs = [];
@@ -1583,14 +1752,19 @@ async function executePageInteraction({
       else if (commentStatus === 'SKIPPED') msgs.push('Bỏ qua cmt');
       else msgs.push(`Lỗi cmt: ${commentError || 'Không gửi được'}`);
     }
+    if (enableShare) {
+      if (shareStatus === 'SUCCESS') msgs.push('Đã chia sẻ lên tường Fanpage');
+      else if (shareStatus === 'SKIPPED') msgs.push('Bỏ qua share');
+      else msgs.push(`Lỗi share: ${shareError || 'Không chia sẻ được'}`);
+    }
     if (enableLike && likeStatus === 'UNVERIFIED') {
       msgs[0] = `Đã bấm ${currentReaction} nhưng chưa xác nhận được`;
     }
 
     if (isAlready) finalStatus = 'ALREADY_LIKED';
-    else if (likeStatus === 'UNVERIFIED' && !(enableComment && commentStatus === 'SUCCESS')) finalStatus = 'UNVERIFIED';
-    else if (likeOk && cmtOk) finalStatus = 'SUCCESS';
-    else if ((enableLike && likeStatus === 'SUCCESS') || (enableComment && commentStatus === 'SUCCESS')) finalStatus = 'SUCCESS';
+    else if (likeStatus === 'UNVERIFIED' && !(enableComment && commentStatus === 'SUCCESS') && !(enableShare && shareStatus === 'SUCCESS')) finalStatus = 'UNVERIFIED';
+    else if (likeOk && cmtOk && shareOk) finalStatus = 'SUCCESS';
+    else if ((enableLike && likeStatus === 'SUCCESS') || (enableComment && commentStatus === 'SUCCESS') || (enableShare && shareStatus === 'SUCCESS')) finalStatus = 'SUCCESS';
     else finalStatus = 'ERROR';
 
     if (finalStatus === 'SUCCESS' || finalStatus === 'ALREADY_LIKED' || finalStatus === 'UNVERIFIED') {
@@ -1598,6 +1772,7 @@ async function executePageInteraction({
       recordPagePostInteraction(normalizedPostUrl, pageInfo.id, {
         reactionType: currentReaction,
         commentText: usedCommentText,
+        shareStatus,
         status: finalStatus,
         pageName: pageInfo.name,
       });
@@ -1611,6 +1786,7 @@ async function executePageInteraction({
         status: finalStatus,
         likeStatus,
         commentStatus,
+        shareStatus,
         commentText: commentStatus === 'SUCCESS' ? usedCommentText : undefined,
         message: msgs.join(' • '),
         error: finalStatus === 'ERROR' ? msgs.join(' • ') : undefined,
@@ -1626,6 +1802,7 @@ async function executePageInteraction({
         status: 'ERROR',
         likeStatus: enableLike ? 'ERROR' : 'SKIPPED',
         commentStatus: enableComment ? 'ERROR' : 'SKIPPED',
+        shareStatus: enableShare ? 'ERROR' : 'SKIPPED',
         error: err.message,
       },
     };
@@ -1647,6 +1824,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     speedMode = 'NORMAL',  // 'TURBO' (siêu tốc ~1.5s) | 'FAST' (nhanh ~2.5s) | 'NORMAL' (chuẩn ~3.8s) | 'SAFE' (an toàn ~6s)
     enableLike = true,     // Có thả Like/Reaction không (mặc định true)
     enableComment = false, // Có viết bình luận bằng Fanpage không (mặc định false)
+    enableShare = false,   // Có chia sẻ bài viết lên tường Fanpage không (mặc định false)
     enableHumanBehavior = true, // Hành vi lướt tự nhiên chống checkpoint (mặc định true)
     fastSwitch = true,     // Ưu tiên đổi danh tính trực tiếp trên bài viết bằng Voice Switcher (tiết kiệm 15s/lần)
     cooldownEvery = 12,    // Cứ mỗi 10-15 page nghỉ an toàn chống checkpoint
@@ -1707,6 +1885,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       status: 'SKIPPED',
       likeStatus: 'SKIPPED',
       commentStatus: 'SKIPPED',
+      shareStatus: 'SKIPPED',
       message: `Đã đủ ${maxActionsPerPageToday} lượt hôm nay`,
     });
     return false;
@@ -1736,7 +1915,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
   const actualConcurrency = isMultiWorker ? targetConcurrency : 1;
 
   console.log(`[FB-Buff] 🚀 Bắt đầu Buff Tương Tác: ${targetUrl}`);
-  console.log(`[FB-Buff] 🎯 Mục tiêu: ${pages.length} Fanpage | Chế độ tốc độ: ${speedMode} (${delayMs}ms) | Thả Like: ${enableLike ? reactionType : 'TẮT'} | Bình luận: ${enableComment ? 'BẬT' : 'TẮT'} | Số luồng: ${actualConcurrency} luồng | Fast-Switch: ${fastSwitch ? 'BẬT' : 'TẮT'}`);
+  console.log(`[FB-Buff] 🎯 Mục tiêu: ${pages.length} Fanpage | Chế độ tốc độ: ${speedMode} (${delayMs}ms) | Thả Like: ${enableLike ? reactionType : 'TẮT'} | Bình luận: ${enableComment ? 'BẬT' : 'TẮT'} | Chia sẻ (Share): ${enableShare ? 'BẬT' : 'TẮT'} | Số luồng: ${actualConcurrency} luồng | Fast-Switch: ${fastSwitch ? 'BẬT' : 'TẮT'}`);
 
   const results = {
     total: pages.length + cappedDetails.length,
@@ -1878,6 +2057,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             normalizedPostUrl,
             enableLike,
             enableComment,
+            enableShare,
             enableHumanBehavior,
             fastSwitch,
             reactionType,
@@ -2069,6 +2249,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           normalizedPostUrl,
           enableLike,
           enableComment,
+          enableShare,
           enableHumanBehavior,
           fastSwitch,
           reactionType,
@@ -2639,6 +2820,8 @@ module.exports = {
   hasPageInteractedWithPost,
   getGlobalRegistryStats,
   resolveSpintax,
+  executePostShare,
+  SEEDING_PRESETS,
 };
 
 // ==========================================

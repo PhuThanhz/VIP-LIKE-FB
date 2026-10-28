@@ -87,6 +87,7 @@ export interface QueueTask {
   reactionType?: string;
   enableLike?: boolean;
   enableComment?: boolean;
+  enableShare?: boolean;
   comments?: string[];
   delayMinutes?: number;
   speedMode?: string;
@@ -424,6 +425,11 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
               {task.enableComment && (
                 <Tag color="purple" className="text-[10px] m-0 font-mono border-0 rounded px-1.5 py-0">
                   {commentCount > 0 ? `${commentCount} bình luận` : 'Bình luận'}
+                </Tag>
+              )}
+              {task.enableShare && (
+                <Tag color="green" className="text-[10px] m-0 font-mono border-0 rounded px-1.5 py-0">
+                  Chia sẻ
                 </Tag>
               )}
             </div>

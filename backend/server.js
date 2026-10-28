@@ -1190,6 +1190,7 @@ app.post('/api/buff-like', async (req, res) => {
     speedMode = 'NORMAL',
     enableLike = true,
     enableComment = false,
+    enableShare = false,
     enableHumanBehavior = true,
     fastSwitch = true,
     cooldownEvery = 15,
@@ -1229,6 +1230,7 @@ app.post('/api/buff-like', async (req, res) => {
         speedMode,
         enableLike,
         enableComment,
+        enableShare,
         enableHumanBehavior,
         fastSwitch,
         cooldownEvery,
@@ -1361,6 +1363,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
     speedMode = 'NORMAL',
     enableLike = true,
     enableComment = false,
+    enableShare = false,
     enableHumanBehavior = true,
     fastSwitch = true,
     cooldownEvery = 15,
@@ -1462,6 +1465,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
         speedMode,
         enableLike,
         enableComment,
+        enableShare,
         enableHumanBehavior,
         fastSwitch,
         cooldownEvery,
@@ -1497,6 +1501,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
                 status: evt.status,
                 likeStatus: evt.likeStatus,
                 commentStatus: evt.commentStatus,
+                shareStatus: evt.shareStatus,
                 commentText: evt.commentText,
                 message: evt.message,
                 error: evt.error,
@@ -1636,6 +1641,7 @@ function addBuffQueueTask(taskPayload) {
     reactionType: taskPayload.reactionType || 'RANDOM_POSITIVE',
     enableLike: taskPayload.enableLike !== false,
     enableComment: Boolean(taskPayload.enableComment),
+    enableShare: Boolean(taskPayload.enableShare),
     comments: Array.isArray(taskPayload.comments) ? taskPayload.comments : [],
     delayMinutes: delayMin,
     speedMode: taskPayload.speedMode || 'FAST',
@@ -2020,6 +2026,7 @@ async function executeQueueTask(task) {
           delayMs: 3500,
           enableLike: task.enableLike !== false,
           enableComment: Boolean(task.enableComment),
+          enableShare: Boolean(task.enableShare),
           enableHumanBehavior: true,
           fastSwitch: true,
           cooldownEvery: 15,
@@ -2043,6 +2050,9 @@ async function executeQueueTask(task) {
                   pageId: ev.pageId,
                   pageName: ev.pageName,
                   status: ev.status,
+                  likeStatus: ev.likeStatus,
+                  commentStatus: ev.commentStatus,
+                  shareStatus: ev.shareStatus,
                   reaction: ev.reaction || task.reactionType,
                   comment: ev.comment || '',
                   error: ev.error || null,
@@ -2744,18 +2754,28 @@ async function handleBuffRequestedFromTelegram({
   targetUrl,
   targetLikes = 50,
   reactionType = 'LIKE',
+  enableLike = true,
+  enableShare = false,
   source = 'TELEGRAM',
   allowRebuff = false,
 }) {
-  console.log(`[TelegramBot] 📥 Nhận yêu cầu buff từ Telegram: ${targetUrl} | ${targetLikes} Like | ${reactionType} | Nguồn: ${source}`);
+  const isShareOnly = enableShare && !enableLike;
+  const actionLabel = isShareOnly
+    ? `${targetLikes} Chia sẻ (Share Fanpage)`
+    : enableShare
+    ? `${targetLikes} Like + Share`
+    : `${targetLikes} Like`;
+
+  console.log(`[TelegramBot] 📥 Nhận yêu cầu buff từ Telegram: ${targetUrl} | ${actionLabel} | ${reactionType} | Nguồn: ${source}`);
 
   const normUrl = normalizeFbPostUrl(targetUrl);
   const queueResult = addBuffQueueTask({
     targetUrl,
     targetLikes,
     reactionType,
-    enableLike: true,
+    enableLike,
     enableComment: false,
+    enableShare,
     speedMode: 'FAST',
     delayMinutes: 0,
     source,
@@ -2781,7 +2801,7 @@ async function handleBuffRequestedFromTelegram({
 
   if (queueResult.alreadyQueued) {
     await sendTelegramMessage(
-      `⏳ <b>[BÀI VIẾT ĐANG TRONG HÀNG ĐỢI]</b>\nBài viết đang có sẵn trong hàng đợi và sẽ sớm được xử lý tự động:\n🔗 <a href="${targetUrl}">${targetUrl}</a>\n🎯 Mục tiêu: ${queueResult.task?.targetLikes || targetLikes} like`
+      `⏳ <b>[BÀI VIẾT ĐANG TRONG HÀNG ĐỢI]</b>\nBài viết đang có sẵn trong hàng đợi và sẽ sớm được xử lý tự động:\n🔗 <a href="${targetUrl}">${targetUrl}</a>\n🎯 Mục tiêu: ${queueResult.task?.targetLikes || targetLikes} lượt`
     );
     return { success: true, alreadyQueued: true };
   }
@@ -2791,8 +2811,8 @@ async function handleBuffRequestedFromTelegram({
     `📥 <b>[TIẾP NHẬN ĐƠN TỪ TELEGRAM THÀNH CÔNG]</b>`,
     `━━━━━━━━━━━━━━━━━━`,
     `🔗 <b>Bài viết:</b> <a href="${targetUrl}">${targetUrl}</a>`,
-    `🎯 <b>Số lượng:</b> <b>${targetLikes}</b> like`,
-    `💖 <b>Cảm xúc:</b> ${reactionType}`,
+    `🎯 <b>Hạng mục:</b> <b>${actionLabel}</b>`,
+    !isShareOnly ? `💖 <b>Cảm xúc:</b> ${reactionType}` : `🚀 <b>Tính năng:</b> Chia sẻ bài viết về tường Fanpage`,
     `⚡ <b>Trạng thái:</b> Đã đưa vào Hàng đợi (Sẽ chạy ngay khi tới lượt)`,
     `⏰ <b>Thời gian:</b> ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`,
     `━━━━━━━━━━━━━━━━━━`,
@@ -2927,6 +2947,14 @@ startCommandListener({
   onBuffRequested: handleBuffRequestedFromTelegram,
   getPagesStats: getPagesStatsForTelegram,
   getQueueText: buildQueueText,
+});
+
+// Lấy kho kịch bản Seeding Comment có sẵn (Smart Seeding Presets)
+app.get('/api/buff-seeding-presets', (req, res) => {
+  return res.json({
+    success: true,
+    presets: fbBuffTool.SEEDING_PRESETS || [],
+  });
 });
 
 // Lấy dữ liệu báo cáo tổng quan ngày (cho trang Săn bài & VIP Like)
