@@ -56,3 +56,5 @@ backend/test-*.js
 backend/check-login.js
 backend/run-batch-finish-remaining.js
 backend/run-batch-full-thanhan.js
+backend/run-resume-*.js
+backend/run-finish-*.js

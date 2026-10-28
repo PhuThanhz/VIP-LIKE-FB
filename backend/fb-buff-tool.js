@@ -1096,18 +1096,33 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '') {
       const switchBtn = tab.locator('div[role="button"]:has-text("Chuyển ngay"), div[role="button"]:has-text("Chuyển"), [aria-label*="Chuyển sang"], div[role="button"]:has-text("Switch now")').first();
       if (await switchBtn.isVisible({ timeout: 2500 }).catch(() => false)) {
         await switchBtn.click({ force: true }).catch(() => {});
+        await tab.waitForTimeout(600);
+
+        // Bắt và bấm nút "Chuyển" trong hộp thoại xác nhận đổi trang cá nhân Pro5 nếu có
+        const modalConfirm = tab.locator(
+          'div[role="dialog"] div[role="button"]:has-text("Chuyển"), ' +
+          'div[role="dialog"] div[role="button"]:has-text("Switch"), ' +
+          'div[role="dialog"] [aria-label*="Chuyển sang"]'
+        ).first();
+        if (await modalConfirm.isVisible({ timeout: 2500 }).catch(() => false)) {
+          await modalConfirm.click({ force: true }).catch(() => {});
+          switched = true;
+          await tab.waitForTimeout(1000);
+        }
       }
     }
   }
 
   // Đợi Facebook hoàn tất chuyển danh tính
-  await tab.waitForTimeout(3000);
+  await tab.waitForTimeout(2000);
   const usePageBtn = tab.locator('div[role="button"]:has-text("Dùng Trang"), div[role="button"]:has-text("Use Page")').first();
   if (await usePageBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
     await usePageBtn.click({ force: true }).catch(() => {});
     await tab.waitForTimeout(500);
   }
-  await tab.keyboard.press('Escape').catch(() => {});
+  if (!switched) {
+    await tab.keyboard.press('Escape').catch(() => {});
+  }
 
   // Cập nhật cookie i_user cho Playwright context
   if (pageInfo.id && pageInfo.id !== uid) {

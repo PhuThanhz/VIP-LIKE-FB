@@ -1243,6 +1243,25 @@ app.post('/api/buff-like', async (req, res) => {
       reactionType,
     }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo hoàn tất buff:', err.message));
 
+    // Tự động lưu lịch sử buff vào MySQL ngay trên Server
+    if (result && Array.isArray(result.details) && result.details.length > 0) {
+      db.saveBuffLogs({
+        id: 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
+        createdAt: new Date().toISOString(),
+        type: 'SINGLE',
+        targetUrl,
+        reactionType,
+        totalPages: totalCount,
+        successCount,
+        alreadyLikedCount: result.details.filter((d) => d.status === 'ALREADY_LIKED').length,
+        failedCount,
+        engagementMode: enableComment ? (enableLike ? 'BOTH' : 'COMMENT_ONLY') : 'LIKE_ONLY',
+        commentCount: result.details.filter((d) => d.commentStatus === 'SUCCESS').length,
+        accountName: 'Via Facebook',
+        details: result.details,
+      }).catch((e) => console.warn('[DB] ⚠️ Lỗi tự động lưu buff_logs từ server:', e.message));
+    }
+
     return res.json({ success: true, result });
   } catch (err) {
     console.error('[Buff API] ❌ Lỗi Buff Like/Comment:', err.message);
@@ -1338,7 +1357,20 @@ app.post('/api/buff-like-stream', async (req, res) => {
   }
 
   let clientGone = false;
+  const heartbeatTimer = setInterval(() => {
+    if (clientGone || res.writableEnded) {
+      clearInterval(heartbeatTimer);
+      return;
+    }
+    try {
+      res.write(': heartbeat\n\n');
+    } catch (e) {
+      clearInterval(heartbeatTimer);
+    }
+  }, 10000);
+
   res.on('close', () => {
+    clearInterval(heartbeatTimer);
     if (!res.writableFinished) {
       clientGone = true;
       console.log('[BuffStream] 🔌 Client đã ngắt kết nối SSE (reload trang hoặc chuyển tab). Background worker vẫn tiếp tục chạy an toàn...');
@@ -1468,9 +1500,30 @@ app.post('/api/buff-like-stream', async (req, res) => {
       reactionType,
     }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo stream xong:', err.message));
 
+    // Tự động lưu lịch sử buff vào MySQL ngay trên Server (đảm bảo không bao giờ bị mất log)
+    if (result && Array.isArray(result.details) && result.details.length > 0) {
+      db.saveBuffLogs({
+        id: 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
+        createdAt: new Date().toISOString(),
+        type: 'SINGLE',
+        targetUrl,
+        reactionType,
+        totalPages: totalCount,
+        successCount,
+        alreadyLikedCount: result.details.filter((d) => d.status === 'ALREADY_LIKED').length,
+        failedCount,
+        engagementMode: enableComment ? (enableLike ? 'BOTH' : 'COMMENT_ONLY') : 'LIKE_ONLY',
+        commentCount: result.details.filter((d) => d.commentStatus === 'SUCCESS').length,
+        accountName: 'Via Facebook',
+        details: result.details,
+      }).catch((e) => console.warn('[DB] ⚠️ Lỗi tự động lưu buff_logs từ stream:', e.message));
+    }
+
     sendEvent('done', { result });
+    clearInterval(heartbeatTimer);
     res.end();
   } catch (err) {
+    clearInterval(heartbeatTimer);
     console.error('[BuffStream] ❌ Lỗi stream:', err.message);
     if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
       activeLiveBuffSession.status = 'ERROR';
