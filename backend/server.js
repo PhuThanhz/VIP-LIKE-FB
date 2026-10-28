@@ -25,6 +25,7 @@ const {
   notifyPostHunted,
   notifyQueueIdle,
   notifyQueueTrouble,
+  notifyActionBlocked,
   sendAlert,
   formatDurationVi,
   startCommandListener,
@@ -1186,15 +1187,15 @@ app.post('/api/buff-like', async (req, res) => {
     targetUrl,
     reactionType = 'LIKE',
     selectedPages = [],
-    delayMs = 1500,
-    speedMode = 'NORMAL',
+    delayMs = 3500,
+    speedMode = 'SMART',
     enableLike = true,
     enableComment = false,
     enableShare = false,
     enableHumanBehavior = true,
     fastSwitch = true,
     cooldownEvery = 15,
-    cooldownDurationMs = 3500,
+    cooldownDurationMs = 15000,
     comments = [],
     proxyUrl: explicitProxy = '',
     concurrency = 1,
@@ -1359,15 +1360,15 @@ app.post('/api/buff-like-stream', async (req, res) => {
     targetUrl,
     reactionType = 'LIKE',
     selectedPages = [],
-    delayMs = 1500,
-    speedMode = 'NORMAL',
+    delayMs = 3500,
+    speedMode = 'SMART',
     enableLike = true,
     enableComment = false,
     enableShare = false,
     enableHumanBehavior = true,
     fastSwitch = true,
     cooldownEvery = 15,
-    cooldownDurationMs = 3500,
+    cooldownDurationMs = 15000,
     comments = [],
     proxyUrl: explicitProxy = '',
     concurrency = 1,
@@ -1526,6 +1527,12 @@ app.post('/api/buff-like-stream', async (req, res) => {
                 activeLiveBuffSession.status = 'STOPPED';
                 activeLiveBuffSession.error = 'Facebook phát hiện thao tác nhanh và tạm thời hạn chế hành động (Action Blocked). Hệ thống đã tự động dừng khẩn cấp để bảo vệ an toàn cho Via!';
                 console.warn('[BuffStream] 🛑 Đã tự động ngắt tiến trình buff trực tiếp do Via bị Facebook Rate Limit / Action Blocked!');
+                notifyActionBlocked({
+                  viaName: evt.viaName || activeLiveBuffSession?.viaName || 'Via',
+                  viaUid: activeLiveBuffSession?.platform_account_id,
+                  postUrl: targetUrl,
+                  reason: 'Facebook tạm thời chặn do thao tác nhanh (Action Blocked)',
+                }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi cảnh báo Action Blocked:', err.message));
               }
             }
           }
@@ -1659,7 +1666,7 @@ function addBuffQueueTask(taskPayload) {
     enableShare: Boolean(taskPayload.enableShare),
     comments: Array.isArray(taskPayload.comments) ? taskPayload.comments : [],
     delayMinutes: delayMin,
-    speedMode: taskPayload.speedMode || 'FAST',
+    speedMode: taskPayload.speedMode || 'SMART',
     addedAt: new Date().toISOString(),
     runAfter: new Date(Date.now() + delayMin * 60 * 1000).toISOString(),
     status: 'QUEUED',
@@ -1721,7 +1728,7 @@ app.post('/api/buff-queue/batch-add', async (req, res) => {
       enableLike = true,
       enableComment = false,
       comments = [],
-      speedMode = 'FAST',
+      speedMode = 'SMART',
       staggerMinutes = 3,
     } = req.body;
 
@@ -2023,7 +2030,7 @@ async function executeQueueTask(task) {
       targetUrl: task.targetUrl,
       total: pagesToBuff.length,
       reactionType: task.reactionType || 'RANDOM_POSITIVE',
-      speedMode: task.speedMode || 'FAST',
+      speedMode: task.speedMode || 'SMART',
       concurrency: 2,
       accountName: 'Queue Worker Auto',
     }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi thông báo queue worker bắt đầu:', err.message));
@@ -2036,7 +2043,7 @@ async function executeQueueTask(task) {
       const res = await withBuffLane(laneUid, () =>
         fbBuffTool.buffLikesWithPages(group.cookieString, task.targetUrl, {
           reactionType: task.reactionType || 'RANDOM_POSITIVE',
-          speedMode: task.speedMode || 'FAST',
+          speedMode: task.speedMode || 'SMART',
           selectedPages: group.pages,
           delayMs: 3500,
           enableLike: task.enableLike !== false,
@@ -2044,13 +2051,22 @@ async function executeQueueTask(task) {
           enableShare: Boolean(task.enableShare),
           enableHumanBehavior: true,
           fastSwitch: true,
-          cooldownEvery: 15,
-          cooldownDurationMs: 4000,
+          cooldownEvery: sysSettings.cooldownEveryPages || 15,
+          cooldownDurationMs: (sysSettings.cooldownDurationSec || 15) * 1000,
           comments: task.comments || [],
           proxyUrl: group.proxyUrl,
           proxyPool,
           shouldStop: () => isEmergencyStopped(),
           onProgress: (ev) => {
+            if (ev.actionBlocked) {
+              console.warn(`[QueueWorker] 🛑 Phát hiện Via bị Facebook hạn chế tốc độ (Action Blocked) trên task ${task.id}. Tự động ngắt task bảo vệ Via!`);
+              notifyActionBlocked({
+                viaName: group.viaName || 'Via',
+                viaUid: laneUid,
+                postUrl: task.targetUrl,
+                reason: 'Facebook tạm thời chặn do thao tác nhanh (Action Blocked)',
+              }).catch(() => {});
+            }
             if (ev.type === 'PAGE_FINISH') {
               totalDone++;
               if (ev.status === 'SUCCESS') totalSuccess++;
@@ -2791,7 +2807,7 @@ async function handleBuffRequestedFromTelegram({
     enableLike,
     enableComment: false,
     enableShare,
-    speedMode: 'FAST',
+    speedMode: 'SMART',
     delayMinutes: 0,
     source,
     allowRebuff,
@@ -3236,6 +3252,19 @@ app.post('/api/telegram/test-scenario', async (req, res) => {
         `⏰ <b>Thời gian:</b> ${now}`,
         `━━━━━━━━━━━━━━━━━━`,
         `⛔ <i>Tất cả trình duyệt Playwright và Hàng đợi Queue đã được đóng ngay lập tức!</i>`,
+      ].join('\n');
+    } else if (scenario === 'ACTION_BLOCKED') {
+      text = [
+        `🚨 <b>[MÔ PHỎNG: CẢNH BÁO BẢO VỆ VIA - ACTION BLOCKED]</b>`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `👤 <b>Via:</b> Thành An (<code>100023403136194</code>)`,
+        `🔗 <b>Bài viết:</b> <a href="https://facebook.com/share/p/19XPWpxegi/">facebook.com/share/p/19XPWpxegi/</a>`,
+        `⚠️ <b>Facebook báo:</b> "Bạn tạm thời bị chặn do sử dụng quá nhanh"`,
+        `🛡️ <b>Hành động tự động:</b> Hệ thống đã TỰ ĐỘNG DỪNG khẩn cấp để bảo vệ Via không bị checkpoint!`,
+        `💡 <b>Khuyến nghị:</b> Nghỉ 30-45 phút trước khi buff lại bài này, hoặc buff bài viết khác / đổi Via 2 bình thường.`,
+        `⏰ <b>Thời điểm:</b> ${now}`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `✨ <i>Thuật toán Smart Adaptive Pacing đang hoạt động để bảo vệ toàn bộ 506 Fanpage con.</i>`,
       ].join('\n');
     } else if (scenario === 'HUNTER') {
       text = [

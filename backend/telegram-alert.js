@@ -29,6 +29,13 @@ const DEFAULT_SETTINGS = {
   notifyOnBuffStart: true,
   notifyOnBuffDone: true,
   notifyOnQueueIssue: true,
+  notifyOnActionBlocked: true,
+  // Smart Adaptive Pacing & Chống hạn chế FB:
+  defaultSpeedMode: 'SMART',
+  smartAdaptivePacing: true,
+  cooldownEveryPages: 15,
+  cooldownDurationSec: 15,
+  autoStopOnActionBlocked: true,
   // Giờ yên tĩnh: trong khung này chỉ gửi tin nghiêm trọng, tin còn lại được gom lại gửi sau
   quietHoursEnabled: false,
   quietStart: '23:00',
@@ -110,6 +117,7 @@ async function sendTelegramMessage(text, parseMode = 'HTML', replyMarkup = null)
   const upper = (text || '').toUpperCase();
   if (upper.includes('BUFF HOÀN TẤT') || upper.includes('CHIẾN DỊCH')) eventType = 'BUFF_COMPLETED';
   else if (upper.includes('CHECKPOINT') || (upper.includes('VIA') && upper.includes('HẾT HẠN'))) eventType = 'VIA_DEAD';
+  else if (upper.includes('HẠN CHẾ') || upper.includes('ACTION_BLOCKED') || upper.includes('CHẶN') || upper.includes('QUÁ NHANH')) eventType = 'ACTION_BLOCKED';
   else if (upper.includes('KHẨN CẤP') || upper.includes('DỪNG')) eventType = 'EMERGENCY_STOP';
   else if (upper.includes('BÀI VIẾT MỚI') || upper.includes('HUNTER')) eventType = 'HUNTER';
   else if (upper.includes('HÀNG ĐỢI')) eventType = 'QUEUE_IDLE';
@@ -517,6 +525,28 @@ async function notifyEmergencyStop({ triggeredBy = 'Admin', reason = '' }) {
   return sendAlert(msg, { critical: true });
 }
 
+// 4.5. CẢNH BÁO FACEBOOK HẠN CHẾ THAO TÁC (ACTION BLOCKED - TỰ ĐỘNG DỪNG BẢO VỆ VIA)
+async function notifyActionBlocked({ viaName = '', viaUid = '', postUrl = '', reason = '', stoppedAt = null } = {}) {
+  const settings = loadSettings();
+  if (settings.notifyOnActionBlocked === false) return;
+  const now = stoppedAt || new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const cleanPostUrl = (postUrl || '').split('?')[0];
+  const msg = [
+    `🚨 <b>[CẢNH BÁO BẢO VỆ VIA: PHÁT HIỆN HẠN CHẾ THAO TÁC]</b>`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `👤 <b>Via:</b> ${viaName || 'Via'} (<code>${viaUid || 'N/A'}</code>)`,
+    cleanPostUrl ? `🔗 <b>Bài viết:</b> <a href="${postUrl}">${cleanPostUrl.slice(0, 45)}...</a>` : '',
+    `⚠️ <b>Facebook báo:</b> "Bạn tạm thời bị chặn do sử dụng quá nhanh"`,
+    `🛡️ <b>Hành động tự động:</b> Hệ thống đã TỰ ĐỘNG DỪNG phiên buff ngay lập tức để bảo vệ an toàn cho Via & dàn Fanpage con!`,
+    `💡 <b>Khuyến nghị:</b> Bạn có thể buff bài viết khác hoặc đổi Via bình thường. Đối với bài viết này, hãy để nghỉ 30-45 phút trước khi buff tiếp.`,
+    `⏰ <b>Thời gian:</b> ${now}`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `✨ <i>Thuật toán Smart Adaptive Pacing đang hoạt động để bảo toàn độ bền Via.</i>`,
+  ].filter(Boolean).join('\n');
+
+  return sendAlert(msg, { critical: true });
+}
+
 function formatDurationVi(totalSec) {
   const sec = Math.max(0, Math.round(Number(totalSec) || 0));
   if (sec < 60) return `${sec}s`;
@@ -876,6 +906,7 @@ module.exports = {
   notifyQueueAdded,
   notifyBuffCompleted,
   notifyEmergencyStop,
+  notifyActionBlocked,
   notifyQueueIdle,
   notifyQueueTrouble,
   sendAlert,

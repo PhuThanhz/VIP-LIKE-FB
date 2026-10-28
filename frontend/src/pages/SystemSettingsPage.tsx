@@ -341,6 +341,31 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
                   </Button>
                 </div>
               </div>
+
+              {/* Card 5: Báo động bị chặn tốc độ (Action Blocked) */}
+              <div className="p-4 rounded-xl bg-gradient-to-br from-orange-950/30 to-slate-900/40 border border-orange-500/20 flex flex-col justify-between gap-3 md:col-span-2">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🛡️</span>
+                    <h4 className="text-sm font-bold text-orange-300 m-0">Báo Động Bị Chặn Tốc Độ & Tự Động Hạ Nhiệt Via</h4>
+                  </div>
+                  <p className="text-xs text-slate-300 leading-relaxed m-0">
+                    Khi bài viết bị Facebook hạn chế do thao tác quá nhanh ("Bạn tạm thời bị chặn..."), Bot cảnh báo ngay về máy kèm UID Via và link bài. Hệ thống tự động ngắt phiên ngay lập tức, chuyển trạng thái hạ nhiệt giúp Via không bao giờ bị khoá hay dính checkpoint!
+                  </p>
+                </div>
+                <div className="pt-1 flex items-center justify-between border-t border-orange-500/10">
+                  <span className="text-[11px] text-orange-400/80">Kích hoạt: Tự động khi Facebook hạn chế tốc độ</span>
+                  <Button
+                    size="small"
+                    loading={sendingScenario === 'ACTION_BLOCKED'}
+                    disabled={!hasTelegramInput}
+                    onClick={() => handleTestScenario('ACTION_BLOCKED', 'Cảnh báo Bị Chặn Tốc Độ')}
+                    className="border-orange-500/40 text-orange-300 hover:text-orange-200 text-xs"
+                  >
+                    ⚡ Bắn thử cảnh báo Chặn tốc độ
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </Section>
@@ -398,6 +423,8 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
                             return <Tag color="green" className="text-[11px] font-semibold">🎉 BUFF HOÀN TẤT</Tag>;
                           case 'VIA_DEAD':
                             return <Tag color="red" className="text-[11px] font-semibold">🚨 VIA CHECKPOINT</Tag>;
+                          case 'ACTION_BLOCKED':
+                            return <Tag color="volcano" className="text-[11px] font-semibold">🛡️ CHẶN TỐC ĐỘ (ACTION BLOCKED)</Tag>;
                           case 'EMERGENCY_STOP':
                             return <Tag color="error" className="text-[11px] font-semibold">🛑 DỪNG KHẨN CẤP</Tag>;
                           case 'HUNTER':
@@ -470,6 +497,12 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
             description="Tổng kết số lượt thành công, thời gian chạy và khi hàng đợi đã trống."
             checked={systemSettings.notifyOnBuffDone !== false}
             onChange={(checked) => set({ notifyOnBuffDone: checked })}
+          />
+          <ToggleRow
+            title="Via bị Facebook hạn chế thao tác (Action Blocked)"
+            description="Báo ngay khi phát hiện Facebook yêu cầu dừng do thao tác quá nhanh."
+            checked={systemSettings.notifyOnActionBlocked !== false}
+            onChange={(checked) => set({ notifyOnActionBlocked: checked })}
           />
           <ToggleRow
             title="Hàng đợi gặp sự cố"
@@ -553,6 +586,76 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
             checked={systemSettings.autoBuffOwnGroup !== false}
             onChange={(checked) => set({ autoBuffOwnGroup: checked })}
           />
+          <div className="h-2" />
+        </Section>
+
+        {/* Thuật toán Smart Adaptive Pacing & Bảo Vệ Via */}
+        <Section
+          title="🛡️ Thuật Toán Smart Adaptive Pacing & Bảo Vệ Via"
+          description="Tự động co giãn nhịp tương tác, ngắt nhịp nghỉ hạ nhiệt Via và ngăn chặn hoàn toàn cờ checkpoint của Meta."
+        >
+          <ToggleRow
+            title="Bật thuật toán Smart Adaptive Pacing (Khuyên dùng)"
+            description="Tự động phân tích số lượng Fanpage (2.8s - 5.8s) kèm jitter ngẫu nhiên ±15%, chống thuật toán AI của Meta gắn cờ tự động hoá."
+            checked={systemSettings.smartAdaptivePacing !== false}
+            onChange={(checked) => set({ smartAdaptivePacing: checked })}
+          />
+          <ToggleRow
+            title="Tự động dừng khẩn cấp khi gặp cờ chặn Facebook (Action Blocked)"
+            description="Ngay khi phát hiện bài viết bị Facebook chặn do thao tác quá nhanh, hệ thống lập tức ngắt phiên để Via không bị checkpoint."
+            checked={systemSettings.autoStopOnActionBlocked !== false}
+            onChange={(checked) => set({ autoStopOnActionBlocked: checked })}
+          />
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-5 py-3.5 border-t border-slate-800/80">
+            <div>
+              <span className="block text-sm text-slate-200">Tự động hạ nhiệt Via (Auto-Cooldown)</span>
+              <span className="block text-xs text-slate-500 mt-0.5">Số trang hoàn tất trước khi tạm nghỉ để Facebook reset bộ đếm spam.</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-400">Mỗi</span>
+                <Input
+                  type="number"
+                  min={5}
+                  max={50}
+                  value={systemSettings.cooldownEveryPages ?? 15}
+                  onChange={(e) => set({ cooldownEveryPages: parseInt(e.target.value, 10) || 15 })}
+                  className="w-20 font-mono text-xs"
+                />
+                <span className="text-xs text-slate-400">Page</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-slate-400">Nghỉ</span>
+                <Input
+                  type="number"
+                  min={5}
+                  max={60}
+                  value={systemSettings.cooldownDurationSec ?? 15}
+                  onChange={(e) => set({ cooldownDurationSec: parseInt(e.target.value, 10) || 15 })}
+                  className="w-20 font-mono text-xs"
+                />
+                <span className="text-xs text-slate-400">giây</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-t border-slate-800/80">
+            <div>
+              <span className="block text-sm text-slate-200">Tốc độ mặc định khi tạo tác vụ</span>
+              <span className="block text-xs text-slate-500 mt-0.5">Áp dụng cho Hàng đợi, Săn bài tự động và Buff trực tiếp.</span>
+            </div>
+            <Select
+              value={systemSettings.defaultSpeedMode || 'SMART'}
+              onChange={(v) => set({ defaultSpeedMode: v })}
+              className="w-48 text-xs"
+              options={[
+                { value: 'SMART', label: '🛡️ Smart (Khuyên dùng)' },
+                { value: 'NORMAL', label: '⚖️ Chuẩn (3.8s)' },
+                { value: 'SAFE', label: '🛡️ An Toàn (6s)' },
+                { value: 'FAST', label: '🚀 Nhanh (2.5s)' },
+                { value: 'TURBO', label: '⚡ Siêu Tốc (1.5s)' },
+              ]}
+            />
+          </div>
           <div className="h-2" />
         </Section>
 

@@ -353,10 +353,10 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
               </Tag>
               {task.speedMode && (
                 <Tag
-                  color={task.speedMode === 'TURBO' ? 'red' : 'green'}
-                  className="text-[9px] m-0 font-mono px-1 py-0 rounded border-0"
+                  color={task.speedMode === 'SMART' ? 'cyan' : task.speedMode === 'TURBO' ? 'red' : task.speedMode === 'SAFE' ? 'gold' : 'green'}
+                  className="text-[9px] m-0 font-mono px-1.5 py-0 rounded border-0"
                 >
-                  {task.speedMode}
+                  {task.speedMode === 'SMART' ? '🛡️ SMART' : task.speedMode}
                 </Tag>
               )}
               {task.addedAt && (
