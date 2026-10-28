@@ -13,6 +13,7 @@ import {
 
 export type NavKey =
   | 'buff-like'
+  | 'buff-running'
   | 'buff-queue'
   | 'buff-history'
   | 'buff-hunter'
@@ -46,6 +47,16 @@ export const NAV_ITEMS: NavItem[] = [
     subtitle: 'Tạo chiến dịch, theo dõi hàng đợi và xem lịch sử',
     iconColor: 'text-cyan-400',
     Icon: ThunderboltOutlined,
+    group: 'engagement',
+  },
+  {
+    key: 'buff-running',
+    parent: 'buff-like',
+    label: 'Tiến trình chạy',
+    title: 'Tiến Trình Tương Tác Trực Tiếp',
+    subtitle: 'Theo dõi trực tiếp quá trình bot thả Like / Comment theo thời gian thực',
+    iconColor: 'text-blue-400',
+    Icon: PlayCircleOutlined,
     group: 'engagement',
   },
   {

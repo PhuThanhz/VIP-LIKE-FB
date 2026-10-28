@@ -45,6 +45,7 @@ import {
   PauseCircleOutlined,
   CaretRightOutlined,
   HistoryOutlined,
+  ClockCircleOutlined,
   InfoCircleOutlined,
   CopyOutlined,
   CommentOutlined,
@@ -634,6 +635,18 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     status: 'IDLE',
     details: [],
   });
+
+  // Thông tin bài viết và cấu hình đang chạy trực tiếp (giúp giải phóng form Tạo mới để nhập link khác)
+  const [runningTargetInfo, setRunningTargetInfo] = useState<{
+    url: string;
+    reaction: string;
+    count: number;
+    startedAt: number;
+    actorMode?: 'VIAS' | 'FANPAGES';
+    speedMode?: string;
+  } | null>(null);
+  const [runningFilter, setRunningFilter] = useState<'ALL' | 'SUCCESS' | 'ALREADY_LIKED' | 'FAILED' | 'RUNNING' | 'WAITING'>('ALL');
+  const [runningSearch, setRunningSearch] = useState<string>('');
 
   // Đồng hồ cho lượt chạy trực tiếp: thời điểm bắt đầu/kết thúc và nhịp cập nhật mỗi giây
   const [runTiming, setRunTiming] = useState<{ start: number | null; end: number | null }>({ start: null, end: null });
@@ -2162,6 +2175,18 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
       // Chốt link tại thời điểm bắt đầu (người dùng có thể sửa ô link trong lúc chạy)
       const runTargetUrl = targetPostUrl.trim();
+      setRunningTargetInfo({
+        url: runTargetUrl,
+        reaction: selectedReaction,
+        count: pagesToBuff.length,
+        startedAt: Date.now(),
+        actorMode,
+        speedMode,
+      });
+      // Tự động chuyển sang tab 'Tiến trình chạy' để theo dõi chi tiết
+      setActiveTabKey('buff-running');
+      // Làm trống ô link ở tab Tạo mới để người dùng rảnh tay dán link khác ngay lập tức
+      setTargetPostUrl('');
       const runAccountName =
         selectedAccountId === 'ALL_VIAS'
           ? `Toàn bộ dàn Via (${fbAccounts.length} Via)`
@@ -2473,6 +2498,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     setIsBatchPaused(false);
     batchAbortRef.current = false;
     batchPauseRef.current = false;
+    setActiveTabKey('buff-running');
 
     for (let i = 0; i < initialOrders.length; i++) {
       if (batchAbortRef.current) break;
@@ -2822,12 +2848,18 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         </div>
       )}
 
-      {/* Chuyển nhanh: Tạo mới / Hàng đợi / Lịch sử / Săn bài tự động (cùng một trang) */}
-      {(activeTabKey === 'buff-like' || activeTabKey === 'buff-queue' || activeTabKey === 'buff-history' || activeTabKey === 'buff-hunter') && (
+      {/* Chuyển nhanh: Tạo mới / Tiến trình chạy / Hàng đợi / Lịch sử / Săn bài tự động (cùng một trang) */}
+      {(activeTabKey === 'buff-like' || activeTabKey === 'buff-running' || activeTabKey === 'buff-queue' || activeTabKey === 'buff-history' || activeTabKey === 'buff-hunter') && (
         <div className="flex items-center justify-between gap-3 border-b border-slate-800/80">
           <div role="tablist" className="flex items-center gap-1 -mb-px">
             {[
               { key: 'buff-like', label: 'Tạo mới', count: 0 },
+              {
+                key: 'buff-running',
+                label: '⚡ Tiến trình chạy',
+                count: (autoBuffProgress.status === 'RUNNING' || isBatchRunning) ? 1 : 0,
+                isPulse: (autoBuffProgress.status === 'RUNNING' || isBatchRunning),
+              },
               { key: 'buff-queue', label: 'Hàng đợi', count: queueItems.filter((i) => i.status === 'QUEUED' || i.status === 'RUNNING').length },
               { key: 'buff-history', label: 'Lịch sử', count: buffLogs.length },
               { key: 'buff-hunter', label: '🎯 Săn bài tự động (VIP Like)', count: monitors.length },
@@ -2840,14 +2872,20 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                   role="tab"
                   aria-selected={active}
                   onClick={() => setActiveTabKey(t.key)}
-                  className={`px-4 py-2.5 text-sm border-b-2 transition-colors cursor-pointer bg-transparent ${
+                  className={`px-4 py-2.5 text-sm border-b-2 transition-colors cursor-pointer bg-transparent flex items-center gap-1.5 ${
                     active
                       ? 'border-blue-500 text-slate-100 font-semibold'
                       : 'border-transparent text-slate-400 hover:text-slate-200'
                   }`}
                 >
                   {t.label}
-                  {t.count > 0 && (
+                  {t.isPulse && (
+                    <span className="relative flex h-2 w-2 ml-0.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                    </span>
+                  )}
+                  {t.count > 0 && !t.isPulse && (
                     <span
                       className={`ml-2 px-1.5 rounded-md text-xs tabular-nums ${
                         active ? 'bg-blue-500/20 text-blue-300' : 'bg-slate-800 text-slate-400'
@@ -2868,7 +2906,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         onChange={(k) => setActiveTabKey(k)}
         renderTabBar={() => null}
         animated={false}
-        destroyInactiveTabPane={true}
+        destroyInactiveTabPane={false}
         tabBarExtraContent={<span className="text-xs text-slate-400">{fbAccounts.length} nick · {scannedPages.length} Page</span>}
         items={[
           {
@@ -3959,16 +3997,36 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               ? `Thêm ${parsedBatchLinks.length} bài vào hàng đợi`
                               : 'Thêm vào hàng đợi'}
                           </Button>
-                        ) : buffMode === 'SINGLE' && autoBuffMutation.isPending ? (
-                          <Button
-                            danger
-                            type="primary"
-                            size="large"
-                            onClick={handleStopAutoBuff}
-                            className="w-full h-11 rounded-xl text-sm font-semibold"
-                          >
-                            Dừng ({autoBuffProgress.percent}%)
-                          </Button>
+                        ) : buffMode === 'SINGLE' && (autoBuffMutation.isPending || autoBuffProgress.status === 'RUNNING') ? (
+                          <div className="space-y-2">
+                            <Button
+                              type="primary"
+                              size="large"
+                              loading={isEnqueueing}
+                              disabled={selectedPageIds.length === 0 || !targetPostUrl.trim()}
+                              onClick={handleEnqueueFromForm}
+                              className="w-full h-11 rounded-xl text-sm font-semibold bg-amber-600 hover:bg-amber-500 border-none"
+                            >
+                              {!targetPostUrl.trim()
+                                ? 'Dán link mới & Thêm vào hàng đợi'
+                                : 'Đưa bài mới này vào hàng đợi'}
+                            </Button>
+                            <div className="grid grid-cols-2 gap-2">
+                              <Button
+                                onClick={() => setActiveTabKey('buff-running')}
+                                className="h-9 rounded-xl text-xs font-semibold text-blue-400 border-blue-500/40"
+                              >
+                                Xem bài đang chạy ({autoBuffProgress.percent}%) ➔
+                              </Button>
+                              <Button
+                                danger
+                                onClick={handleStopAutoBuff}
+                                className="h-9 rounded-xl text-xs font-semibold"
+                              >
+                                Dừng bài đang chạy
+                              </Button>
+                            </div>
+                          </div>
                         ) : buffMode === 'SINGLE' ? (
                           <Button
                             type="primary"
@@ -4025,288 +4083,626 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                         )}
                       </div>
 
-                      {/* LIVE MONITOR TERMINAL / GIÁM SÁT TIẾN TRÌNH TRỰC TIẾP */}
-                      <div className="p-4 sm:p-5 app-surface space-y-3.5">
-                        <div className="flex items-center justify-between pb-2.5 border-b border-slate-800/80">
-                          <span className="text-xs sm:text-sm font-bold text-slate-100 flex items-center gap-2">
-                            <RobotOutlined className="text-blue-400" /> Tiến trình
-                          </span>
-                          {autoBuffProgress.status === 'RUNNING' || isBatchRunning ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs font-bold">
-                              <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span> Đang chạy
-                              {autoBuffProgress.status === 'RUNNING' && runTiming.start && (
-                                <span className="font-normal tabular-nums">
-                                  · {formatDuration(Math.max(0, (clockNow - runTiming.start) / 1000))}
-                                </span>
-                              )}
+                      {/* MINI STATUS WIDGET TRÊN TAB TẠO MỚI (KHÔNG CHIẾM DIỆN TÍCH FORM) */}
+                      {autoBuffProgress.status === 'RUNNING' || isBatchRunning ? (
+                        <div className="p-4 rounded-xl border border-blue-500/40 bg-blue-950/20 space-y-3">
+                          <div className="flex items-center justify-between pb-2 border-b border-blue-800/30">
+                            <span className="text-xs font-bold text-blue-300 flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+                              Có 1 tiến trình đang chạy ngầm
                             </span>
-                          ) : autoBuffProgress.status === 'DONE' ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
-                              <CheckCircleFilled /> Hoàn tất
-                              {runTiming.start && runTiming.end && (
-                                <span className="font-normal tabular-nums">
-                                  · {formatDuration((runTiming.end - runTiming.start) / 1000)}
-                                </span>
-                              )}
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-slate-800/60 border border-slate-700/60 text-slate-400 text-xs font-medium">
-                              Sẵn sàng
-                            </span>
-                          )}
+                            <span className="font-mono text-xs font-bold text-blue-300">{autoBuffProgress.percent}%</span>
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="text-xs text-slate-300 truncate font-mono bg-slate-950/60 p-2 rounded-lg border border-slate-800">
+                              🎯 {runningTargetInfo?.url || 'Bài viết Facebook'}
+                            </div>
+
+                            <div className="flex items-center justify-between text-xs text-slate-400">
+                              <span className="truncate max-w-[200px]">
+                                Đang xử lý: <b className="text-white">{autoBuffProgress.currentRunningPageName || 'Đang mở Facebook...'}</b>
+                              </span>
+                              <span className="font-mono font-bold text-slate-200">
+                                {autoBuffProgress.success + autoBuffProgress.alreadyLiked}/{autoBuffProgress.total}
+                              </span>
+                            </div>
+
+                            <Progress percent={autoBuffProgress.percent} size={['100%', 5]} showInfo={false} />
+
+                            <div className="grid grid-cols-4 gap-1.5 pt-1">
+                              <div className="p-1.5 rounded-lg bg-slate-950/60 border border-slate-800 text-center">
+                                <div className="text-[10px] text-slate-400">Tổng</div>
+                                <div className="text-xs font-bold text-slate-100">{autoBuffProgress.total}</div>
+                              </div>
+                              <div className="p-1.5 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-center">
+                                <div className="text-[10px] text-emerald-400">Thành công</div>
+                                <div className="text-xs font-bold text-emerald-300">{autoBuffProgress.success}</div>
+                              </div>
+                              <div className="p-1.5 rounded-lg bg-blue-950/40 border border-blue-800/50 text-center">
+                                <div className="text-[10px] text-blue-400">Đã like</div>
+                                <div className="text-xs font-bold text-blue-300">{autoBuffProgress.alreadyLiked}</div>
+                              </div>
+                              <div className="p-1.5 rounded-lg bg-rose-950/40 border border-rose-800/50 text-center">
+                                <div className="text-[10px] text-rose-400">Lỗi</div>
+                                <div className="text-xs font-bold text-rose-300">{autoBuffProgress.failed}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="pt-1 flex items-center gap-2">
+                            <Button
+                              type="primary"
+                              size="middle"
+                              onClick={() => setActiveTabKey('buff-running')}
+                              className="flex-1 text-xs font-semibold rounded-lg"
+                              icon={<ExportOutlined />}
+                            >
+                              Xem chi tiết tiến trình ➔
+                            </Button>
+                          </div>
+
+                          <div className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/40 p-2.5 rounded-lg border border-slate-800">
+                            💡 <b>Mẹo:</b> Ô nhập link bên trái đã được làm trống. Bạn có thể dán tiếp link khác và bấm <b>"Đưa bài mới này vào hàng đợi"</b> để tự động chạy nối tiếp mà không cần chờ!
+                          </div>
                         </div>
-
-                        {/* Trạng thái IDLE vs RUNNING/DONE */}
-                        {autoBuffProgress.status === 'IDLE' && !isBatchRunning && batchOrders.length === 0 ? (
-                          <div className="p-6 rounded-xl border border-dashed border-slate-800 text-center text-slate-400 space-y-2.5 bg-slate-950/40">
-                            <div className="w-12 h-12 mx-auto rounded-xl bg-blue-950/60 border border-blue-700/50 flex items-center justify-center text-2xl text-blue-400">
-                                                          </div>
-                            <div>
-                              <div className="text-sm font-bold text-slate-200">Sẵn sàng thực thi tương tác</div>
-                              <div className="text-xs text-slate-400 max-w-sm mx-auto mt-1 leading-relaxed">
-                                Dán link bài viết và bấm nút <b>Bắt đầu</b> ở trên. Bảng theo dõi sẽ hiển thị từng Page/Via thả cảm xúc theo thời gian thực.
-                              </div>
-                            </div>
+                      ) : autoBuffProgress.status === 'DONE' ? (
+                        <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-950/20 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                              <CheckCircleFilled className="text-emerald-400" /> Tiến trình vừa hoàn tất!
+                            </span>
+                            <Tag color="success">{autoBuffProgress.success}/{autoBuffProgress.total} Like</Tag>
                           </div>
-                        ) : (
-                          <div className="space-y-3.5">
-                            {/* 4 ô số liệu: cùng kích thước, nhãn không xuống dòng */}
-                            <div className="grid grid-cols-4 gap-2">
-                              {[
-                                { label: 'Tổng số', value: autoBuffProgress.total || batchOrders.length, box: 'bg-slate-950/80 border-slate-800', lab: 'text-slate-400', num: 'text-slate-100' },
-                                { label: 'Thành công', value: autoBuffProgress.success || batchOrders.filter((o) => o.status === 'COMPLETED').length, box: 'bg-emerald-950/40 border-emerald-800/50', lab: 'text-emerald-400', num: 'text-emerald-300' },
-                                { label: 'Đã like', value: autoBuffProgress.alreadyLiked, box: 'bg-blue-950/40 border-blue-800/50', lab: 'text-blue-400', num: 'text-blue-300' },
-                                { label: 'Lỗi', value: autoBuffProgress.failed || batchOrders.filter((o) => o.status === 'FAILED').length, box: 'bg-rose-950/40 border-rose-800/50', lab: 'text-rose-400', num: 'text-rose-300' },
-                              ].map((m) => (
-                                <div key={m.label} className={`h-[68px] px-1.5 rounded-xl border text-center flex flex-col items-center justify-center ${m.box}`}>
-                                  <div className={`text-[11px] font-medium whitespace-nowrap ${m.lab}`}>{m.label}</div>
-                                  <div className={`text-lg font-semibold tabular-nums leading-tight mt-1 ${m.num}`}>{m.value}</div>
-                                </div>
-                              ))}
-                            </div>
-
-                            {/* Thời gian chạy: luôn hiện khi đang buff */}
-                            {autoBuffProgress.status === 'RUNNING' && runTiming.start && (() => {
-                              const elapsed = Math.max(0, (clockNow - runTiming.start) / 1000);
-                              const finished = autoBuffProgress.success + autoBuffProgress.failed + autoBuffProgress.alreadyLiked;
-                              const remaining =
-                                finished > 0 && autoBuffProgress.total > finished
-                                  ? (elapsed / finished) * (autoBuffProgress.total - finished)
-                                  : null;
-                              return (
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div className="px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800">
-                                    <div className="text-[11px] text-slate-400">Đã chạy</div>
-                                    <div className="text-base font-semibold text-slate-100 tabular-nums">{formatDuration(elapsed)}</div>
-                                  </div>
-                                  <div className="px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800">
-                                    <div className="text-[11px] text-slate-400">Còn khoảng</div>
-                                    <div className="text-base font-semibold text-slate-100 tabular-nums">
-                                      {remaining !== null ? formatDuration(remaining) : 'Đang tính...'}
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })()}
-
-                            {/* Glowing Progress Banner when running */}
-                            {autoBuffProgress.status === 'RUNNING' && (
-                              <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-500/50 space-y-2">
-                                <div className="flex items-center justify-between text-xs text-blue-200">
-                                  <span className="flex items-center gap-1.5 font-bold">
-                                    <LoadingOutlined spin className="text-blue-400" />
-                                    <span>Đang xử lý: <b className="text-white">{autoBuffProgress.currentRunningPageName || 'Đang mở Facebook...'}</b></span>
-                                  </span>
-                                  <span className="font-mono font-bold text-blue-300">{autoBuffProgress.percent}%</span>
-                                </div>
-                                <Progress
-                                  percent={autoBuffProgress.percent}
-                                  size={['100%', 6]}
-                                  showInfo={false}
-                                />
-                              </div>
-                            )}
-
-                            {autoBuffProgress.status === 'DONE' && runTiming.start && runTiming.end && (
-                              <div className="px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between text-sm">
-                                <span className="text-slate-400">Thời gian hoàn thành</span>
-                                <span className="font-semibold text-slate-100 tabular-nums">
-                                  {formatDuration((runTiming.end - runTiming.start) / 1000)}
-                                </span>
-                              </div>
-                            )}
-
-                            {/* Nút mở Facebook kiểm tra kết quả khi hoàn thành */}
-                            {targetPostUrl && autoBuffProgress.status === 'DONE' && (
-                              <Button
-                                type="dashed"
-                                icon={<ExportOutlined />}
-                                onClick={() => window.open(targetPostUrl, '_blank')}
-                                className="w-full text-blue-400 border-blue-500/50 hover:text-blue-300 hover:border-blue-400 h-9 font-bold rounded-xl cursor-pointer"
-                              >
-                                Mở bài viết trên Facebook để kiểm tra kết quả ngay
-                              </Button>
-                            )}
-
-                            {buffMode === 'BATCH' && batchOrders.length > 0 && (
-                              <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
-                                {batchOrders.map((order) => (
-                                  <div key={order.id} className="p-2 rounded-lg border border-slate-800 bg-slate-950/40 space-y-1">
-                                    <div className="flex items-center justify-between gap-2 text-xs">
-                                      <span className="text-slate-300 truncate min-w-0">
-                                        #{order.orderNumber} {order.url}
-                                      </span>
-                                      <Tag
-                                        className="text-[10px] m-0 shrink-0"
-                                        color={
-                                          order.status === 'COMPLETED'
-                                            ? 'success'
-                                            : order.status === 'RUNNING'
-                                            ? 'processing'
-                                            : order.status === 'FAILED'
-                                            ? 'error'
-                                            : 'default'
-                                        }
-                                      >
-                                        {order.status === 'COMPLETED'
-                                          ? `Xong ${order.successLikes}/${order.totalLikesTarget}`
-                                          : order.status === 'RUNNING'
-                                          ? `${order.successLikes}/${order.totalLikesTarget} · ${order.percent || 0}%`
-                                          : order.status === 'FAILED'
-                                          ? 'Lỗi'
-                                          : order.status === 'PAUSED'
-                                          ? 'Đã dừng'
-                                          : 'Chờ'}
-                                      </Tag>
-                                    </div>
-                                    {order.status === 'RUNNING' && order.currentRunningPageName && (
-                                      <div className="text-[11px] text-slate-400 truncate">Đang chạy: {order.currentRunningPageName}</div>
-                                    )}
-                                    {order.status === 'FAILED' && order.error && (
-                                      <div className="text-[11px] text-rose-300 truncate">{order.error}</div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Danh sách Stream Live Results */}
-                            <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-1">
-                              {(buffMode === 'BATCH' && batchOrders.length > 0 ? [] : autoBuffProgress.details).map((detail, index) => {
-                                const reactionObj = REACTIONS.find((r) => r.key === selectedReaction) || REACTIONS[0];
-                                const isRunning = detail.status === 'RUNNING';
-                                const isSuccess = detail.status === 'SUCCESS';
-                                const isAlreadyLiked = detail.status === 'ALREADY_LIKED';
-                                const isWaiting = detail.status === 'WAITING';
-
-                                return (
-                                  <div
-                                    key={detail.pageId + index}
-                                    className={`p-2 rounded-xl border flex items-center justify-between gap-2 transition-all ${
-                                      isRunning
-                                        ? 'border-blue-500 bg-blue-950/50 /50'
-                                        : isSuccess
-                                        ? 'border-emerald-800/40 bg-emerald-950/20'
-                                        : isAlreadyLiked
-                                        ? 'border-blue-800/40 bg-blue-950/20'
-                                        : isWaiting || detail.status === 'SKIPPED'
-                                        ? 'border-slate-800 bg-slate-950/30 opacity-70'
-                                        : detail.status === 'UNVERIFIED'
-                                        ? 'border-amber-800/40 bg-amber-950/20'
-                                        : 'border-rose-800/40 bg-rose-950/20'
-                                    }`}
-                                  >
-                                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                                      {(() => {
-                                        const cleanDetailName = cleanPageName(detail.pageName);
-                                        const detailAvatar =
-                                          avatarCacheMap[detail.pageId]?.avatarUrl ||
-                                          (detail.pageId ? `https://graph.facebook.com/${detail.pageId}/picture?type=square` : '');
-                                        return (
-                                          <>
-                                            <div className="relative w-6 h-6 shrink-0 rounded-lg overflow-hidden bg-slate-800 border border-slate-700/60 shadow-sm flex items-center justify-center">
-                                              {detailAvatar ? (
-                                                <img
-                                                  src={detailAvatar}
-                                                  alt={cleanDetailName}
-                                                  className="w-full h-full object-cover"
-                                                  onError={(e) => {
-                                                    (e.target as HTMLElement).style.display = 'none';
-                                                    const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
-                                                    if (fallback) fallback.classList.remove('hidden');
-                                                  }}
-                                                />
-                                              ) : null}
-                                              <div
-                                                className={`w-full h-full text-on-accent font-semibold text-[9px] items-center justify-center ${getAvatarGradient(
-                                                  cleanDetailName
-                                                )} ${detailAvatar ? 'hidden' : 'flex'}`}
-                                              >
-                                                {getInitials(cleanDetailName)}
-                                              </div>
-                                            </div>
-                                            <div className="min-w-0 flex-1">
-                                              <div className="flex items-center gap-1.5">
-                                                <span className="font-bold text-xs text-slate-100 truncate" title={cleanDetailName}>
-                                                  {cleanDetailName}
-                                                </span>
-                                                {engagementMode !== 'COMMENT_ONLY' && (
-                                                  <span className="text-xs">{reactionObj.emoji}</span>
-                                                )}
-                                              </div>
-                                              {detail.commentText && (
-                                                <div className="text-[10px] text-blue-300 italic truncate max-w-[240px]">
-                                                  "{detail.commentText}"
-                                                </div>
-                                              )}
-                                            </div>
-                                          </>
-                                        );
-                                      })()}
-                                    </div>
-
-                                    <div className="shrink-0">
-                                      {isWaiting && (
-                                        <span className="text-[10px] text-slate-400 font-medium">Chờ lượt</span>
-                                      )}
-                                      {isRunning && (
-                                        <Tag color="processing" icon={<LoadingOutlined spin />} className="font-bold text-[10px] m-0">
-                                          Đang like...
-                                        </Tag>
-                                      )}
-                                      {isSuccess && (
-                                        <Tag color="success" icon={<CheckCircleFilled />} className="text-[10px] m-0">
-                                          {detail.message || 'Thành công'}
-                                        </Tag>
-                                      )}
-                                      {isAlreadyLiked && (
-                                        <Tag color="blue" icon={<CheckOutlined />} className="text-[10px] m-0">
-                                          Đã like trước
-                                        </Tag>
-                                      )}
-                                      {detail.status === 'UNVERIFIED' && (
-                                        <Tag color="warning" className="text-[10px] m-0">Chưa xác nhận</Tag>
-                                      )}
-                                      {detail.status === 'NO_BUTTON' && (
-                                        <Tag color="error" className="text-[10px] m-0">Không thấy nút Like</Tag>
-                                      )}
-                                      {detail.status === 'SKIPPED' && (
-                                        <Tag className="text-[10px] m-0">{detail.message || 'Bỏ qua'}</Tag>
-                                      )}
-                                      {detail.status === 'ERROR' && (
-                                        <Tag color="error" className="text-[10px] m-0">{detail.error || 'Lỗi'}</Tag>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                          <div className="text-xs text-slate-300 truncate font-mono bg-slate-950/50 p-2 rounded-lg border border-slate-800">
+                            {runningTargetInfo?.url || 'Bài viết Facebook'}
                           </div>
-                        )}
-                      </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="small"
+                              type="primary"
+                              onClick={() => setActiveTabKey('buff-running')}
+                              className="text-xs flex-1 rounded-lg"
+                            >
+                              Xem bảng kết quả ➔
+                            </Button>
+                            <Button
+                              size="small"
+                              onClick={() => setActiveTabKey('buff-history')}
+                              className="text-xs rounded-lg"
+                            >
+                              Xem Lịch sử
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-5 rounded-xl border border-dashed border-slate-800 text-center text-slate-400 space-y-2 bg-slate-950/30">
+                          <div className="w-10 h-10 mx-auto rounded-xl bg-blue-950/60 border border-blue-700/40 flex items-center justify-center text-xl text-blue-400">
+                            <PlayCircleOutlined />
+                          </div>
+                          <div className="text-xs font-semibold text-slate-200">Sẵn sàng chạy tương tác</div>
+                          <div className="text-[11px] text-slate-400 max-w-xs mx-auto leading-relaxed">
+                            Dán link bài viết và bấm <b>Bắt đầu</b>. Hệ thống sẽ tự động chuyển sang tab <b>Tiến trình chạy</b> để bạn quan sát từng lượt thả cảm xúc theo thời gian thực.
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </Col>
                 </Row>
+              </div>
+            ),
+          },
+          {
+            key: 'buff-running',
+            label: (
+              <span className="flex items-center gap-1.5">
+                <PlayCircleOutlined className="text-blue-400" />
+                <span>Tiến trình chạy</span>
+                {(autoBuffProgress.status === 'RUNNING' || isBatchRunning) && (
+                  <span className="relative flex h-2 w-2 ml-0.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                  </span>
+                )}
+              </span>
+            ),
+            children: (
+              <div className="space-y-4">
+                {/* Header bar */}
+                <div className="app-surface p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2.5">
+                      <h2 className="text-base sm:text-lg font-bold text-slate-100 flex items-center gap-2 m-0">
+                        <PlayCircleOutlined className="text-blue-400" /> Tiến trình tương tác trực tiếp
+                      </h2>
+                      {autoBuffProgress.status === 'RUNNING' || isBatchRunning ? (
+                        <Tag color="processing" className="text-xs font-bold px-2.5 py-0.5 rounded-full border-blue-500/40">
+                          <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse inline-block mr-1.5"></span>
+                          Đang chạy trực tiếp
+                        </Tag>
+                      ) : autoBuffProgress.status === 'DONE' ? (
+                        <Tag color="success" className="text-xs font-bold px-2.5 py-0.5 rounded-full">
+                          <CheckCircleFilled className="mr-1" /> Đã hoàn thành
+                        </Tag>
+                      ) : (
+                        <Tag className="text-xs font-medium px-2.5 py-0.5 rounded-full text-slate-400 bg-slate-800/60 border-slate-700/60">
+                          Chưa có tiến trình
+                        </Tag>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1 mb-0">
+                      {autoBuffProgress.status === 'RUNNING' || isBatchRunning
+                        ? 'Hệ thống đang điều khiển Playwright tự động thả cảm xúc và bình luận theo thời gian thực.'
+                        : autoBuffProgress.status === 'DONE'
+                        ? 'Chiến dịch vừa hoàn thành toàn bộ lượt tương tác.'
+                        : 'Không có chiến dịch nào đang chạy. Bạn có thể sang tab Tạo mới để bắt đầu.'}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      type="primary"
+                      icon={<PlusOutlined />}
+                      onClick={() => setActiveTabKey('buff-like')}
+                      className="font-semibold rounded-xl text-xs sm:text-sm h-9"
+                    >
+                      Thêm link khác
+                    </Button>
+                    {queueItems.length > 0 && (
+                      <Button
+                        icon={<ClockCircleOutlined />}
+                        onClick={() => setActiveTabKey('buff-queue')}
+                        className="rounded-xl text-xs sm:text-sm h-9"
+                      >
+                        Hàng đợi ({queueItems.length})
+                      </Button>
+                    )}
+                    {autoBuffProgress.status === 'RUNNING' && (
+                      <Button
+                        danger
+                        type="primary"
+                        icon={<StopOutlined />}
+                        onClick={handleStopAutoBuff}
+                        className="font-semibold rounded-xl text-xs sm:text-sm h-9"
+                      >
+                        Dừng khẩn cấp
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Empty State when IDLE */}
+                {autoBuffProgress.status === 'IDLE' && !isBatchRunning && batchOrders.length === 0 ? (
+                  <div className="app-surface p-12 text-center space-y-4 max-w-xl mx-auto rounded-2xl border border-dashed border-slate-800">
+                    <div className="w-16 h-16 mx-auto rounded-2xl bg-blue-950/60 border border-blue-500/30 flex items-center justify-center text-3xl text-blue-400 shadow-lg shadow-blue-500/10">
+                      <PlayCircleOutlined />
+                    </div>
+                    <div className="space-y-1.5">
+                      <h3 className="text-lg font-bold text-slate-100">Hiện tại chưa có tiến trình nào đang chạy</h3>
+                      <p className="text-xs sm:text-sm text-slate-400 leading-relaxed max-w-md mx-auto">
+                        Khi bạn bấm <b>Bắt đầu</b> ở tab Tạo mới hoặc khi các bài trong Hàng đợi đến lượt chạy, toàn bộ tiến trình real-time của từng Fanpage/Via sẽ hiển thị chi tiết tại đây.
+                      </p>
+                    </div>
+                    <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+                      <Button
+                        type="primary"
+                        size="large"
+                        icon={<PlusOutlined />}
+                        onClick={() => setActiveTabKey('buff-like')}
+                        className="font-semibold rounded-xl"
+                      >
+                        Tạo chiến dịch mới ngay
+                      </Button>
+                      {buffLogs.length > 0 && (
+                        <Button
+                          size="large"
+                          icon={<HistoryOutlined />}
+                          onClick={() => setActiveTabKey('buff-history')}
+                          className="font-semibold rounded-xl"
+                        >
+                          Xem lịch sử bài trước ({buffLogs.length})
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Post Meta & Timing Banner */}
+                    <div className="app-surface p-4 sm:p-5 space-y-4">
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs text-slate-400 font-medium">Bài viết đang tương tác:</div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-sm font-mono font-bold text-blue-300 truncate max-w-xl">
+                              {runningTargetInfo?.url || targetPostUrl || 'Bài viết Facebook'}
+                            </span>
+                            {(runningTargetInfo?.url || targetPostUrl) && (
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<ExportOutlined />}
+                                onClick={() => window.open(runningTargetInfo?.url || targetPostUrl, '_blank')}
+                                className="text-blue-400 hover:text-blue-300 text-xs shrink-0 p-1 h-auto"
+                                title="Mở link trên Facebook"
+                              >
+                                Mở Facebook
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3 shrink-0 text-xs">
+                          <div className="px-3 py-1.5 rounded-lg bg-slate-950/60 border border-slate-800 flex items-center gap-1.5">
+                            <span className="text-slate-400">Cảm xúc:</span>
+                            <span className="font-bold text-slate-100">
+                              {(() => {
+                                const rxKey = runningTargetInfo?.reaction || selectedReaction;
+                                const r = REACTIONS.find((x) => x.key === rxKey);
+                                return r ? `${r.emoji} ${r.label}` : rxKey;
+                              })()}
+                            </span>
+                          </div>
+                          <div className="px-3 py-1.5 rounded-lg bg-slate-950/60 border border-slate-800 flex items-center gap-1.5">
+                            <span className="text-slate-400">Mục tiêu:</span>
+                            <span className="font-bold text-slate-100 tabular-nums">
+                              {autoBuffProgress.total || runningTargetInfo?.count || 0} nick
+                            </span>
+                          </div>
+                          {runTiming.start && (
+                            <div className="px-3 py-1.5 rounded-lg bg-slate-950/60 border border-slate-800 flex items-center gap-1.5">
+                              <span className="text-slate-400">Đã chạy:</span>
+                              <span className="font-mono font-bold text-blue-300 tabular-nums">
+                                {formatDuration(
+                                  Math.max(0, ((runTiming.end || clockNow) - runTiming.start) / 1000)
+                                )}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Glowing Live Progress Bar */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-xs sm:text-sm">
+                          <span className="flex items-center gap-2 font-semibold text-slate-200">
+                            {autoBuffProgress.status === 'RUNNING' && <LoadingOutlined spin className="text-blue-400" />}
+                            {autoBuffProgress.status === 'DONE' && <CheckCircleFilled className="text-emerald-400" />}
+                            <span>
+                              {autoBuffProgress.status === 'RUNNING'
+                                ? `Đang xử lý: `
+                                : autoBuffProgress.status === 'DONE'
+                                ? 'Đã hoàn tất tương tác: '
+                                : 'Trạng thái: '}
+                              <b className="text-white">
+                                {autoBuffProgress.status === 'DONE'
+                                  ? '100% mục tiêu hoàn thành'
+                                  : autoBuffProgress.currentRunningPageName || 'Đang mở Facebook...'}
+                              </b>
+                            </span>
+                          </span>
+                          <span className="font-mono text-base font-extrabold text-blue-300">
+                            {autoBuffProgress.percent}%
+                          </span>
+                        </div>
+                        <Progress
+                          percent={autoBuffProgress.percent}
+                          status={autoBuffProgress.status === 'RUNNING' ? 'active' : undefined}
+                          strokeColor={{ '0%': '#3b82f6', '100%': '#10b981' }}
+                          size={['100%', 10]}
+                          showInfo={false}
+                        />
+                      </div>
+
+                      {/* 4 KPI Metrics */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                        <div className="p-3.5 rounded-xl border bg-slate-950/80 border-slate-800 text-center">
+                          <div className="text-xs text-slate-400 font-medium">Tổng số nick</div>
+                          <div className="text-2xl font-extrabold text-slate-100 tabular-nums mt-1">
+                            {autoBuffProgress.total || batchOrders.length}
+                          </div>
+                        </div>
+                        <div className="p-3.5 rounded-xl border bg-emerald-950/40 border-emerald-800/50 text-center">
+                          <div className="text-xs text-emerald-400 font-medium">Thành công</div>
+                          <div className="text-2xl font-extrabold text-emerald-300 tabular-nums mt-1">
+                            {autoBuffProgress.success || batchOrders.filter((o) => o.status === 'COMPLETED').length}
+                          </div>
+                        </div>
+                        <div className="p-3.5 rounded-xl border bg-blue-950/40 border-blue-800/50 text-center">
+                          <div className="text-xs text-blue-400 font-medium">Đã like trước</div>
+                          <div className="text-2xl font-extrabold text-blue-300 tabular-nums mt-1">
+                            {autoBuffProgress.alreadyLiked}
+                          </div>
+                        </div>
+                        <div className="p-3.5 rounded-xl border bg-rose-950/40 border-rose-800/50 text-center">
+                          <div className="text-xs text-rose-400 font-medium">Lỗi / Bỏ qua</div>
+                          <div className="text-2xl font-extrabold text-rose-300 tabular-nums mt-1">
+                            {autoBuffProgress.failed || batchOrders.filter((o) => o.status === 'FAILED').length}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* If DONE: Celebration Box */}
+                      {autoBuffProgress.status === 'DONE' && (
+                        <div className="p-4 rounded-xl border border-emerald-500/40 bg-emerald-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-xl text-emerald-400 shrink-0">
+                              🎉
+                            </div>
+                            <div>
+                              <div className="text-sm font-bold text-emerald-300">Chiến dịch tương tác hoàn tất xuất sắc!</div>
+                              <div className="text-xs text-slate-400">
+                                Đã hoàn thành {autoBuffProgress.success}/{autoBuffProgress.total} like. Dữ liệu đã lưu vào Lịch sử và gửi thông báo Telegram.
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {(runningTargetInfo?.url || targetPostUrl) && (
+                              <Button
+                                type="primary"
+                                icon={<ExportOutlined />}
+                                onClick={() => window.open(runningTargetInfo?.url || targetPostUrl, '_blank')}
+                                className="font-semibold text-xs rounded-xl"
+                              >
+                                Kiểm tra trên Facebook
+                              </Button>
+                            )}
+                            <Button
+                              icon={<HistoryOutlined />}
+                              onClick={() => setActiveTabKey('buff-history')}
+                              className="text-xs rounded-xl"
+                            >
+                              Xem Lịch sử
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Batch Orders View (if batch mode) */}
+                    {buffMode === 'BATCH' && batchOrders.length > 0 && (
+                      <div className="app-surface p-4 sm:p-5 space-y-3">
+                        <div className="text-sm font-bold text-slate-100">Danh sách bài viết trong Batch ({batchOrders.length} bài)</div>
+                        <div className="space-y-2">
+                          {batchOrders.map((order) => (
+                            <div key={order.id} className="p-3 rounded-xl border border-slate-800 bg-slate-950/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-mono font-semibold text-slate-200 truncate">
+                                  #{order.orderNumber} {order.url}
+                                </div>
+                                {order.status === 'RUNNING' && order.currentRunningPageName && (
+                                  <div className="text-[11px] text-blue-300 mt-0.5">
+                                    Đang chạy: {order.currentRunningPageName}
+                                  </div>
+                                )}
+                                {order.status === 'FAILED' && order.error && (
+                                  <div className="text-[11px] text-rose-300 mt-0.5">{order.error}</div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 shrink-0">
+                                <span className="text-xs text-slate-400 tabular-nums">
+                                  {order.successLikes}/{order.totalLikesTarget} like
+                                </span>
+                                <Tag
+                                  color={
+                                    order.status === 'COMPLETED'
+                                      ? 'success'
+                                      : order.status === 'RUNNING'
+                                      ? 'processing'
+                                      : order.status === 'FAILED'
+                                      ? 'error'
+                                      : 'default'
+                                  }
+                                  className="text-xs font-semibold m-0"
+                                >
+                                  {order.status === 'COMPLETED'
+                                    ? 'Hoàn thành'
+                                    : order.status === 'RUNNING'
+                                    ? `Đang chạy (${order.percent || 0}%)`
+                                    : order.status === 'FAILED'
+                                    ? 'Thất bại'
+                                    : order.status === 'PAUSED'
+                                    ? 'Tạm dừng'
+                                    : 'Chờ đến lượt'}
+                                </Tag>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Detailed Live Accounts Execution Feed */}
+                    <div className="app-surface p-4 sm:p-5 space-y-4">
+                      {/* Filter & Search Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {[
+                            { key: 'ALL', label: 'Tất cả', count: autoBuffProgress.details.length },
+                            { key: 'RUNNING', label: 'Đang chạy', count: autoBuffProgress.details.filter((d) => d.status === 'RUNNING').length },
+                            { key: 'SUCCESS', label: 'Thành công', count: autoBuffProgress.details.filter((d) => d.status === 'SUCCESS').length },
+                            { key: 'ALREADY_LIKED', label: 'Đã like trước', count: autoBuffProgress.details.filter((d) => d.status === 'ALREADY_LIKED').length },
+                            { key: 'FAILED', label: 'Lỗi', count: autoBuffProgress.details.filter((d) => d.status === 'ERROR' || d.status === 'NO_BUTTON').length },
+                            { key: 'WAITING', label: 'Chờ lượt', count: autoBuffProgress.details.filter((d) => d.status === 'WAITING').length },
+                          ].map((f) => (
+                            <button
+                              key={f.key}
+                              type="button"
+                              onClick={() => setRunningFilter(f.key as any)}
+                              className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                                runningFilter === f.key
+                                  ? 'bg-blue-600 text-white shadow-sm'
+                                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                              }`}
+                            >
+                              {f.label} ({f.count})
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="w-full sm:w-56">
+                          <Input
+                            placeholder="Tìm kiếm tài khoản..."
+                            prefix={<SearchOutlined className="text-slate-500" />}
+                            size="small"
+                            value={runningSearch}
+                            onChange={(e) => setRunningSearch(e.target.value)}
+                            allowClear
+                            className="rounded-lg"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Items Grid */}
+                      {(() => {
+                        const filtered = autoBuffProgress.details.filter((d) => {
+                          if (runningFilter === 'RUNNING' && d.status !== 'RUNNING') return false;
+                          if (runningFilter === 'SUCCESS' && d.status !== 'SUCCESS') return false;
+                          if (runningFilter === 'ALREADY_LIKED' && d.status !== 'ALREADY_LIKED') return false;
+                          if (runningFilter === 'FAILED' && (d.status !== 'ERROR' && d.status !== 'NO_BUTTON')) return false;
+                          if (runningFilter === 'WAITING' && d.status !== 'WAITING') return false;
+                          if (runningSearch.trim()) {
+                            const q = runningSearch.trim().toLowerCase();
+                            return (
+                              d.pageName.toLowerCase().includes(q) ||
+                              (d.viaName && d.viaName.toLowerCase().includes(q))
+                            );
+                          }
+                          return true;
+                        });
+
+                        if (filtered.length === 0) {
+                          return (
+                            <div className="py-8 text-center text-xs text-slate-500">
+                              Không có tài khoản nào phù hợp bộ lọc.
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[500px] overflow-y-auto pr-1">
+                            {filtered.map((detail, index) => {
+                              const rxKey = runningTargetInfo?.reaction || selectedReaction;
+                              const reactionObj =
+                                REACTIONS.find((r) => r.key === rxKey) ||
+                                REACTIONS[0];
+                              const isRunning = detail.status === 'RUNNING';
+                              const isSuccess = detail.status === 'SUCCESS';
+                              const isAlreadyLiked = detail.status === 'ALREADY_LIKED';
+                              const isWaiting = detail.status === 'WAITING';
+                              const cleanDetailName = cleanPageName(detail.pageName);
+                              const detailAvatar =
+                                avatarCacheMap[detail.pageId]?.avatarUrl ||
+                                (detail.pageId ? `https://graph.facebook.com/${detail.pageId}/picture?type=square` : '');
+
+                              return (
+                                <div
+                                  key={detail.pageId + index}
+                                  className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${
+                                    isRunning
+                                      ? 'border-blue-500 bg-blue-950/40 shadow-sm shadow-blue-500/20'
+                                      : isSuccess
+                                      ? 'border-emerald-800/40 bg-emerald-950/20'
+                                      : isAlreadyLiked
+                                      ? 'border-blue-800/40 bg-blue-950/20'
+                                      : isWaiting || detail.status === 'SKIPPED'
+                                      ? 'border-slate-800/80 bg-slate-950/30 opacity-70'
+                                      : 'border-rose-800/40 bg-rose-950/20'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <div className="relative w-8 h-8 shrink-0 rounded-lg overflow-hidden bg-slate-800 border border-slate-700/60 shadow-sm flex items-center justify-center">
+                                      {detailAvatar ? (
+                                        <img
+                                          src={detailAvatar}
+                                          alt={cleanDetailName}
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => {
+                                            (e.target as HTMLElement).style.display = 'none';
+                                            const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
+                                            if (fallback) fallback.classList.remove('hidden');
+                                          }}
+                                        />
+                                      ) : null}
+                                      <div
+                                        className={`w-full h-full text-on-accent font-semibold text-xs items-center justify-center ${getAvatarGradient(
+                                          cleanDetailName
+                                        )} ${detailAvatar ? 'hidden' : 'flex'}`}
+                                      >
+                                        {getInitials(cleanDetailName)}
+                                      </div>
+                                    </div>
+
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-bold text-xs text-slate-100 truncate" title={cleanDetailName}>
+                                          {cleanDetailName}
+                                        </span>
+                                        {engagementMode !== 'COMMENT_ONLY' && (
+                                          <span className="text-xs shrink-0">{reactionObj.emoji}</span>
+                                        )}
+                                      </div>
+                                      {detail.viaName && (
+                                        <div className="text-[10px] text-slate-400 truncate">
+                                          Via: {detail.viaName}
+                                        </div>
+                                      )}
+                                      {detail.commentText && (
+                                        <div className="text-[10px] text-blue-300 italic truncate max-w-[280px]">
+                                          "{detail.commentText}"
+                                        </div>
+                                      )}
+                                      {detail.error && (
+                                        <div className="text-[10px] text-rose-300 truncate max-w-[280px]">
+                                          {detail.error}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="shrink-0">
+                                    {isWaiting && (
+                                      <span className="text-[10px] text-slate-400 font-medium px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
+                                        Chờ lượt
+                                      </span>
+                                    )}
+                                    {isRunning && (
+                                      <Tag color="processing" icon={<LoadingOutlined spin />} className="font-bold text-[10px] m-0">
+                                        Đang thả like...
+                                      </Tag>
+                                    )}
+                                    {isSuccess && (
+                                      <Tag color="success" icon={<CheckCircleFilled />} className="text-[10px] m-0 font-semibold">
+                                        {detail.message || 'Thành công'}
+                                      </Tag>
+                                    )}
+                                    {isAlreadyLiked && (
+                                      <Tag color="blue" icon={<CheckOutlined />} className="text-[10px] m-0">
+                                        Đã like trước
+                                      </Tag>
+                                    )}
+                                    {detail.status === 'ERROR' && (
+                                      <Tag color="error" className="text-[10px] m-0 font-medium">
+                                        {detail.error || 'Lỗi'}
+                                      </Tag>
+                                    )}
+                                    {detail.status === 'NO_BUTTON' && (
+                                      <Tag color="error" className="text-[10px] m-0">
+                                        Không thấy nút Like
+                                      </Tag>
+                                    )}
+                                    {detail.status === 'SKIPPED' && (
+                                      <Tag className="text-[10px] m-0">{detail.message || 'Bỏ qua'}</Tag>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
             ),
           },
