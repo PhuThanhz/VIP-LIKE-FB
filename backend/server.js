@@ -19,6 +19,8 @@ const {
   loadSettings: loadBuffSettings,
   saveSettings: saveBuffSettings,
   notifyViaDead,
+  notifyBuffStarted,
+  notifyQueueAdded,
   notifyBuffCompleted,
   notifyPostHunted,
   notifyQueueIdle,
@@ -1208,6 +1210,16 @@ app.post('/api/buff-like', async (req, res) => {
     const proxyUrl = await resolveViaProxy(cookieString, explicitProxy);
     const laneUid = fbBuffTool.getUserIdFromCookie(cookieString);
     const startMs = Date.now();
+
+    notifyBuffStarted({
+      targetUrl,
+      total: selectedPages?.length || 0,
+      reactionType,
+      speedMode,
+      concurrency: Math.max(1, Math.min(5, parseInt(concurrency, 10) || 1)),
+      accountName: 'Via ' + (laneUid || 'FB'),
+    }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo bắt đầu buff:', err.message));
+
     const result = await withBuffLane(laneUid, () =>
       fbBuffTool.buffLikesWithPages(cookieString, targetUrl, {
         reactionType,
@@ -1417,6 +1429,15 @@ app.post('/api/buff-like-stream', async (req, res) => {
     const proxyUrl = await resolveViaProxy(cookieString, explicitProxy);
     const laneUid = fbBuffTool.getUserIdFromCookie(cookieString);
 
+    notifyBuffStarted({
+      targetUrl,
+      total: Math.max(incomingTotal, selectedPages.length),
+      reactionType,
+      speedMode,
+      concurrency: Math.max(1, Math.min(5, parseInt(concurrency, 10) || 1)),
+      accountName: 'Via ' + (laneUid || 'FB'),
+    }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo stream bắt đầu:', err.message));
+
     const result = await withBuffLane(laneUid, () =>
       fbBuffTool.buffLikesWithPages(cookieString, targetUrl, {
         reactionType,
@@ -1622,6 +1643,14 @@ app.post('/api/buff-queue/add', async (req, res) => {
         task: result.task,
       });
     }
+
+    notifyQueueAdded({
+      targetUrl: req.body.targetUrl,
+      targetLikes: req.body.targetLikes || 30,
+      reactionType: req.body.reactionType || 'LIKE',
+      delayMinutes: req.body.delayMinutes || 0,
+    }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo hàng đợi:', err.message));
+
     return res.json({ success: true, task: result.task });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -1679,6 +1708,15 @@ app.post('/api/buff-queue/batch-add', async (req, res) => {
         added.push(result.task);
       }
     });
+
+    if (added.length > 0) {
+      notifyQueueAdded({
+        targetUrl: `${added.length} bài viết (Gộp đơn)`,
+        targetLikes: `${targetLikes} like/bài`,
+        reactionType,
+        delayMinutes: baseDelay,
+      }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo batch hàng đợi:', err.message));
+    }
 
     return res.json({
       success: true,
@@ -1927,6 +1965,15 @@ async function executeQueueTask(task) {
     let totalSuccess = 0;
     let totalFailed = 0;
     let totalDone = 0;
+
+    notifyBuffStarted({
+      targetUrl: task.targetUrl,
+      total: pagesToBuff.length,
+      reactionType: task.reactionType || 'RANDOM_POSITIVE',
+      speedMode: task.speedMode || 'FAST',
+      concurrency: 2,
+      accountName: 'Queue Worker Auto',
+    }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi thông báo queue worker bắt đầu:', err.message));
 
     for (const group of viaGroupsMap.values()) {
       if (isEmergencyStopped()) break;

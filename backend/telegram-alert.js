@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS = {
   telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
   notifyOnViaDead: true,
   notifyOnHunter: true,
+  notifyOnBuffStart: true,
   notifyOnBuffDone: true,
   notifyOnQueueIssue: true,
   // Giờ yên tĩnh: trong khung này chỉ gửi tin nghiêm trọng, tin còn lại được gom lại gửi sau
@@ -277,6 +278,74 @@ async function notifyBuffCompleted({ targetUrl, success, total, failed, duration
   return sendAlert(msg, { critical: true });
 }
 
+// 3.1. THÔNG BÁO BẮT ĐẦU CHIẾN DỊCH BUFF MỚI
+async function notifyBuffStarted({
+  targetUrl,
+  total,
+  reactionType = 'LIKE',
+  speedMode = 'NORMAL',
+  concurrency = 2,
+  accountName = 'Dàn Via Facebook',
+}) {
+  const settings = loadSettings();
+  if (settings.notifyOnBuffStart === false) return;
+
+  const now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const reactionEmoji =
+    reactionType === 'LIKE' ? '👍 Thích (Like)'
+    : reactionType === 'LOVE' ? '❤️ Thả tim (Love)'
+    : reactionType === 'CARE' ? '🥰 Thương thương (Care)'
+    : reactionType === 'HAHA' ? '😆 Haha'
+    : reactionType === 'WOW' ? '😮 Wow'
+    : reactionType === 'SAD' ? '😢 Buồn (Sad)'
+    : reactionType === 'ANGRY' ? '😡 Phẫn nộ (Angry)'
+    : reactionType === 'RANDOM_POSITIVE' ? '🎲 Random tích cực (Like/Love/Care)'
+    : reactionType;
+
+  const msg = [
+    `📥 <b>[ĐÃ NHẬN CHIẾN DỊCH BUFF MỚI]</b>`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `🔗 <b>Bài viết:</b> <a href="${targetUrl}">${targetUrl}</a>`,
+    `🎯 <b>Mục tiêu:</b> <b>${total}</b> like`,
+    `💖 <b>Cảm xúc:</b> ${reactionEmoji}`,
+    `⚡ <b>Tốc độ:</b> ${concurrency} luồng (${speedMode})`,
+    `🤖 <b>Tài khoản:</b> ${accountName}`,
+    `⏰ <b>Bắt đầu lúc:</b> ${now}`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `🚀 <i>Bot Playwright đang tiến hành điều phối và tương tác trực tiếp...</i>`,
+  ].join('\n');
+
+  return sendAlert(msg, { critical: true });
+}
+
+// 3.2. THÔNG BÁO THÊM ĐƠN VÀO HÀNG ĐỢI
+async function notifyQueueAdded({
+  targetUrl,
+  targetLikes,
+  reactionType = 'LIKE',
+  delayMinutes = 0,
+}) {
+  const settings = loadSettings();
+  if (settings.notifyOnBuffStart === false) return;
+
+  const now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const delayText = delayMinutes > 0 ? `Sau ${delayMinutes} phút` : 'Ngay khi tới lượt';
+
+  const msg = [
+    `📥 <b>[ĐÃ THÊM VÀO HÀNG ĐỢI BUFF]</b>`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `🔗 <b>Bài viết:</b> <a href="${targetUrl}">${targetUrl}</a>`,
+    `🎯 <b>Số lượng:</b> <b>${targetLikes}</b> like`,
+    `💖 <b>Cảm xúc:</b> ${reactionType}`,
+    `⏳ <b>Lịch chạy:</b> ${delayText}`,
+    `⏰ <b>Thời gian nhận:</b> ${now}`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `📋 <i>Hệ thống sẽ tự động xếp lịch và xoay vòng dàn Page chạy nối tiếp.</i>`,
+  ].join('\n');
+
+  return sendAlert(msg, { critical: true });
+}
+
 // 4. CẢNH BÁO DỪNG KHẨN CẤP
 async function notifyEmergencyStop({ triggeredBy = 'Admin', reason = '' }) {
   const now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
@@ -425,6 +494,8 @@ module.exports = {
   sendTelegramMessage,
   notifyViaDead,
   notifyPostHunted,
+  notifyBuffStarted,
+  notifyQueueAdded,
   notifyBuffCompleted,
   notifyEmergencyStop,
   notifyQueueIdle,
