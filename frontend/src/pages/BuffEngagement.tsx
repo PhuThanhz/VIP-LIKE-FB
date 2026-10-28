@@ -807,6 +807,26 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       .catch(() => {});
   }, []);
 
+  // Danh sách ID các Fanpage đã từng like link bài viết này trong hệ thống backend
+  const [interactedPageIds, setInteractedPageIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!targetPostUrl || !targetPostUrl.includes('facebook.com')) {
+      setInteractedPageIds(new Set());
+      return;
+    }
+    const timer = setTimeout(() => {
+      api.get('/api/buff-post-interacted-pages', { params: { url: targetPostUrl.trim() } })
+        .then((res) => {
+          if (res.data?.success && Array.isArray(res.data.interactedPageIds)) {
+            setInteractedPageIds(new Set(res.data.interactedPageIds));
+          }
+        })
+        .catch(() => {});
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [targetPostUrl]);
+
   // Auto-Buff Queue State (Hunter-Ready & Background Pipeline)
   const [queueItems, setQueueItems] = useState<any[]>([]);
   const [queueUrlInput, setQueueUrlInput] = useState<string>('');
@@ -2091,14 +2111,22 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     );
   }, [scannedPages, pageSearchQuery, viaFilter]);
 
-  // Chọn nhanh ngẫu nhiên N Fanpage từ dàn Page
+  // Chọn nhanh ngẫu nhiên N Fanpage từ dàn Page (tự động loại trừ các Page đã like bài này)
   const handleSelectRandomPages = (count: number) => {
     if (scannedPages.length === 0) return;
-    const targetCount = Math.min(count, scannedPages.length);
-    const shuffled = [...scannedPages].sort(() => 0.5 - Math.random());
+    const freshPages = scannedPages.filter(
+      (p) => !interactedPageIds.has(p.id) && !alreadyLikedPagesForUrl.some((al) => al.pageId === p.id)
+    );
+    const pool = freshPages.length > 0 ? freshPages : scannedPages;
+    const targetCount = Math.min(count, pool.length);
+    const shuffled = [...pool].sort(() => 0.5 - Math.random());
     const selected = shuffled.slice(0, targetCount).map((p) => p.id);
     setSelectedPageIds(selected);
-    message.success(`Đã chọn ngẫu nhiên ${selected.length} Fanpage sẵn sàng tương tác!`);
+    if (freshPages.length < scannedPages.length && pool === freshPages) {
+      message.success(`Đã tự động loại trừ Page cũ và chọn ngẫu nhiên ${selected.length} Fanpage mới chưa like!`);
+    } else {
+      message.success(`Đã chọn ngẫu nhiên ${selected.length} Fanpage sẵn sàng tương tác!`);
+    }
   };
 
   // Mutation: Scan Fanpages from Cookie (Merges & preserves pages, never drops count)
@@ -3723,11 +3751,11 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               </Checkbox>
                             </div>
 
-                            {/* Thanh công cụ Chọn Nhanh Số Lượng Page (20, 50, 100, 200, All) */}
+                            {/* Thanh công cụ Chọn Nhanh Số Lượng Page (20, 50, 100, 200, 300, 400, 500, All) */}
                             {scannedPages.length > 5 && (
                               <div className="flex items-center gap-1.5 flex-wrap p-2 rounded-xl bg-slate-950/70 border border-slate-800/80">
                                 <span className="text-[11px] text-slate-400 font-semibold">Chọn nhanh:</span>
-                                {[20, 50, 100, 200]
+                                {[20, 50, 100, 200, 300, 400, 500]
                                   .filter((n) => n <= scannedPages.length)
                                   .map((num) => (
                                     <Button
@@ -3805,10 +3833,35 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               />
                             )}
 
+                            {/* Cảnh báo phát hiện Page đã từng tương tác bài viết này */}
+                            {(interactedPageIds.size > 0 || alreadyLikedPagesForUrl.length > 0) && (
+                              <div className="p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/30 text-xs flex items-center justify-between gap-2">
+                                <span className="text-amber-300 font-medium flex items-center gap-1.5 text-[11px]">
+                                  <InfoCircleOutlined className="text-amber-400" />
+                                  <span>Phát hiện <b>{Math.max(interactedPageIds.size, alreadyLikedPagesForUrl.length)} Page</b> từng like link này. Nút "Chọn nhanh" sẽ tự động ưu tiên các Page mới chưa like!</span>
+                                </span>
+                                <Button
+                                  size="small"
+                                  onClick={() => {
+                                    const allInteracted = new Set([
+                                      ...Array.from(interactedPageIds),
+                                      ...alreadyLikedPagesForUrl.map((al) => al.pageId),
+                                    ]);
+                                    setSelectedPageIds((prev) => prev.filter((id) => !allInteracted.has(id)));
+                                    message.success('Đã tự động bỏ chọn các Page đã từng like bài viết này!');
+                                  }}
+                                  className="text-[11px] h-6 px-2 rounded-lg bg-amber-900/60 border-amber-600/50 text-amber-200 cursor-pointer shrink-0"
+                                >
+                                  Bỏ chọn Page đã like
+                                </Button>
+                              </div>
+                            )}
+
                             {/* Grid các Via/Fanpage card */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[360px] overflow-y-auto pr-1">
                               {filteredPages.map((page) => {
                                 const isChecked = selectedPageIds.includes(page.id);
+                                const isAlreadyLiked = interactedPageIds.has(page.id) || alreadyLikedPagesForUrl.some((al) => al.pageId === page.id);
                                 const cleanName = cleanPageName(page.name);
                                 const avatarInfo = avatarCacheMap[page.id];
                                 const avatarUrl =
@@ -3859,6 +3912,11 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                         </div>
                                         <div className="flex items-center gap-1 text-[10px] font-mono text-slate-400 truncate">
                                           <span>ID: {page.id}</span>
+                                          {isAlreadyLiked && (
+                                            <Tag color="orange" className="text-[9px] m-0 border-0 px-1 py-0 leading-tight">
+                                              Đã like
+                                            </Tag>
+                                          )}
                                           {actorMode === 'VIAS' ? (
                                             <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 font-sans font-medium">
                                               Via

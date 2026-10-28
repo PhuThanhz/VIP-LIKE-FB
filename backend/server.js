@@ -2957,6 +2957,24 @@ app.get('/api/buff-seeding-presets', (req, res) => {
   });
 });
 
+// Lấy danh sách ID các Fanpage đã từng like/tương tác với bài viết mục tiêu (chống trùng lặp tức thì)
+app.get('/api/buff-post-interacted-pages', async (req, res) => {
+  if (!(await checkLicenseOrReject(req, res))) return;
+  const targetUrl = req.query.url;
+  if (!targetUrl) {
+    return res.json({ success: true, count: 0, interactedPageIds: [] });
+  }
+  const normUrl = fbBuffTool.normalizeFbPostUrl(targetUrl);
+  const interactedSet = fbBuffTool.getPostInteractedPageIds(normUrl);
+  const interactedPageIds = Array.from(interactedSet);
+  return res.json({
+    success: true,
+    normalizedUrl: normUrl,
+    count: interactedPageIds.length,
+    interactedPageIds,
+  });
+});
+
 // Lấy dữ liệu báo cáo tổng quan ngày (cho trang Săn bài & VIP Like)
 app.get('/api/buff-daily-report', async (req, res) => {
   try {

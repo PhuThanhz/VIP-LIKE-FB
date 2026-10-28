@@ -13,6 +13,7 @@ const {
   recordPagePostInteraction,
   hasPageInteractedWithPost,
   getGlobalRegistryStats,
+  getPostInteractedPageIds,
   normalizeFbPostUrl,
 } = require('./page-post-registry');
 const { isEmergencyStopped, loadSettings } = require('./telegram-alert');
@@ -2819,6 +2820,8 @@ module.exports = {
   recordPagePostInteraction,
   hasPageInteractedWithPost,
   getGlobalRegistryStats,
+  getPostInteractedPageIds,
+  normalizeFbPostUrl,
   resolveSpintax,
   executePostShare,
   SEEDING_PRESETS,
