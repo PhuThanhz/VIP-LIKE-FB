@@ -832,7 +832,7 @@ async function verifyReacted(handle, beforeAria, refind = null, maxWaitMs = 2600
 }
 
 // Hàm tính toán độ trễ tối ưu giữa các trang theo chế độ tốc độ (chống lag, không kẹt số)
-function calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMinutes, totalPages, concurrency, speedMode = 'NORMAL') {
+function calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMinutes, totalPages, concurrency, speedMode = 'SMART') {
   if (dripFeedMode && dripDurationMinutes > 0) {
     const totalDurationMs = dripDurationMinutes * 60 * 1000;
     const dripBaseWait = Math.max(delayMs, Math.floor((totalDurationMs / Math.max(1, totalPages)) * concurrency));
@@ -841,24 +841,39 @@ function calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMi
   }
 
   if (enableComment) {
-    const baseWait = delayMs > 0 ? Math.max(delayMs, 4500) : 8000;
+    const baseWait = delayMs > 0 ? Math.max(delayMs, 4800) : 8000;
     return baseWait + Math.floor(Math.random() * 1800);
+  }
+
+  // Chế độ Smart Adaptive Pacing: Tự động điều chỉnh nhịp an toàn dựa trên tổng số page
+  if (speedMode === 'SMART') {
+    let base = 3500;
+    if (totalPages <= 30) base = 2800;
+    else if (totalPages <= 80) base = 3800;
+    else if (totalPages <= 150) base = 4800;
+    else base = 5800;
+
+    const jitter = Math.floor(base * 0.15 * (Math.random() * 2 - 1));
+    return Math.max(2200, base + jitter);
   }
 
   // Chế độ Buff Like / Reaction thuần túy:
   if (speedMode === 'TURBO' || delayMs <= 1800) {
-    const base = delayMs > 0 ? Math.max(800, delayMs) : 1500;
-    return base + Math.floor(Math.random() * 300);
+    const minSafe = totalPages > 80 ? 2200 : 1200;
+    const base = delayMs > 0 ? Math.max(minSafe, delayMs) : (totalPages > 80 ? 2400 : 1600);
+    return base + Math.floor(Math.random() * 350);
   } else if (speedMode === 'FAST' || delayMs <= 2800) {
-    const base = delayMs > 0 ? Math.max(1800, delayMs) : 2500;
+    const minSafe = totalPages > 80 ? 2800 : 2000;
+    const base = delayMs > 0 ? Math.max(minSafe, delayMs) : 2600;
     return base + Math.floor(Math.random() * 450);
   } else if (speedMode === 'SAFE' || delayMs >= 5000) {
-    const base = delayMs > 0 ? delayMs : 5000;
-    return base + Math.floor(Math.random() * 1800);
+    const base = delayMs > 0 ? delayMs : 5500;
+    return base + Math.floor(Math.random() * 1500);
   } else {
-    const base = delayMs > 0 ? delayMs : 3500;
+    // NORMAL
+    const base = delayMs > 0 ? Math.max(3000, delayMs) : 3800;
     const jitter = Math.floor(base * 0.15 * (Math.random() * 2 - 1));
-    return Math.max(1200, base + jitter);
+    return Math.max(2500, base + jitter);
   }
 }
 
@@ -2150,10 +2165,33 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           if (cooldownEvery < 9999 && i > 0 && i % cooldownEvery === 0 && i < workerPages.length - 1) {
             const isBigBatch = i % 36 === 0;
             const batchRest = isBigBatch
-              ? Math.max(10000, cooldownDurationMs * 2) + Math.floor(Math.random() * 3000)
-              : Math.max(2500, cooldownDurationMs) + Math.floor(Math.random() * 1500);
-            console.log(`[FB-Buff]${workerTag} 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. Nghỉ ngơi ${(batchRest / 1000).toFixed(1)}s hạ nhiệt Via...`);
+              ? Math.max(12000, cooldownDurationMs * 2) + Math.floor(Math.random() * 3000)
+              : Math.max(6000, cooldownDurationMs) + Math.floor(Math.random() * 2000);
+            const restSec = Math.round(batchRest / 1000);
+            const restMsg = `🛡️ Đang hạ nhiệt Via (${restSec}s) để chống cờ chặn tốc độ của Facebook...`;
+            console.log(`[FB-Buff]${workerTag} 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. ${restMsg}`);
+
+            if (typeof onProgress === 'function') {
+              onProgress({
+                type: 'COOLDOWN_START',
+                workerId,
+                workerTag,
+                pageIndex: i,
+                durationSec: restSec,
+                message: restMsg,
+              });
+            }
+
             await new Promise((r) => setTimeout(r, batchRest));
+
+            if (typeof onProgress === 'function') {
+              onProgress({
+                type: 'COOLDOWN_END',
+                workerId,
+                workerTag,
+                pageIndex: i,
+              });
+            }
           }
 
           // Giảm tải RAM cho Chromium khi chạy lô lớn (200 - 500 page)
@@ -2341,10 +2379,31 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         if (cooldownEvery < 9999 && i > 0 && i % cooldownEvery === 0 && i < pages.length - 1) {
           const isBigBatch = i % 36 === 0;
           const batchRest = isBigBatch
-            ? Math.max(10000, cooldownDurationMs * 2) + Math.floor(Math.random() * 3000)
-            : Math.max(2500, cooldownDurationMs) + Math.floor(Math.random() * 1500);
-          console.log(`[FB-Buff] 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. Nghỉ ngơi ${(batchRest / 1000).toFixed(1)}s hạ nhiệt Via & BM...`);
+            ? Math.max(12000, cooldownDurationMs * 2) + Math.floor(Math.random() * 3000)
+            : Math.max(6000, cooldownDurationMs) + Math.floor(Math.random() * 2000);
+          const restSec = Math.round(batchRest / 1000);
+          const restMsg = `🛡️ Đang hạ nhiệt Via (${restSec}s) để chống cờ chặn tốc độ của Facebook...`;
+          console.log(`[FB-Buff] 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. ${restMsg}`);
+
+          if (typeof onProgress === 'function') {
+            onProgress({
+              type: 'COOLDOWN_START',
+              workerId: 1,
+              pageIndex: i,
+              durationSec: restSec,
+              message: restMsg,
+            });
+          }
+
           await new Promise((r) => setTimeout(r, batchRest));
+
+          if (typeof onProgress === 'function') {
+            onProgress({
+              type: 'COOLDOWN_END',
+              workerId: 1,
+              pageIndex: i,
+            });
+          }
         }
 
         // Độ trễ tối ưu giữa các page

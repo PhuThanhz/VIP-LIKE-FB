@@ -591,8 +591,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
   const [pageSearchQuery, setPageSearchQuery] = useState('');
   const [viaFilter, setViaFilter] = useState<string>('ALL');
-  const [speedMode, setSpeedMode] = useState<'TURBO' | 'FAST' | 'NORMAL' | 'SAFE'>('FAST');
-  const [delayMs, setDelayMs] = useState<number>(2500);
+  const [speedMode, setSpeedMode] = useState<'SMART' | 'TURBO' | 'FAST' | 'NORMAL' | 'SAFE'>('SMART');
+  const [delayMs, setDelayMs] = useState<number>(3500);
   const [enableHumanBehavior, setEnableHumanBehavior] = useState<boolean>(true);
   const [fastSwitch, setFastSwitch] = useState<boolean>(true);
   const [antiCheckpointGuard, setAntiCheckpointGuard] = useState<boolean>(true);
@@ -1436,7 +1436,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         setDelayMs(6000); // 6 giây an toàn và nhanh khi có bình luận
       }
     } else if (delayMs >= 6000) {
-      setDelayMs(speedMode === 'TURBO' ? 1500 : speedMode === 'FAST' ? 2500 : 3800);
+      setDelayMs(speedMode === 'TURBO' ? 1500 : speedMode === 'FAST' ? 2500 : speedMode === 'SAFE' ? 6000 : 3500);
     }
   }, [engagementMode, speedMode]);
 
@@ -3250,7 +3250,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                 ⚙️ Cài Đặt Nâng Cao &amp; Tốc Độ (Tùy chọn)
                               </span>
                               <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950/80 border border-cyan-800/60 px-2 py-0.5 rounded-full">
-                                {speedMode === 'TURBO' ? '⚡ Siêu Tốc' : speedMode === 'FAST' ? '🚀 Nhanh' : speedMode === 'SAFE' ? '🛡️ An Toàn' : '⚖️ Chuẩn'} • {concurrency} luồng • {delayMs / 1000}s • {dripFeedMode ? `${dripDurationMinutes}p Drip` : 'Chạy ngay'}
+                                {speedMode === 'SMART' ? '🛡️ Smart Pacing' : speedMode === 'TURBO' ? '⚡ Siêu Tốc' : speedMode === 'FAST' ? '🚀 Nhanh' : speedMode === 'SAFE' ? '🛡️ An Toàn' : '⚖️ Chuẩn'} • {concurrency} luồng • {delayMs / 1000}s • {dripFeedMode ? `${dripDurationMinutes}p Drip` : 'Chạy ngay'}
                               </span>
                             </div>
                             <span className="text-xs text-cyan-400 font-bold">
@@ -3261,7 +3261,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           {!showAdvancedSettings && (
                             <div className="px-3 pb-2.5 text-[11px] text-slate-400 flex items-center gap-1.5">
                               <CheckCircleFilled className="text-emerald-400 text-xs shrink-0" />
-                              <span>Đang chạy ở chế độ <strong>{speedMode === 'TURBO' ? '⚡ Siêu Tốc' : speedMode === 'FAST' ? '🚀 Nhanh Mượt' : '⚖️ Chuẩn'}</strong> ({concurrency} luồng song song, giãn cách {delayMs / 1000}s).</span>
+                              <span>Đang chạy ở chế độ <strong>{speedMode === 'SMART' ? '🛡️ Smart Pacing (Thích ứng an toàn)' : speedMode === 'TURBO' ? '⚡ Siêu Tốc' : speedMode === 'FAST' ? '🚀 Nhanh Mượt' : speedMode === 'SAFE' ? '🛡️ An Toàn' : '⚖️ Chuẩn'}</strong> ({concurrency} luồng song song, giãn cách {delayMs / 1000}s).</span>
                             </div>
                           )}
 
@@ -3280,9 +3280,13 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                     size="small"
                                     value={speedMode}
                                     onChange={(val) => {
-                                      const mode = val as 'TURBO' | 'FAST' | 'NORMAL' | 'SAFE';
+                                      const mode = val as 'SMART' | 'TURBO' | 'FAST' | 'NORMAL' | 'SAFE';
                                       setSpeedMode(mode);
-                                      if (mode === 'TURBO') {
+                                      if (mode === 'SMART') {
+                                        setDelayMs(3500);
+                                        setEnableHumanBehavior(true);
+                                        setFastSwitch(true);
+                                      } else if (mode === 'TURBO') {
                                         setDelayMs(1500);
                                         setEnableHumanBehavior(false);
                                         setFastSwitch(true);
@@ -3301,14 +3305,32 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                       }
                                     }}
                                     options={[
-                                      { label: '⚡ Siêu Tốc (1.5s)', value: 'TURBO' },
-                                      { label: '🚀 Nhanh (2.5s)', value: 'FAST' },
+                                      { label: '🛡️ Smart (Khuyên dùng)', value: 'SMART' },
                                       { label: '⚖️ Chuẩn (3.8s)', value: 'NORMAL' },
                                       { label: '🛡️ An Toàn (6s)', value: 'SAFE' },
+                                      { label: '🚀 Nhanh (2.5s)', value: 'FAST' },
+                                      { label: '⚡ Siêu Tốc (1.5s)', value: 'TURBO' },
                                     ]}
                                     className="bg-slate-900 border border-slate-700 text-slate-200"
                                   />
                                 </div>
+
+                                {speedMode === 'SMART' && (
+                                  <div className="sm:col-span-2 flex items-center gap-2 p-2 rounded-lg bg-cyan-950/40 border border-cyan-800/40 text-[11px] text-cyan-300">
+                                    <SafetyCertificateOutlined className="text-cyan-400 text-sm shrink-0" />
+                                    <span>
+                                      <b>Smart Adaptive Pacing đang bật:</b> Tự động giãn nhịp an toàn ({selectedPageIds.length <= 30 ? '~2.8s' : selectedPageIds.length <= 80 ? '~3.8s' : selectedPageIds.length <= 150 ? '~4.8s' : '~5.8s'}) và chèn nhịp nghỉ hạ nhiệt sau mỗi 15-20 page để Via không bao giờ bị Facebook gắn cờ chặn tốc độ.
+                                    </span>
+                                  </div>
+                                )}
+                                {selectedPageIds.length > 80 && (speedMode === 'TURBO' || speedMode === 'FAST') && (
+                                  <div className="sm:col-span-2 flex items-center gap-2 p-2 rounded-lg bg-amber-950/40 border border-amber-700/50 text-[11px] text-amber-300">
+                                    <ThunderboltFilled className="text-amber-400 text-sm shrink-0" />
+                                    <span>
+                                      <b>Lưu ý an toàn:</b> Bạn đang chọn {selectedPageIds.length} Page với tốc độ {speedMode === 'TURBO' ? 'Siêu Tốc' : 'Nhanh'}. Khuyên dùng <b>Smart Pacing</b> hoặc <b>An Toàn</b> để tránh bị Facebook hạn chế thao tác.
+                                    </span>
+                                  </div>
+                                )}
 
                                 <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-emerald-900/60 text-xs shadow-sm">
                                   <div>
@@ -4470,6 +4492,12 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
                       {/* Glowing Live Progress Bar */}
                       <div className="space-y-2">
+                        {autoBuffProgress.currentRunningPageName?.includes('🛡️') && (
+                          <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs shadow-md animate-pulse">
+                            <ThunderboltFilled className="text-amber-400 text-sm flex-shrink-0" />
+                            <span className="font-semibold">{autoBuffProgress.currentRunningPageName}</span>
+                          </div>
+                        )}
                         <div className="flex items-center justify-between text-xs sm:text-sm">
                           <span className="flex items-center gap-2 font-semibold text-slate-200">
                             {autoBuffProgress.status === 'RUNNING' && <LoadingOutlined spin className="text-blue-400" />}

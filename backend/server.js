@@ -1482,9 +1482,17 @@ app.post('/api/buff-like-stream', async (req, res) => {
         onProgress: (evt) => {
           if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
             activeLiveBuffSession.updatedAt = new Date().toISOString();
-            if (evt.type === 'PAGE_START') {
+            if (evt.type === 'COOLDOWN_START') {
+              activeLiveBuffSession.currentRunningPageName = evt.message || `🛡️ Đang hạ nhiệt Via (${evt.durationSec}s)...`;
+              activeLiveBuffSession.isCoolingDown = true;
+              activeLiveBuffSession.cooldownSec = evt.durationSec;
+            } else if (evt.type === 'COOLDOWN_END') {
+              activeLiveBuffSession.isCoolingDown = false;
+              activeLiveBuffSession.cooldownSec = 0;
+            } else if (evt.type === 'PAGE_START') {
               activeLiveBuffSession.currentRunningPageName = evt.pageName || '';
             } else if (evt.type === 'PAGE_FINISH') {
+              activeLiveBuffSession.isCoolingDown = false;
               activeLiveBuffSession.done = (activeLiveBuffSession.done || 0) + 1;
               if (evt.status === 'SUCCESS') activeLiveBuffSession.success++;
               else if (evt.status === 'ALREADY_LIKED') activeLiveBuffSession.alreadyLiked++;
