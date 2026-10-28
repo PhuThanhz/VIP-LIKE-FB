@@ -899,7 +899,8 @@ async function findLikeButtonOnTab(tab) {
           aria.includes('Đã thích') || aria.includes('Liked') ||
           aria === 'Thích bài viết' || aria === 'Like post' ||
           aria === 'Bày tỏ cảm xúc' || aria === 'React' ||
-          aria === 'Reaction'
+          aria === 'Reaction' ||
+          /^(?:Yêu thích|Thương thương|Haha|Wow|Buồn|Phẫn nộ|Love|Care|Sad|Angry)$/i.test(aria)
         ) {
           return true;
         }
@@ -980,6 +981,29 @@ async function findLikeButtonOnTab(tab) {
 
 async function checkActionBlockedOnTab(tab) {
   try {
+    const isBlockedText = await tab.evaluate(() => {
+      const bodyText = (document.body ? document.body.innerText : '') || '';
+      const blockedPhrases = [
+        'bạn tạm thời bị chặn',
+        'sử dụng quá nhanh',
+        'hành động này bị chặn',
+        'bạn tạm thời bị hạn chế',
+        'you’re temporarily blocked',
+        'you\'re temporarily blocked',
+        'action blocked',
+        'không thể bày tỏ cảm xúc',
+        'tài khoản của bạn bị hạn chế',
+        'your account is restricted',
+        'we restrict certain activity',
+        'thử lại sau',
+        'try again later',
+      ];
+      const lower = bodyText.toLowerCase();
+      return blockedPhrases.some((phrase) => lower.includes(phrase));
+    }).catch(() => false);
+
+    if (isBlockedText) return true;
+
     const blocked = tab.locator(
       'div[role="dialog"]:has-text("Hành động này bị chặn"), ' +
       'div[role="dialog"]:has-text("Bạn tạm thời bị hạn chế"), ' +
@@ -989,7 +1013,9 @@ async function checkActionBlockedOnTab(tab) {
       'div[role="dialog"]:has-text("Try again later"), ' +
       'div[role="dialog"]:has-text("Không thể bày tỏ cảm xúc"), ' +
       'div[role="dialog"]:has-text("Tài khoản của bạn bị hạn chế"), ' +
-      'div[role="dialog"]:has-text("Your account is restricted")'
+      'div[role="dialog"]:has-text("Your account is restricted"), ' +
+      'div:has-text("Bạn tạm thời bị chặn"), ' +
+      'div:has-text("sử dụng quá nhanh")'
     ).first();
     return (await blocked.count().catch(() => 0)) > 0 && (await blocked.isVisible().catch(() => false));
   } catch (e) {
@@ -1361,6 +1387,7 @@ async function executePageInteraction({
   let shareError = '';
   let usedCommentText = '';
   let currentReaction = (reactionType || 'LIKE').toUpperCase();
+  let isActionBlocked = false;
 
   try {
     // BƯỚC 1: CHUYỂN ĐỔI DANH TÍNH
@@ -1607,30 +1634,39 @@ async function executePageInteraction({
             console.warn(`[FB-Buff]${workerTag} ⚠️ Facebook cảnh báo chặn hành động sau khi like bằng Page "${pageInfo.name}".`);
             likeStatus = 'ERROR';
             likeError = 'Facebook tạm thời hạn chế hành động (Action Blocked)';
+            isActionBlocked = true;
           }
         }
       } else {
-        const currentUrl = tab.url();
-        console.warn(`[FB-Buff]${workerTag} ⚠️ Không tìm thấy nút Like cho "${pageInfo.name}" (URL: ${currentUrl})`);
+        const isBlockedOnMissing = await checkActionBlockedOnTab(tab);
+        if (isBlockedOnMissing) {
+          isActionBlocked = true;
+          likeStatus = 'ERROR';
+          likeError = 'Facebook tạm thời hạn chế do thao tác nhanh (Action Blocked) - Tự động dừng bảo vệ Via';
+          console.warn(`[FB-Buff]${workerTag} 🛑 PHÁT HIỆN FACEBOOK CHẶN HÀNH ĐỘNG (Rate Limit): "Bạn tạm thời bị chặn do sử dụng quá nhanh" trên Page "${pageInfo.name}"!`);
+        } else {
+          const currentUrl = tab.url();
+          console.warn(`[FB-Buff]${workerTag} ⚠️ Không tìm thấy nút Like cho "${pageInfo.name}" (URL: ${currentUrl})`);
 
-        // Lưu ảnh màn hình debug
-        try {
-          const debugDir = path.join(__dirname, 'data', 'debug_screens');
-          if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
-          const imgPath = path.join(debugDir, `no_like_${pageInfo.id}.png`);
-          await tab.screenshot({ path: imgPath, fullPage: false }).catch(() => {});
-        } catch (e) {}
+          // Lưu ảnh màn hình debug
+          try {
+            const debugDir = path.join(__dirname, 'data', 'debug_screens');
+            if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
+            const imgPath = path.join(debugDir, `no_like_${pageInfo.id}.png`);
+            await tab.screenshot({ path: imgPath, fullPage: false }).catch(() => {});
+          } catch (e) {}
 
-        const isGroup = currentUrl.includes('/groups/');
-        const joinGroupBtn = tab.locator('div[role="button"]:has-text("Tham gia nhóm"), div[role="button"]:has-text("Join group")').first();
-        const needsJoin = (await joinGroupBtn.count().catch(() => 0)) > 0;
+          const isGroup = currentUrl.includes('/groups/');
+          const joinGroupBtn = tab.locator('div[role="button"]:has-text("Tham gia nhóm"), div[role="button"]:has-text("Join group")').first();
+          const needsJoin = (await joinGroupBtn.count().catch(() => 0)) > 0;
 
-        likeStatus = 'NO_BUTTON';
-        likeError = needsJoin
-          ? 'Nhóm yêu cầu tham gia (Chưa vào nhóm nên ẩn nút Like)'
-          : isGroup
-          ? 'Bài viết trong Nhóm kín hoặc chưa tải kịp nút Like'
-          : 'Không tìm thấy nút Like trên bài viết';
+          likeStatus = 'NO_BUTTON';
+          likeError = needsJoin
+            ? 'Nhóm yêu cầu tham gia (Chưa vào nhóm nên ẩn nút Like)'
+            : isGroup
+            ? 'Bài viết trong Nhóm kín hoặc chưa tải kịp nút Like'
+            : 'Không tìm thấy nút Like trên bài viết';
+        }
       }
     }
 
@@ -1780,23 +1816,24 @@ async function executePageInteraction({
     }
 
     return {
-      actionBlocked: false,
+      actionBlocked: isActionBlocked,
       item: {
         pageId: pageInfo.id,
         pageName: pageInfo.name,
-        status: finalStatus,
+        status: isActionBlocked ? 'ERROR' : finalStatus,
         likeStatus,
         commentStatus,
         shareStatus,
         commentText: commentStatus === 'SUCCESS' ? usedCommentText : undefined,
         message: msgs.join(' • '),
-        error: finalStatus === 'ERROR' ? msgs.join(' • ') : undefined,
+        error: (finalStatus === 'ERROR' || isActionBlocked) ? msgs.join(' • ') : undefined,
       },
     };
   } catch (err) {
     console.error(`[FB-Buff]${workerTag} ❌ Lỗi khi Page "${pageInfo.name}" tương tác: ${err.message}`);
+    const isBlockedOnCatch = await checkActionBlockedOnTab(tab).catch(() => false);
     return {
-      actionBlocked: false,
+      actionBlocked: isBlockedOnCatch,
       item: {
         pageId: pageInfo.id,
         pageName: pageInfo.name,
@@ -1804,7 +1841,9 @@ async function executePageInteraction({
         likeStatus: enableLike ? 'ERROR' : 'SKIPPED',
         commentStatus: enableComment ? 'ERROR' : 'SKIPPED',
         shareStatus: enableShare ? 'ERROR' : 'SKIPPED',
-        error: err.message,
+        error: isBlockedOnCatch
+          ? 'Facebook tạm thời hạn chế hành động (Action Blocked) do thao tác nhanh. Tự động dừng bảo vệ Via.'
+          : err.message,
       },
     };
   }
@@ -2108,12 +2147,12 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           }
 
           // Chống checkpoint: Nghỉ ngơi an toàn theo lô (Batch Cooldown) per worker
-          if (cooldownEvery < 9999 && i > 0 && i % cooldownEvery === 0 && i < workerPages.length - 1 && speedMode !== 'TURBO') {
+          if (cooldownEvery < 9999 && i > 0 && i % cooldownEvery === 0 && i < workerPages.length - 1) {
             const isBigBatch = i % 36 === 0;
             const batchRest = isBigBatch
-              ? Math.max(12000, cooldownDurationMs * 2) + Math.floor(Math.random() * 4000)
+              ? Math.max(10000, cooldownDurationMs * 2) + Math.floor(Math.random() * 3000)
               : Math.max(2500, cooldownDurationMs) + Math.floor(Math.random() * 1500);
-            console.log(`[FB-Buff]${workerTag} 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. Nghỉ ngơi ${(batchRest / 1000).toFixed(1)}s...`);
+            console.log(`[FB-Buff]${workerTag} 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. Nghỉ ngơi ${(batchRest / 1000).toFixed(1)}s hạ nhiệt Via...`);
             await new Promise((r) => setTimeout(r, batchRest));
           }
 
@@ -2299,10 +2338,10 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         }
 
         // Chống checkpoint: Nghỉ ngơi an toàn theo lô (Batch Cooldown)
-        if (cooldownEvery < 9999 && i > 0 && i % cooldownEvery === 0 && i < pages.length - 1 && speedMode !== 'TURBO') {
+        if (cooldownEvery < 9999 && i > 0 && i % cooldownEvery === 0 && i < pages.length - 1) {
           const isBigBatch = i % 36 === 0;
           const batchRest = isBigBatch
-            ? Math.max(12000, cooldownDurationMs * 2) + Math.floor(Math.random() * 4000)
+            ? Math.max(10000, cooldownDurationMs * 2) + Math.floor(Math.random() * 3000)
             : Math.max(2500, cooldownDurationMs) + Math.floor(Math.random() * 1500);
           console.log(`[FB-Buff] 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. Nghỉ ngơi ${(batchRest / 1000).toFixed(1)}s hạ nhiệt Via & BM...`);
           await new Promise((r) => setTimeout(r, batchRest));

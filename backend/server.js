@@ -1512,6 +1512,13 @@ app.post('/api/buff-like-stream', async (req, res) => {
               } else {
                 activeLiveBuffSession.details.push(detailItem);
               }
+
+              if (evt.actionBlocked) {
+                activeLiveBuffSession.stopRequested = true;
+                activeLiveBuffSession.status = 'STOPPED';
+                activeLiveBuffSession.error = 'Facebook phát hiện thao tác nhanh và tạm thời hạn chế hành động (Action Blocked). Hệ thống đã tự động dừng khẩn cấp để bảo vệ an toàn cho Via!';
+                console.warn('[BuffStream] 🛑 Đã tự động ngắt tiến trình buff trực tiếp do Via bị Facebook Rate Limit / Action Blocked!');
+              }
             }
           }
           sendEvent('progress', evt);
