@@ -2509,6 +2509,80 @@ async function validateViaSession(cookieStr, options = {}) {
   }
 }
 
+/**
+ * Chụp ảnh màn hình bài viết Facebook làm bằng chứng nghiệm thu kết quả buff
+ * @param {string} targetUrl - URL bài viết
+ * @param {object} options - { cookieStr, proxyUrl, outputPath, timeoutMs }
+ * @returns {Promise<{ success: boolean, filePath?: string, error?: string }>}
+ */
+async function capturePostScreenshot(targetUrl, options = {}) {
+  const {
+    cookieStr = null,
+    proxyUrl = null,
+    outputPath = null,
+    timeoutMs = 25000,
+  } = options;
+
+  const targetPath =
+    outputPath ||
+    path.join(__dirname, 'data', 'screenshots', `proof_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.png`);
+  const dir = path.dirname(targetPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  const proxy = proxyUrl ? parseProxy(proxyUrl) : null;
+  const cookies = cookieStr ? parseCookieString(cookieStr) : [];
+
+  let browser = null;
+  let context = null;
+
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: OPTIMIZED_CHROMIUM_ARGS,
+      proxy: proxy ? { server: proxy.server, username: proxy.username, password: proxy.password } : undefined,
+    });
+
+    context = await browser.newContext({
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      viewport: { width: 1080, height: 1100 },
+      deviceScaleFactor: 1.5,
+      locale: 'vi-VN',
+    });
+
+    if (cookies.length > 0) {
+      await context.addCookies(cookies);
+    }
+
+    const page = await context.newPage();
+    // Chặn video nặng để tiết kiệm RAM & CPU, giữ ảnh để render bài viết đẹp mắt
+    await page.route('**/*.{mp4,mov,m4v,avi,webm,m3u8,ts}', (route) => route.abort());
+    await page.route('**/*{google-analytics,doubleclick,connect.facebook.net/signals,pixel.facebook.com,facebook.com/tr/}*', (route) => route.abort());
+
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs }).catch(() => {});
+    await page.waitForTimeout(3000);
+
+    // Chụp lại khối bài viết chính hoặc viewport
+    const article = await page.$('div[role="article"]').catch(() => null);
+    if (article) {
+      await article.screenshot({ path: targetPath }).catch(async () => {
+        await page.screenshot({ path: targetPath, fullPage: false });
+      });
+    } else {
+      await page.screenshot({ path: targetPath, fullPage: false });
+    }
+
+    console.log(`[FB-Proof] 📸 Đã chụp ảnh nghiệm thu thành công: ${targetPath}`);
+    return { success: true, filePath: targetPath };
+  } catch (err) {
+    console.warn(`[FB-Proof] ⚠️ Lỗi chụp ảnh nghiệm thu: ${err.message}`);
+    return { success: false, error: err.message };
+  } finally {
+    if (context) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
+  }
+}
+
 module.exports = {
   parseCookieString,
   getUserIdFromCookie,
@@ -2521,6 +2595,7 @@ module.exports = {
   buffViews,
   scanTargetForPosts,
   validateViaSession,
+  capturePostScreenshot,
   parseProxy,
   testProxy,
   testProxyHealth,

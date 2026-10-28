@@ -29,6 +29,7 @@ const {
   formatDurationVi,
   startCommandListener,
   sendTelegramMessage,
+  registerShortUrl,
 } = require('./telegram-alert');
 const {
   filterAvailablePagesForPost,
@@ -1246,6 +1247,20 @@ app.post('/api/buff-like', async (req, res) => {
     const successCount = result?.successCount ?? (result?.details ? result.details.filter((d) => d.status === 'SUCCESS' || d.status === 'ALREADY_LIKED').length : 0);
     const failedCount = result?.failedCount ?? (result?.details ? result.details.filter((d) => d.status === 'ERROR' || d.status === 'FAILED' || d.status === 'NO_BUTTON').length : 0);
 
+    let screenshotPath = null;
+    try {
+      const shot = await fbBuffTool.capturePostScreenshot(targetUrl, {
+        cookieStr,
+        proxyUrl,
+        timeoutMs: 25000,
+      });
+      if (shot && shot.success && shot.filePath) {
+        screenshotPath = shot.filePath;
+      }
+    } catch (e) {
+      console.warn('[ScreenshotProof] ⚠️ Bỏ qua lỗi chụp ảnh bài viết:', e.message);
+    }
+
     notifyBuffCompleted({
       targetUrl,
       success: successCount,
@@ -1253,6 +1268,7 @@ app.post('/api/buff-like', async (req, res) => {
       failed: failedCount,
       durationSec,
       reactionType,
+      screenshotPath,
     }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo hoàn tất buff:', err.message));
 
     // Tự động lưu lịch sử buff vào MySQL ngay trên Server
@@ -1512,6 +1528,20 @@ app.post('/api/buff-like-stream', async (req, res) => {
     const successCount = result?.successCount ?? (result?.details ? result.details.filter((d) => d.status === 'SUCCESS' || d.status === 'ALREADY_LIKED').length : 0);
     const failedCount = result?.failedCount ?? (result?.details ? result.details.filter((d) => d.status === 'ERROR' || d.status === 'FAILED' || d.status === 'NO_BUTTON').length : 0);
 
+    let screenshotPath = null;
+    try {
+      const shot = await fbBuffTool.capturePostScreenshot(targetUrl, {
+        cookieStr,
+        proxyUrl,
+        timeoutMs: 25000,
+      });
+      if (shot && shot.success && shot.filePath) {
+        screenshotPath = shot.filePath;
+      }
+    } catch (e) {
+      console.warn('[ScreenshotProof] ⚠️ Bỏ qua lỗi chụp ảnh bài viết stream:', e.message);
+    }
+
     notifyBuffCompleted({
       targetUrl,
       success: successCount,
@@ -1519,6 +1549,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
       failed: failedCount,
       durationSec,
       reactionType,
+      screenshotPath,
     }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo stream xong:', err.message));
 
     // Tự động lưu lịch sử buff vào MySQL ngay trên Server (đảm bảo không bao giờ bị mất log)
@@ -1585,7 +1616,8 @@ function addBuffQueueTask(taskPayload) {
   const history = loadBuffHistory();
   const normUrl = normalizeFbPostUrl(taskPayload.targetUrl);
 
-  if (history[normUrl]) {
+  const isRebuff = Boolean(taskPayload.allowRebuff || taskPayload.force || taskPayload.source?.includes('REBUFF'));
+  if (history[normUrl] && !isRebuff) {
     return { skipped: true, history: history[normUrl] };
   }
 
@@ -2057,6 +2089,21 @@ async function executeQueueTask(task) {
     };
     saveBuffHistory(history);
 
+    let screenshotPath = null;
+    try {
+      const firstVia = viaGroupsMap.values().next()?.value;
+      const shot = await fbBuffTool.capturePostScreenshot(task.targetUrl, {
+        cookieStr: firstVia?.cookieString || null,
+        proxyUrl: firstVia?.proxyUrl || null,
+        timeoutMs: 25000,
+      });
+      if (shot && shot.success && shot.filePath) {
+        screenshotPath = shot.filePath;
+      }
+    } catch (e) {
+      console.warn('[ScreenshotProof] ⚠️ Bỏ qua lỗi chụp ảnh bài viết queue:', e.message);
+    }
+
     notifyBuffCompleted({
       targetUrl: task.targetUrl,
       success: totalSuccess,
@@ -2064,6 +2111,7 @@ async function executeQueueTask(task) {
       failed: totalFailed,
       durationSec,
       reactionType: task.reactionType,
+      screenshotPath,
     }).catch(() => {});
 
     console.log(`[BuffQueue Worker] ✅ Hoàn tất Task ${task.id}: Thành công ${totalSuccess}/${pagesToBuff.length} (${durationSec}s)`);
@@ -2691,8 +2739,119 @@ async function runDailyReportTick() {
 }
 setInterval(runDailyReportTick, 60 * 1000);
 
-// Nhận lệnh /status /stop /resume từ Telegram
-startCommandListener({ getStatusText: buildStatusText });
+// Xử lý yêu cầu buff từ Telegram ("Chat là Buff" & Callback Button)
+async function handleBuffRequestedFromTelegram({
+  targetUrl,
+  targetLikes = 50,
+  reactionType = 'LIKE',
+  source = 'TELEGRAM',
+  allowRebuff = false,
+}) {
+  console.log(`[TelegramBot] 📥 Nhận yêu cầu buff từ Telegram: ${targetUrl} | ${targetLikes} Like | ${reactionType} | Nguồn: ${source}`);
+
+  const normUrl = normalizeFbPostUrl(targetUrl);
+  const queueResult = addBuffQueueTask({
+    targetUrl,
+    targetLikes,
+    reactionType,
+    enableLike: true,
+    enableComment: false,
+    speedMode: 'FAST',
+    delayMinutes: 0,
+    source,
+    allowRebuff,
+  });
+
+  if (queueResult.skipped) {
+    const shortId = registerShortUrl(targetUrl);
+    await sendTelegramMessage(
+      `⚠️ <b>[BÀI VIẾT ĐÃ TỪNG BUFF TRƯỚC ĐÓ]</b>\nBài viết này đã có trong lịch sử buff để tránh trùng lặp.\n🔗 <a href="${targetUrl}">${targetUrl}</a>\n\n👉 <i>Nếu bạn muốn buff thêm lượt mới từ các Page còn lại, hãy bấm nút "Buff tiếp" bên dưới:</i>`,
+      'HTML',
+      {
+        inline_keyboard: [
+          [
+            { text: '🔁 Ép buộc buff thêm 50 Like', callback_data: `rebuff:${shortId}:50` },
+            { text: '🔁 Ép buộc buff thêm 100 Like', callback_data: `rebuff:${shortId}:100` },
+          ],
+        ],
+      }
+    );
+    return { success: false, reason: 'ALREADY_BUFFED' };
+  }
+
+  if (queueResult.alreadyQueued) {
+    await sendTelegramMessage(
+      `⏳ <b>[BÀI VIẾT ĐANG TRONG HÀNG ĐỢI]</b>\nBài viết đang có sẵn trong hàng đợi và sẽ sớm được xử lý tự động:\n🔗 <a href="${targetUrl}">${targetUrl}</a>\n🎯 Mục tiêu: ${queueResult.task?.targetLikes || targetLikes} like`
+    );
+    return { success: true, alreadyQueued: true };
+  }
+
+  const shortId = registerShortUrl(targetUrl);
+  const confirmMsg = [
+    `📥 <b>[TIẾP NHẬN ĐƠN TỪ TELEGRAM THÀNH CÔNG]</b>`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `🔗 <b>Bài viết:</b> <a href="${targetUrl}">${targetUrl}</a>`,
+    `🎯 <b>Số lượng:</b> <b>${targetLikes}</b> like`,
+    `💖 <b>Cảm xúc:</b> ${reactionType}`,
+    `⚡ <b>Trạng thái:</b> Đã đưa vào Hàng đợi (Sẽ chạy ngay khi tới lượt)`,
+    `⏰ <b>Thời gian:</b> ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `🚀 <i>Bot Playwright đang chuẩn bị dàn Page để tương tác bài viết...</i>`,
+  ].join('\n');
+
+  const replyMarkup = {
+    inline_keyboard: [
+      [
+        { text: '🛑 Dừng ngay', callback_data: 'stop' },
+        { text: '📋 Xem hàng đợi', callback_data: 'status' },
+      ],
+      [
+        { text: '📊 Số Page khả dụng', callback_data: 'check_pages' },
+        { text: '🔁 Thêm 100 Like nữa', callback_data: `rebuff:${shortId}:100` },
+      ],
+    ],
+  };
+
+  await sendTelegramMessage(confirmMsg, 'HTML', replyMarkup);
+  return { success: true, task: queueResult.task };
+}
+
+async function getPagesStatsForTelegram() {
+  try {
+    const pages = await db.getFacebookPageAccesses();
+    const activePages = (pages || []).filter((p) => p.active);
+
+    const viaMap = {};
+    activePages.forEach((p) => {
+      const vName = p.profile_name || p.personal_profile_id || 'Via khác';
+      viaMap[vName] = (viaMap[vName] || 0) + 1;
+    });
+
+    const breakdown = Object.entries(viaMap)
+      .map(([name, count]) => `• <b>${name}:</b> ${count} Fanpages`)
+      .join('\n');
+
+    return [
+      `📊 <b>[THỐNG KÊ DÀN FANPAGE ACTIVE]</b>`,
+      `━━━━━━━━━━━━━━━━━━`,
+      `🟢 <b>Tổng số Page sẵn sàng:</b> <b>${activePages.length}</b> Page`,
+      `━━━━━━━━━━━━━━━━━━`,
+      `<b>Chi tiết theo từng Via:</b>`,
+      breakdown || '• Chưa có phân bổ chi tiết',
+      `━━━━━━━━━━━━━━━━━━`,
+      `🛡️ <i>Tất cả các Page trên đều đang hoạt động tốt và sẵn sàng nhận lệnh buff!</i>`,
+    ].join('\n');
+  } catch (err) {
+    return `⚠️ Không lấy được thống kê page: ${err.message}`;
+  }
+}
+
+// Nhận lệnh /status /stop /resume và điều khiển 2 chiều từ Telegram
+startCommandListener({
+  getStatusText: buildStatusText,
+  onBuffRequested: handleBuffRequestedFromTelegram,
+  getPagesStats: getPagesStatsForTelegram,
+});
 
 // Lấy dữ liệu báo cáo tổng quan ngày (cho trang Săn bài & VIP Like)
 app.get('/api/buff-daily-report', async (req, res) => {

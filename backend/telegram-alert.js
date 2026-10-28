@@ -6,6 +6,21 @@ const store = require('./state-store');
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
+// Bộ nhớ đệm Short URL để tránh vượt quá giới hạn 64 byte của Telegram callback_data
+const shortUrlRegistry = new Map();
+function registerShortUrl(url) {
+  if (shortUrlRegistry.size > 500) {
+    const first = shortUrlRegistry.keys().next().value;
+    shortUrlRegistry.delete(first);
+  }
+  const shortId = 'u_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  shortUrlRegistry.set(shortId, url);
+  return shortId;
+}
+function getShortUrl(shortId) {
+  return shortUrlRegistry.get(shortId) || null;
+}
+
 const DEFAULT_SETTINGS = {
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
   telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
@@ -76,7 +91,7 @@ function saveSettings(settings) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Gửi 1 tin; thử lại tối đa 2 lần khi lỗi mạng / Telegram quá tải (5xx, 429) */
-async function sendTelegramMessage(text, parseMode = 'HTML') {
+async function sendTelegramMessage(text, parseMode = 'HTML', replyMarkup = null) {
   const settings = loadSettings();
   const token = settings.telegramBotToken;
   const chatId = settings.telegramChatId;
@@ -100,13 +115,19 @@ async function sendTelegramMessage(text, parseMode = 'HTML') {
   else if (upper.includes('HÀNG ĐỢI')) eventType = 'QUEUE_IDLE';
   else if (upper.includes('TEST') || upper.includes('XÁC NHẬN KẾT NỐI')) eventType = 'TEST';
 
+  const payload = {
+    chat_id: chatId,
+    text,
+    parse_mode: parseMode,
+    disable_web_page_preview: true,
+  };
+  if (replyMarkup) {
+    payload.reply_markup = typeof replyMarkup === 'string' ? JSON.parse(replyMarkup) : replyMarkup;
+  }
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const res = await axios.post(
-        url,
-        { chat_id: chatId, text, parse_mode: parseMode, disable_web_page_preview: true },
-        { timeout: 8000 }
-      );
+      const res = await axios.post(url, payload, { timeout: 8000 });
       const msgId = res.data?.result?.message_id || null;
       try {
         const db = require('./db');
@@ -144,6 +165,88 @@ async function sendTelegramMessage(text, parseMode = 'HTML') {
   return { success: false, reason: lastErr };
 }
 
+/**
+ * Gửi ảnh qua Telegram (dùng cho báo cáo chụp ảnh nghiệm thu)
+ */
+async function sendTelegramPhoto(photoPathOrBuffer, caption = '', { parseMode = 'HTML', replyMarkup = null } = {}) {
+  const settings = loadSettings();
+  const token = settings.telegramBotToken;
+  const chatId = settings.telegramChatId;
+
+  if (!token || !chatId) {
+    return { success: false, reason: 'Chưa cấu hình Telegram Bot Token hoặc Chat ID' };
+  }
+
+  const url = `https://api.telegram.org/bot${token}/sendPhoto`;
+  try {
+    const formData = new FormData();
+    formData.append('chat_id', chatId);
+
+    if (typeof photoPathOrBuffer === 'string') {
+      if (fs.existsSync(photoPathOrBuffer)) {
+        const fileBuf = fs.readFileSync(photoPathOrBuffer);
+        formData.append('photo', new Blob([fileBuf]), path.basename(photoPathOrBuffer));
+      } else {
+        console.warn(`[Telegram] ⚠️ File ảnh không tồn tại, fallback gửi text: ${photoPathOrBuffer}`);
+        if (caption) return sendTelegramMessage(caption, parseMode, replyMarkup);
+        return { success: false, reason: 'File không tồn tại' };
+      }
+    } else if (Buffer.isBuffer(photoPathOrBuffer)) {
+      formData.append('photo', new Blob([photoPathOrBuffer]), 'proof.png');
+    }
+
+    if (caption) {
+      // Telegram caption giới hạn 1024 ký tự
+      const safeCaption = caption.length > 1000 ? caption.slice(0, 995) + '...' : caption;
+      formData.append('caption', safeCaption);
+      formData.append('parse_mode', parseMode);
+    }
+
+    if (replyMarkup) {
+      formData.append(
+        'reply_markup',
+        typeof replyMarkup === 'string' ? replyMarkup : JSON.stringify(replyMarkup)
+      );
+    }
+
+    const res = await axios.post(url, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 35000,
+    });
+
+    console.log('[Telegram] 📸 Đã gửi ảnh nghiệm thu thành công lên Telegram!');
+    return { success: true, data: res.data };
+  } catch (err) {
+    const errMsg = err.response?.data?.description || err.message;
+    console.warn(`[Telegram] ⚠️ Lỗi gửi ảnh: ${errMsg}, fallback sang gửi tin nhắn text.`);
+    if (caption) {
+      await sendTelegramMessage(caption, parseMode, replyMarkup);
+    }
+    return { success: false, reason: errMsg };
+  }
+}
+
+/**
+ * Phản hồi Callback Query để tắt biểu tượng loading trên nút bấm Telegram
+ */
+async function answerCallbackQuery(callbackQueryId, text = '', showAlert = false) {
+  const settings = loadSettings();
+  const token = settings.telegramBotToken;
+  if (!token || !callbackQueryId) return;
+
+  try {
+    await axios.post(
+      `https://api.telegram.org/bot${token}/answerCallbackQuery`,
+      {
+        callback_query_id: callbackQueryId,
+        text,
+        show_alert: showAlert,
+      },
+      { timeout: 8000 }
+    );
+  } catch (_) {}
+}
+
 // ---------------------------------------------------------------------------
 // GIỜ YÊN TĨNH + GOM TIN
 // ---------------------------------------------------------------------------
@@ -171,13 +274,13 @@ function isQuietNow(settings = loadSettings(), now = new Date()) {
  * Gửi thông báo. critical=true → gửi ngay kể cả giờ yên tĩnh.
  * Tin thường được đưa vào hộp chờ và gom lại (xem flushDigest).
  */
-function sendAlert(text, { critical = false } = {}) {
-  if (critical) return sendTelegramMessage(text);
+function sendAlert(text, { critical = false, replyMarkup = null } = {}) {
+  if (critical) return sendTelegramMessage(text, 'HTML', replyMarkup);
   const settings = loadSettings();
   if (!settings.telegramBotToken || !settings.telegramChatId) {
     return Promise.resolve({ success: false, reason: 'Chưa cấu hình Telegram' });
   }
-  pendingDigest.push({ text, at: Date.now() });
+  pendingDigest.push({ text, at: Date.now(), replyMarkup });
   return Promise.resolve({ success: true, queued: true });
 }
 
@@ -255,7 +358,15 @@ async function notifyPostHunted({ targetName, targetUrl, postUrl, delayMinutes, 
 }
 
 // 3. THÔNG BÁO CHIẾN DỊCH HOÀN TẤT
-async function notifyBuffCompleted({ targetUrl, success, total, failed, durationSec, reactionType }) {
+async function notifyBuffCompleted({
+  targetUrl,
+  success,
+  total,
+  failed,
+  durationSec,
+  reactionType,
+  screenshotPath = null,
+}) {
   const settings = loadSettings();
   if (!settings.notifyOnBuffDone) return;
 
@@ -273,9 +384,29 @@ async function notifyBuffCompleted({ targetUrl, success, total, failed, duration
     `⏱️ <b>Thời gian xử lý:</b> ${formatDurationVi(durationSec)}`,
     `⏰ <b>Hoàn tất lúc:</b> ${now}`,
     `━━━━━━━━━━━━━━━━━━`,
-  ].join('\n');
+    screenshotPath ? `📸 <i>Ảnh chụp màn hình nghiệm thu thực tế bài viết đã lên like</i>` : ``,
+  ]
+    .filter(Boolean)
+    .join('\n');
 
-  return sendAlert(msg, { critical: true });
+  const shortId = registerShortUrl(targetUrl);
+  const replyMarkup = {
+    inline_keyboard: [
+      [
+        { text: '🔁 Buff tiếp 50 Like', callback_data: `rebuff:${shortId}:50` },
+        { text: '🔁 Buff tiếp 100 Like', callback_data: `rebuff:${shortId}:100` },
+      ],
+      [
+        { text: '📊 Kiểm tra hệ thống', callback_data: 'status' },
+      ],
+    ],
+  };
+
+  if (screenshotPath && fs.existsSync(screenshotPath)) {
+    return sendTelegramPhoto(screenshotPath, msg, { replyMarkup });
+  }
+
+  return sendAlert(msg, { critical: true, replyMarkup });
 }
 
 // 3.1. THÔNG BÁO BẮT ĐẦU CHIẾN DỊCH BUFF MỚI
@@ -315,7 +446,19 @@ async function notifyBuffStarted({
     `🚀 <i>Bot Playwright đang tiến hành điều phối và tương tác trực tiếp...</i>`,
   ].join('\n');
 
-  return sendAlert(msg, { critical: true });
+  const replyMarkup = {
+    inline_keyboard: [
+      [
+        { text: '🛑 Dừng ngay', callback_data: 'stop' },
+        { text: '📊 Số Page khả dụng', callback_data: 'check_pages' },
+      ],
+      [
+        { text: '📋 Hàng đợi xử lý', callback_data: 'status' },
+      ],
+    ],
+  };
+
+  return sendAlert(msg, { critical: true, replyMarkup });
 }
 
 // 3.2. THÔNG BÁO THÊM ĐƠN VÀO HÀNG ĐỢI
@@ -343,7 +486,19 @@ async function notifyQueueAdded({
     `📋 <i>Hệ thống sẽ tự động xếp lịch và xoay vòng dàn Page chạy nối tiếp.</i>`,
   ].join('\n');
 
-  return sendAlert(msg, { critical: true });
+  const replyMarkup = {
+    inline_keyboard: [
+      [
+        { text: '🛑 Dừng ngay', callback_data: 'stop' },
+        { text: '📋 Xem hàng đợi', callback_data: 'status' },
+      ],
+      [
+        { text: '📊 Số Page khả dụng', callback_data: 'check_pages' },
+      ],
+    ],
+  };
+
+  return sendAlert(msg, { critical: true, replyMarkup });
 }
 
 // 4. CẢNH BÁO DỪNG KHẨN CẤP
@@ -396,11 +551,11 @@ async function notifyQueueTrouble({ consecutiveFailures = 0, lastError = '', las
 }
 
 // ---------------------------------------------------------------------------
-// LỆNH BOT: /status /stop /resume /help  (chỉ nhận từ đúng Chat ID đã cấu hình)
+// LỆNH BOT & ĐIỀU KHIỂN 2 CHIỀU: "CHAT LÀ BUFF" + NÚT INLINE MENU
 // ---------------------------------------------------------------------------
 let commandListenerStarted = false;
 
-function startCommandListener({ getStatusText } = {}) {
+function startCommandListener({ getStatusText, onBuffRequested, getPagesStats } = {}) {
   if (commandListenerStarted) return;
   commandListenerStarted = true;
 
@@ -420,21 +575,38 @@ function startCommandListener({ getStatusText } = {}) {
           offset = last ? last.update_id + 1 : 0;
         } else {
           const r = await axios.get(base, {
-            params: { offset, timeout: 20, allowed_updates: JSON.stringify(['message']) },
+            params: {
+              offset,
+              timeout: 20,
+              allowed_updates: JSON.stringify(['message', 'callback_query']),
+            },
             timeout: 30000,
           });
+
           for (const u of r.data?.result || []) {
             offset = u.update_id + 1;
-            const msg = u.message;
-            if (!msg?.text || String(msg.chat?.id) !== String(st.telegramChatId)) continue;
-            await handleCommand(msg.text, getStatusText);
+
+            // 1. XỬ LÝ TIN NHẮN (MESSAGE)
+            if (u.message) {
+              const msg = u.message;
+              if (msg.text && String(msg.chat?.id) === String(st.telegramChatId)) {
+                await handleIncomingMessage(msg.text, { getStatusText, onBuffRequested, getPagesStats });
+              }
+            }
+
+            // 2. XỬ LÝ NÚT BẤM INLINE (CALLBACK QUERY)
+            if (u.callback_query) {
+              const cq = u.callback_query;
+              if (String(cq.from?.id) === String(st.telegramChatId)) {
+                await handleCallbackQuery(cq, { getStatusText, onBuffRequested, getPagesStats });
+              }
+            }
           }
           waitMs = 500;
         }
       }
     } catch (err) {
       const code = err.response?.status;
-      // 409: có nơi khác đang nhận tin của bot này (webhook hoặc bản chạy khác) → chờ lâu hơn
       waitMs = code === 409 || code === 401 ? 60000 : 10000;
     }
     const t = setTimeout(loop, waitMs);
@@ -443,31 +615,193 @@ function startCommandListener({ getStatusText } = {}) {
   loop();
 }
 
-async function handleCommand(text, getStatusText) {
-  const cmd = String(text).trim().split(/[\s@]/)[0].toLowerCase();
+async function handleIncomingMessage(text, { getStatusText, onBuffRequested, getPagesStats }) {
+  const clean = String(text || '').trim();
+  const cmd = clean.split(/[\s@]/)[0].toLowerCase();
+
   if (cmd === '/status') {
-    const body = getStatusText ? await getStatusText() : 'Chưa có dữ liệu.';
-    return sendTelegramMessage(body);
+    const body = getStatusText ? await getStatusText() : 'Chưa có dữ liệu hệ thống.';
+    const replyMarkup = {
+      inline_keyboard: [
+        [
+          { text: '🛑 Dừng khẩn cấp', callback_data: 'stop' },
+          { text: '📊 Số Page khả dụng', callback_data: 'check_pages' },
+        ],
+      ],
+    };
+    return sendTelegramMessage(body, 'HTML', replyMarkup);
   }
+
   if (cmd === '/stop') {
     if (isEmergencyStopped()) return sendTelegramMessage('⛔ Hệ thống đã ở trạng thái dừng khẩn cấp rồi.');
     setEmergencyStop(true, 'Dừng khẩn cấp từ lệnh Telegram');
     return;
   }
+
   if (cmd === '/resume') {
     if (!isEmergencyStopped()) return sendTelegramMessage('▶️ Hệ thống đang chạy bình thường.');
     setEmergencyStop(false);
-    return sendTelegramMessage('▶️ Đã khôi phục hoạt động. Hàng đợi sẽ tiếp tục chạy.');
+    return sendTelegramMessage('▶️ Đã khôi phục hoạt động. Hàng đợi sẽ tiếp tục xử lý các bài chờ.');
   }
+
+  if (cmd === '/pages' || cmd === '/check_pages') {
+    const body = getPagesStats ? await getPagesStats() : 'Chưa có dữ liệu thống kê Page.';
+    return sendTelegramMessage(body);
+  }
+
   if (cmd === '/help' || cmd === '/start') {
     return sendTelegramMessage(
       [
-        `🤖 <b>Lệnh có thể dùng</b>`,
-        `/status — xem tình trạng hệ thống`,
-        `/stop — dừng khẩn cấp toàn bộ`,
-        `/resume — khôi phục sau khi dừng`,
+        `🤖 <b>HỆ THỐNG VIPLIKE RADIANT - ĐIỀU KHIỂN TELEGRAM</b>`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `👉 <b>CÁCH BUFF LIKE SIÊU TỐC ("CHAT LÀ BUFF"):</b>`,
+        `Chỉ cần gửi link Facebook kèm số like và cảm xúc:`,
+        `• <code>https://facebook.com/share/p/xxx 100 LIKE</code>`,
+        `• <code>https://facebook.com/share/p/xxx 200 LOVE</code>`,
+        `• <code>https://facebook.com/share/p/xxx 500 RANDOM</code>`,
+        `<i>(Hoặc chỉ cần dán mỗi link bài viết, Bot sẽ hiện menu chọn nhanh số like!)</i>`,
+        ``,
+        `🛠️ <b>CÁC LỆNH HỆ THỐNG:</b>`,
+        `/status — Xem tình trạng hàng đợi & dàn Via`,
+        `/pages — Xem chi tiết số Fanpage khả dụng`,
+        `/stop — Dừng khẩn cấp toàn bộ hệ thống`,
+        `/resume — Khôi phục hoạt động hàng đợi`,
+        `/help — Hướng dẫn sử dụng`,
       ].join('\n')
     );
+  }
+
+  // 3. PHÁT HIỆN LINK FACEBOOK TRONG TIN NHẮN ("CHAT LÀ BUFF")
+  const fbMatch = clean.match(/(https?:\/\/(?:www\.|m\.|web\.|mbasic\.)?(?:facebook\.com|fb\.watch)\/[^\s]+)/i);
+  if (fbMatch) {
+    const rawUrl = fbMatch[1];
+    const restText = clean.replace(rawUrl, '').replace(/\/buff\s*/i, '').trim();
+
+    // Tìm số like
+    const numMatch = restText.match(/\b(\d{1,5})\b/);
+    const targetLikes = numMatch ? parseInt(numMatch[1], 10) : null;
+
+    // Tìm cảm xúc
+    let reactionType = 'LIKE';
+    const upperRest = restText.toUpperCase();
+    if (upperRest.includes('LOVE') || upperRest.includes('TIM')) reactionType = 'LOVE';
+    else if (upperRest.includes('CARE') || upperRest.includes('THƯƠNG')) reactionType = 'CARE';
+    else if (upperRest.includes('HAHA')) reactionType = 'HAHA';
+    else if (upperRest.includes('WOW')) reactionType = 'WOW';
+    else if (upperRest.includes('SAD') || upperRest.includes('BUỒN')) reactionType = 'SAD';
+    else if (upperRest.includes('ANGRY') || upperRest.includes('GIẬN') || upperRest.includes('PHẪN')) reactionType = 'ANGRY';
+    else if (upperRest.includes('RANDOM')) reactionType = 'RANDOM_POSITIVE';
+
+    if (targetLikes && targetLikes > 0) {
+      if (typeof onBuffRequested === 'function') {
+        return onBuffRequested({ targetUrl: rawUrl, targetLikes, reactionType, source: 'TELEGRAM_DIRECT' });
+      }
+    } else {
+      // Người dùng chỉ dán mỗi link -> Hiển thị menu chọn nhanh
+      const shortId = registerShortUrl(rawUrl);
+      const replyMarkup = {
+        inline_keyboard: [
+          [
+            { text: '👍 50 Like', callback_data: `qb:${shortId}:50:LIKE` },
+            { text: '👍 100 Like', callback_data: `qb:${shortId}:100:LIKE` },
+            { text: '👍 200 Like', callback_data: `qb:${shortId}:200:LIKE` },
+          ],
+          [
+            { text: '❤️ 100 Tim', callback_data: `qb:${shortId}:100:LOVE` },
+            { text: '🎲 200 Random', callback_data: `qb:${shortId}:200:RANDOM_POSITIVE` },
+            { text: '🚀 500 Max', callback_data: `qb:${shortId}:500:LIKE` },
+          ],
+          [
+            { text: '❌ Huỷ bỏ', callback_data: 'cancel_buff' },
+          ],
+        ],
+      };
+      return sendTelegramMessage(
+        [
+          `🎯 <b>[PHÁT HIỆN LINK BÀI VIẾT FACEBOOK]</b>`,
+          `━━━━━━━━━━━━━━━━━━`,
+          `🔗 <b>Link:</b> <a href="${rawUrl}">${rawUrl}</a>`,
+          ``,
+          `👇 <i>Bấm chọn nhanh số lượng cảm xúc bạn muốn buff:</i>`,
+        ].join('\n'),
+        'HTML',
+        replyMarkup
+      );
+    }
+  }
+}
+
+async function handleCallbackQuery(cq, { getStatusText, onBuffRequested, getPagesStats }) {
+  const data = String(cq.data || '');
+  await answerCallbackQuery(cq.id, 'Đã nhận lệnh!');
+
+  if (data === 'stop') {
+    if (isEmergencyStopped()) {
+      return sendTelegramMessage('⛔ Hệ thống đã ở trạng thái dừng khẩn cấp rồi.');
+    }
+    setEmergencyStop(true, 'Dừng khẩn cấp từ nút bấm Telegram');
+    return;
+  }
+
+  if (data === 'resume') {
+    if (!isEmergencyStopped()) {
+      return sendTelegramMessage('▶️ Hệ thống đang chạy bình thường.');
+    }
+    setEmergencyStop(false);
+    return sendTelegramMessage('▶️ Đã khôi phục hoạt động. Hàng đợi sẽ tiếp tục xử lý các bài chờ.');
+  }
+
+  if (data === 'status') {
+    const body = getStatusText ? await getStatusText() : 'Chưa có dữ liệu hệ thống.';
+    return sendTelegramMessage(body);
+  }
+
+  if (data === 'check_pages') {
+    const body = getPagesStats ? await getPagesStats() : 'Chưa có dữ liệu thống kê Page.';
+    return sendTelegramMessage(body);
+  }
+
+  if (data.startsWith('qb:')) {
+    // Format: qb:shortId:count:reaction
+    const parts = data.split(':');
+    const shortId = parts[1];
+    const count = parseInt(parts[2], 10) || 50;
+    const reaction = parts[3] || 'LIKE';
+    const targetUrl = getShortUrl(shortId);
+
+    if (!targetUrl) {
+      return sendTelegramMessage('⚠️ Link bài viết này đã hết hạn lưu tạm. Vui lòng gửi lại link bài viết vào bot.');
+    }
+
+    if (typeof onBuffRequested === 'function') {
+      return onBuffRequested({ targetUrl, targetLikes: count, reactionType: reaction, source: 'TELEGRAM_QUICK' });
+    }
+  }
+
+  if (data.startsWith('rebuff:')) {
+    // Format: rebuff:shortId:count
+    const parts = data.split(':');
+    const shortId = parts[1];
+    const count = parseInt(parts[2], 10) || 100;
+    const targetUrl = getShortUrl(shortId);
+
+    if (!targetUrl) {
+      return sendTelegramMessage('⚠️ Link bài viết này đã hết hạn lưu tạm. Vui lòng gửi lại link bài viết vào bot.');
+    }
+
+    if (typeof onBuffRequested === 'function') {
+      return onBuffRequested({
+        targetUrl,
+        targetLikes: count,
+        reactionType: 'LIKE',
+        source: 'TELEGRAM_REBUFF',
+        allowRebuff: true,
+      });
+    }
+  }
+
+  if (data === 'cancel_buff') {
+    return sendTelegramMessage('ℹ️ Đã huỷ thao tác buff bài viết.');
   }
 }
 
@@ -492,6 +826,10 @@ module.exports = {
   loadSettings,
   saveSettings,
   sendTelegramMessage,
+  sendTelegramPhoto,
+  answerCallbackQuery,
+  registerShortUrl,
+  getShortUrl,
   notifyViaDead,
   notifyPostHunted,
   notifyBuffStarted,
