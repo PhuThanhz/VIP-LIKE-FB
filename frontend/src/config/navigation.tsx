@@ -6,24 +6,24 @@ import {
   ClockCircleOutlined,
   HistoryOutlined,
   IdcardOutlined,
-  PictureOutlined,
   SettingOutlined,
   KeyOutlined,
+  AimOutlined,
 } from '@ant-design/icons';
 
 export type NavKey =
   | 'buff-like'
-  | 'buff-view'
-  | 'post-hunter'
   | 'buff-queue'
   | 'buff-history'
+  | 'buff-hunter'
   | 'via-management'
-  | 'avatar-studio'
   | 'system-settings'
   | 'license-management';
 
 export interface NavItem {
   key: NavKey;
+  /** Mục con hiển thị dưới dạng tab bên trong trang cha (ẩn khỏi Sidebar) */
+  parent?: NavKey;
   /** Nhãn ngắn trên Sidebar */
   label: string;
   /** Tiêu đề đầy đủ trên Header */
@@ -41,33 +41,16 @@ export const DEFAULT_NAV_KEY: NavKey = 'buff-like';
 export const NAV_ITEMS: NavItem[] = [
   {
     key: 'buff-like',
-    label: 'Like & Bình Luận',
-    title: 'Like & Bình Luận',
-    subtitle: 'Tăng tương tác bài viết Group, Fanpage, Profile cá nhân, Video Reels',
+    label: 'Like & Bình luận',
+    title: 'Like & Bình luận',
+    subtitle: 'Tạo chiến dịch, theo dõi hàng đợi và xem lịch sử',
     iconColor: 'text-cyan-400',
     Icon: ThunderboltOutlined,
     group: 'engagement',
   },
   {
-    key: 'buff-view',
-    label: 'Tăng View Video/Reels',
-    title: 'Tăng View Video / Reels',
-    subtitle: 'Buff lượt xem Video và Reels Facebook đa luồng Playwright không cần đăng nhập',
-    iconColor: 'text-purple-400',
-    Icon: PlayCircleOutlined,
-    group: 'engagement',
-  },
-  {
-    key: 'post-hunter',
-    label: 'Tự Săn Bài Mới',
-    title: 'Tự Săn Bài Mới (Post Hunter)',
-    subtitle: 'Theo dõi Fanpage & Nhóm mục tiêu, tự động nạp bài mới vào hàng đợi',
-    iconColor: 'text-emerald-400',
-    Icon: SearchOutlined,
-    group: 'engagement',
-  },
-  {
     key: 'buff-queue',
+    parent: 'buff-like',
     label: 'Hàng Đợi Tự Động',
     title: 'Hàng Đợi Tự Động (Auto-Buff Queue)',
     subtitle: 'Xếp lịch chạy ngầm với độ trễ tự nhiên, xoay vòng dàn Page chống kiệt sức',
@@ -77,6 +60,7 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     key: 'buff-history',
+    parent: 'buff-like',
     label: 'Nhật Ký & Lịch Sử',
     title: 'Nhật Ký & Lịch Sử Tương Tác',
     subtitle: 'Sổ chống trùng lặp và thống kê chi tiết toàn bộ lượt tương tác',
@@ -85,35 +69,35 @@ export const NAV_ITEMS: NavItem[] = [
     group: 'engagement',
   },
   {
+    key: 'buff-hunter',
+    label: 'Săn Bài & VIP Like',
+    title: 'Săn Bài & VIP Like (Tự Động Theo Dõi Page/Group)',
+    subtitle: 'Theo dõi 20 Fanpage/Group mục tiêu, tự động săn bài mới để buff và báo cáo tổng quan cuối ngày',
+    iconColor: 'text-emerald-400',
+    Icon: AimOutlined,
+    group: 'engagement',
+  },
+  {
     key: 'via-management',
-    label: 'Dàn Via & Cookie',
-    title: 'Quản Lý Dàn Via & Fanpage Trực Thuộc',
-    subtitle: 'Thêm tài khoản Facebook, quản lý Cookie/Proxy và cấu hình dàn Fanpage tương tác',
+    label: 'Via & Fanpage',
+    title: 'Via & Fanpage',
+    subtitle: 'Quản lý tài khoản, Cookie, Proxy và Fanpage',
     iconColor: 'text-sky-400',
     Icon: IdcardOutlined,
     group: 'management',
   },
   {
-    key: 'avatar-studio',
-    label: 'Cập Nhật Avatar Page',
-    title: 'Studio Cập Nhật Avatar & Ảnh Bìa Fanpage',
-    subtitle: 'Đổi ảnh đại diện và ảnh bìa hàng loạt cho các Fanpage',
-    iconColor: 'text-pink-400',
-    Icon: PictureOutlined,
-    group: 'management',
-  },
-  {
     key: 'system-settings',
-    label: 'Cấu Hình & Telegram',
-    title: 'Cấu Hình Vận Hành & Giám Sát Hệ Thống',
-    subtitle: 'Bot Telegram báo cáo tức thời, cảnh báo checkpoint và chính sách vận hành',
+    label: 'Cài đặt',
+    title: 'Cài đặt',
+    subtitle: 'Telegram, thông báo và tự động',
     iconColor: 'text-slate-400',
     Icon: SettingOutlined,
     group: 'management',
   },
   {
     key: 'license-management',
-    label: 'Cho Thuê & Bản Quyền',
+    label: 'Bản quyền',
     title: 'Bản Quyền & Cho Thuê Phần Mềm',
     subtitle: 'Quản lý thời hạn bản quyền, kích hoạt mã máy và quản lý khách thuê tool',
     iconColor: 'text-amber-400',
@@ -126,3 +110,9 @@ const NAV_BY_KEY = new Map<string, NavItem>(NAV_ITEMS.map((item) => [item.key, i
 
 export const getNavItem = (key: string): NavItem =>
   NAV_BY_KEY.get(key) || NAV_BY_KEY.get(DEFAULT_NAV_KEY)!;
+
+/** Mục hiển thị trên Sidebar/Header: tab con quy về trang cha */
+export const getRootNavItem = (key: string): NavItem => {
+  const item = getNavItem(key);
+  return item.parent ? getNavItem(item.parent) : item;
+};

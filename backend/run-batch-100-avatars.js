@@ -37,11 +37,11 @@ async function runBatch100Avatars() {
 
   // 1. Lấy Cookie của nick mẹ Thành An (UID: 100023403136194)
   const conn = await mysql.createConnection({
-    host: 'localhost',
-    port: 3306,
-    user: 'root',
-    password: '26082003',
-    database: 'autopost_saas',
+    host: process.env.DB_HOST || 'localhost',
+    port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'viplike_radiant',
   });
   const [rows] = await conn.query(
     'SELECT access_token, proxy_url FROM social_accounts WHERE platform_account_id = ?',

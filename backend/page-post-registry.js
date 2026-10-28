@@ -1,12 +1,13 @@
 const fs = require('fs');
 const path = require('path');
+const store = require('./state-store');
 
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-const REGISTRY_FILE = path.join(dataDir, 'page_post_registry.json');
 
-// Cấu trúc trong bộ nhớ: { [normalizedPostUrl]: { [pageId]: { pageName, reactionType, commentText, reactedAt, status } } }
-let registryCache = null;
+// Cấu trúc: { [normalizedPostUrl]: { [pageId]: { pageName, reactionType, commentText, reactedAt, status } } }
+// Lưu qua state-store: MySQL (bảng app_state) là nguồn chính, file JSON là bản dự phòng.
+let pruned = false;
 
 // Khoá chuẩn hoá duy nhất cho 1 bài viết: dùng chung cho registry, history queue và hunter.
 // Giữ lại query định danh bài (story_fbid, fbid, v, id...) và chỉ bỏ tham số tracking.
@@ -34,14 +35,6 @@ function normalizeFbPostUrl(rawUrl) {
   }
 }
 
-function writeRegistryFile() {
-  if (!registryCache) return;
-  const tmp = `${REGISTRY_FILE}.tmp`;
-  // Ghi gọn (không thụt lề): với 1000+ page file lớn nhanh, thụt lề làm chậm gấp đôi
-  fs.writeFileSync(tmp, JSON.stringify(registryCache), 'utf8');
-  fs.renameSync(tmp, REGISTRY_FILE);
-}
-
 // Bỏ các bài đã quá REGISTRY_RETENTION_DAYS ngày kể từ lần tương tác cuối (bài cũ hầu như không buff lại)
 const REGISTRY_RETENTION_DAYS = 45;
 function pruneRegistry(registry) {
@@ -63,42 +56,22 @@ function pruneRegistry(registry) {
 }
 
 function loadRegistry() {
-  if (registryCache) return registryCache;
-  try {
-    if (fs.existsSync(REGISTRY_FILE)) {
-      registryCache = JSON.parse(fs.readFileSync(REGISTRY_FILE, 'utf8'));
-      if (pruneRegistry(registryCache) > 0) scheduleSaveRegistry();
-      return registryCache;
-    }
-  } catch (err) {
-    console.warn(`[PagePostRegistry] ⚠️ Lỗi đọc page_post_registry.json: ${err.message}`);
+  let reg = store.read('page_post_registry');
+  if (!reg || typeof reg !== 'object' || Array.isArray(reg)) reg = store.write('page_post_registry', {});
+  if (!pruned && store.isReady()) {
+    pruned = true;
+    if (pruneRegistry(reg) > 0) store.write('page_post_registry', reg);
   }
-  registryCache = {};
-  return registryCache;
+  return reg;
 }
 
-let saveTimeout = null;
-// Gom ghi: tối đa 1 lần mỗi 3 giây (nhiều via chạy song song ghi liên tục, không để mỗi like ghi lại cả file)
+// Ghi được gộp theo thời gian trong state-store (nhiều via chạy song song không làm mỗi like ghi lại cả sổ)
 function scheduleSaveRegistry() {
-  if (saveTimeout) return;
-  saveTimeout = setTimeout(() => {
-    saveTimeout = null;
-    try {
-      writeRegistryFile();
-    } catch (err) {
-      console.error(`[PagePostRegistry] ❌ Lỗi lưu page_post_registry.json: ${err.message}`);
-    }
-  }, 3000);
+  store.write('page_post_registry', loadRegistry());
 }
 
 function flushRegistry() {
-  if (saveTimeout) clearTimeout(saveTimeout);
-  saveTimeout = null;
-  try {
-    writeRegistryFile();
-  } catch (err) {
-    console.error(`[PagePostRegistry] ❌ Lỗi flush page_post_registry.json: ${err.message}`);
-  }
+  store.flush().catch((err) => console.error(`[PagePostRegistry] ❌ Lỗi flush sổ chống trùng: ${err.message}`));
 }
 
 /**

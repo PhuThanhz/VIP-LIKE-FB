@@ -11,6 +11,8 @@ import {
   SearchOutlined,
   SettingOutlined,
   ThunderboltOutlined,
+  SendOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons';
 
 export interface HunterMonitor {
@@ -200,6 +202,23 @@ export default function PostHunterTab({
       await onToggle(id);
     } finally {
       setTogglingId(null);
+    }
+  };
+
+  const [sendingReport, setSendingReport] = useState(false);
+  const handleSendDailyReport = async () => {
+    try {
+      setSendingReport(true);
+      const res = await axios.post(`${workerBaseUrl}/api/buff-daily-report/send`);
+      if (res.data?.success) {
+        message.success('Đã gửi báo cáo tổng kết 24h về Telegram thành công!');
+      } else {
+        message.error(res.data?.error || 'Không thể gửi báo cáo');
+      }
+    } catch (e: any) {
+      message.error(e.response?.data?.error || e.message);
+    } finally {
+      setSendingReport(false);
     }
   };
 
@@ -393,6 +412,40 @@ export default function PostHunterTab({
           </div>
           <Button type="link" size="small" className="!p-0 !h-auto text-[11px]" onClick={onOpenSettings}>
             Cài đặt
+          </Button>
+        </div>
+      </div>
+
+      {/* Khung Báo Cáo Tổng Quan Cuối Ngày (Daily Summary Banner) */}
+      <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-900/90 to-cyan-950/40 border border-emerald-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-lg shadow-emerald-950/20">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0 text-xl">
+            📊
+          </div>
+          <div>
+            <div className="text-sm font-bold text-slate-100 flex items-center gap-2">
+              <span>Báo Cáo Tổng Quan VIP Like Cuối Ngày</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                24 Giờ Qua
+              </span>
+            </div>
+            <div className="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+              <span>🎯 Đang theo dõi: <b className="text-emerald-300">{stats.active}/{monitors.length}</b> mục tiêu</span>
+              <span>📰 Bài bắt được: <b className="text-cyan-300">{stats.caught24h}</b> bài mới</span>
+              <span>⏳ Chờ trong hàng đợi: <b className="text-amber-300">{stats.waiting}</b> bài</span>
+              <span>🛡️ Dàn Via thực thi: <b className="text-slate-200">514 Page Thành An</b> (Sẵn sàng)</span>
+            </div>
+          </div>
+        </div>
+        <div className="shrink-0 flex items-center gap-2">
+          <Button
+            type="primary"
+            icon={<SendOutlined />}
+            loading={sendingReport}
+            onClick={handleSendDailyReport}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs h-9 shadow-md shadow-emerald-950/40"
+          >
+            Gửi Báo Cáo Về Telegram
           </Button>
         </div>
       </div>

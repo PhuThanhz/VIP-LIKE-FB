@@ -61,8 +61,8 @@ import api, { WORKER_BASE_URL } from '../config/axios';
 import PasteLinkInput from '../components/common/PasteLinkInput';
 
 import PostHunterTab from '../components/buff/PostHunterTab';
+import BuffQueueTab, { formatDuration } from '../components/buff/BuffQueueTab';
 import ViaManagementPage from './ViaManagementPage';
-import PageAvatarStudio from './PageAvatarStudio';
 import SystemSettingsPage from './SystemSettingsPage';
 import LicenseManagementPage from './LicenseManagementPage';
 
@@ -234,6 +234,31 @@ function getLogCounts(log: BuffLogEntry) {
   const c = summarizeBuffDetails(log.details);
   const total = log.details.length;
   return { ...c, total, skipped: total - c.success - c.alreadyLiked - c.unverified - c.failed };
+}
+
+// Âm thanh chuông báo chiến thắng khi buff hoàn tất
+function playVictoryChime() {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+    notes.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.12);
+      gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.12);
+      gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + i * 0.12 + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.12 + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.12);
+      osc.stop(ctx.currentTime + i * 0.12 + 0.4);
+    });
+  } catch (e) {
+    // Audio might be muted or blocked by browser policy
+  }
 }
 
 export interface BuffMonitor {
@@ -544,7 +569,7 @@ export interface BuffEngagementProps {
 
 export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [searchParams] = useSearchParams();
-  const { message, modal } = App.useApp();
+  const { message, modal, notification } = App.useApp();
 
   const [internalActiveTabKey, setInternalActiveTabKey] = useState<string>('buff-like');
   const activeTabKey = props.activeTabKey !== undefined ? props.activeTabKey : internalActiveTabKey;
@@ -562,12 +587,14 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [actorMode, setActorMode] = useState<'VIAS' | 'FANPAGES'>('VIAS');
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
   const [pageSearchQuery, setPageSearchQuery] = useState('');
-  const [delayMs, setDelayMs] = useState<number>(3800);
+  const [viaFilter, setViaFilter] = useState<string>('ALL');
+  const [speedMode, setSpeedMode] = useState<'TURBO' | 'FAST' | 'NORMAL' | 'SAFE'>('FAST');
+  const [delayMs, setDelayMs] = useState<number>(2500);
   const [enableHumanBehavior, setEnableHumanBehavior] = useState<boolean>(true);
   const [fastSwitch, setFastSwitch] = useState<boolean>(true);
   const [antiCheckpointGuard, setAntiCheckpointGuard] = useState<boolean>(true);
   const [isAiGeneratingComments, setIsAiGeneratingComments] = useState<boolean>(false);
-  const [concurrency, setConcurrency] = useState<number>(1);
+  const [concurrency, setConcurrency] = useState<number>(2);
   const [dripFeedMode, setDripFeedMode] = useState<boolean>(false);
   const [dripDurationMinutes, setDripDurationMinutes] = useState<number>(30);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState<boolean>(false);
@@ -608,6 +635,23 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     details: [],
   });
 
+  // Đồng hồ cho lượt chạy trực tiếp: thời điểm bắt đầu/kết thúc và nhịp cập nhật mỗi giây
+  const [runTiming, setRunTiming] = useState<{ start: number | null; end: number | null }>({ start: null, end: null });
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    const status = autoBuffProgress.status;
+    if (status === 'RUNNING') {
+      setRunTiming((t) => (t.start && !t.end ? t : { start: Date.now(), end: null }));
+    } else if (status === 'DONE' || status === 'ERROR') {
+      setRunTiming((t) => (t.start && !t.end ? { ...t, end: Date.now() } : t));
+    }
+  }, [autoBuffProgress.status]);
+  useEffect(() => {
+    if (autoBuffProgress.status !== 'RUNNING') return;
+    const id = setInterval(() => setClockNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [autoBuffProgress.status]);
+
   // Khôi phục phiên Buff trực tiếp đang chạy ngầm nếu người dùng F5 hoặc tải lại trang
   useEffect(() => {
     let pollTimer: any = null;
@@ -621,6 +665,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         if (session.status === 'RUNNING') {
           if (session.targetUrl) setTargetPostUrl(session.targetUrl);
           if (session.reactionType) setSelectedReaction(session.reactionType);
+          if (session.startedAt) setRunTiming({ start: new Date(session.startedAt).getTime(), end: null });
 
           setAutoBuffProgress({
             total: session.total || 0,
@@ -680,6 +725,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           }, 1200);
         } else if (session.status === 'DONE' && Date.now() - new Date(session.updatedAt).getTime() < 120000) {
           if (session.targetUrl) setTargetPostUrl(session.targetUrl);
+          if (session.startedAt && session.updatedAt) {
+            setRunTiming({ start: new Date(session.startedAt).getTime(), end: new Date(session.updatedAt).getTime() });
+          }
           setAutoBuffProgress({
             total: session.total || 0,
             success: session.success || 0,
@@ -752,6 +800,87 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     const interval = setInterval(fetchBuffQueue, 10000);
     return () => clearInterval(interval);
   }, [fetchBuffQueue]);
+
+  // Tab Tạo mới: chạy ngay hoặc đưa vào hàng đợi
+  const [runMode, setRunMode] = useState<'NOW' | 'QUEUE'>('NOW');
+  const [queueStartAfter, setQueueStartAfter] = useState<number | 'AT'>(0);
+  const [queueStartAt, setQueueStartAt] = useState<string>('');
+  const [queueStagger, setQueueStagger] = useState<number>(3);
+  const [isEnqueueing, setIsEnqueueing] = useState(false);
+
+  const handleEnqueueFromForm = async () => {
+    const urls = buffMode === 'BATCH' ? parsedBatchLinks : [targetPostUrl.trim()].filter(Boolean);
+    if (urls.length === 0) {
+      message.warning('Vui lòng dán link bài viết!');
+      return;
+    }
+    if (selectedPageIds.length === 0) {
+      message.warning('Vui lòng chọn tài khoản thực hiện!');
+      return;
+    }
+
+    let delayMinutes = typeof queueStartAfter === 'number' ? queueStartAfter : 0;
+    if (queueStartAfter === 'AT') {
+      if (!queueStartAt) {
+        message.warning('Vui lòng chọn giờ bắt đầu!');
+        return;
+      }
+      const [hh, mm] = queueStartAt.split(':').map(Number);
+      const target = new Date();
+      target.setHours(hh, mm, 0, 0);
+      if (target.getTime() <= Date.now()) target.setDate(target.getDate() + 1); // giờ đã qua → hẹn ngày mai
+      delayMinutes = Math.max(0, Math.round((target.getTime() - Date.now()) / 60000));
+    }
+
+    const payload = {
+      targetLikes: selectedPageIds.length,
+      reactionType: selectedReaction,
+      enableLike: engagementMode !== 'COMMENT_ONLY',
+      enableComment: engagementMode !== 'LIKE_ONLY',
+      comments:
+        engagementMode !== 'LIKE_ONLY'
+          ? commentListText.split('\n').map((c) => c.trim()).filter(Boolean)
+          : [],
+      speedMode,
+      delayMinutes,
+    };
+
+    setIsEnqueueing(true);
+    try {
+      if (urls.length === 1) {
+        const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/add`, {
+          ...payload,
+          targetUrl: urls[0],
+          source: 'MANUAL',
+        });
+        if (res.data?.skipped) {
+          message.info(res.data.message || 'Bài viết đã từng chạy trước đó.');
+          return;
+        }
+        if (res.data?.alreadyQueued) {
+          message.info(res.data.message || 'Bài viết đã có trong hàng đợi.');
+          return;
+        }
+        message.success('Đã thêm vào hàng đợi');
+      } else {
+        const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/batch-add`, {
+          ...payload,
+          urls,
+          staggerMinutes: queueStagger,
+        });
+        message.success(`Đã thêm ${res.data?.addedCount ?? 0}/${res.data?.totalReceived ?? urls.length} bài vào hàng đợi`);
+        if (res.data?.skippedCount > 0) message.info(`Bỏ qua ${res.data.skippedCount} bài đã chạy trước đó.`);
+      }
+      if (buffMode === 'BATCH') setBatchLinksText('');
+      else setTargetPostUrl('');
+      fetchBuffQueue();
+      setActiveTabKey('buff-queue');
+    } catch (err: any) {
+      message.error(err.response?.data?.error || err.message || 'Không thể thêm vào hàng đợi');
+    } finally {
+      setIsEnqueueing(false);
+    }
+  };
 
   const handleAddQueueTask = async () => {
     if (!queueUrlInput.trim()) {
@@ -830,6 +959,18 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     }
   };
 
+  const handleRetryQueueTask = async (id: string) => {
+    try {
+      const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/retry/${id}`);
+      if (res.data?.success) {
+        message.success('Đã đưa bài viết vào hàng đợi chạy lại!');
+        fetchBuffQueue();
+      }
+    } catch (err: any) {
+      message.error(err.response?.data?.error || err.message);
+    }
+  };
+
   // ─────────────────────────────────────────────────────────────────────────────
   // POST HUNTER & AUTO-MONITORS STATE & HANDLERS
   // ─────────────────────────────────────────────────────────────────────────────
@@ -904,6 +1045,42 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       }
     } catch {}
   }, []);
+
+  // Via có cookie hết hạn hoặc bị checkpoint (lấy từ dữ liệu tổng quan, tự làm mới mỗi 15 giây)
+  const deadViaList = useMemo<{ uid: string; viaName?: string; tokenStatus: string }[]>(
+    () =>
+      (bmOverview?.vias || []).filter(
+        (v: any) => v.tokenStatus === 'EXPIRED' || v.tokenStatus === 'CHECKPOINT'
+      ),
+    [bmOverview]
+  );
+  const notifiedDeadViaRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!bmOverview) return;
+    const current = new Set(deadViaList.map((v) => v.uid));
+    // Lần tải đầu chỉ ghi nhận, không bật thông báo; sau đó báo khi có Via mới chuyển sang lỗi
+    if (notifiedDeadViaRef.current) {
+      const newlyDead = deadViaList.filter((v) => !notifiedDeadViaRef.current!.has(v.uid));
+      if (newlyDead.length > 0) {
+        notification.warning({
+          key: 'via-dead',
+          message: newlyDead.length === 1 ? 'Via cần cập nhật Cookie' : `${newlyDead.length} Via cần cập nhật Cookie`,
+          description: (
+            <div className="space-y-0.5">
+              {newlyDead.map((v) => (
+                <div key={v.uid}>
+                  {v.viaName || v.uid} · {v.tokenStatus === 'CHECKPOINT' ? 'bị checkpoint' : 'cookie hết hạn'}
+                </div>
+              ))}
+            </div>
+          ),
+          placement: 'bottomRight',
+          duration: 0,
+        });
+      }
+    }
+    notifiedDeadViaRef.current = current;
+  }, [bmOverview, deadViaList, notification]);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -1206,12 +1383,12 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   useEffect(() => {
     if (engagementMode !== 'LIKE_ONLY') {
       if (delayMs < 6000) {
-        setDelayMs(12000); // 12 giây mặc định an toàn khi có bình luận
+        setDelayMs(6000); // 6 giây an toàn và nhanh khi có bình luận
       }
     } else if (delayMs >= 6000) {
-      setDelayMs(3800); // Quay về mức an toàn chuẩn của chế độ chỉ like
+      setDelayMs(speedMode === 'TURBO' ? 1500 : speedMode === 'FAST' ? 2500 : 3800);
     }
-  }, [engagementMode]);
+  }, [engagementMode, speedMode]);
 
   // History & Anti-Duplicate States
   const [buffLogs, setBuffLogs] = useState<BuffLogEntry[]>([]);
@@ -1255,8 +1432,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
   // Xuất Báo Cáo Lịch Sử Tương Tác ra file CSV (UTF-8 BOM chuẩn Excel)
   const handleExportLogsToCsv = () => {
-    if (buffLogs.length === 0) {
-      message.warning('Chưa có lịch sử buff nào để xuất báo cáo!');
+    if (filteredBuffLogs.length === 0) {
+      message.warning('Không có dòng nào khớp bộ lọc để xuất báo cáo!');
       return;
     }
     const headers = [
@@ -1271,7 +1448,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       'Thất Bại',
       'Chi Tiết Dàn Page',
     ];
-    const rows = buffLogs.map((log) => {
+    const rows = filteredBuffLogs.map((log) => {
       const time = new Date(log.createdAt).toLocaleString('vi-VN');
       const type = log.type === 'BATCH' ? 'Hàng Loạt' : 'Đơn Lẻ';
       const url = `"${(log.targetUrl || '').replace(/"/g, '""')}"`;
@@ -1296,7 +1473,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    message.success(`Đã xuất báo cáo ${buffLogs.length} chiến dịch ra file CSV thành công!`);
+    message.success(`Đã xuất ${filteredBuffLogs.length} dòng ra file CSV!`);
   };
 
 
@@ -1312,6 +1489,65 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [autoSkipAlreadyLiked, setAutoSkipAlreadyLiked] = useState<boolean>(true);
   const [logSearchQuery, setLogSearchQuery] = useState('');
   const [logFilterReaction, setLogFilterReaction] = useState<string>('ALL');
+  const [logFilterTime, setLogFilterTime] = useState<'ALL' | 'TODAY' | '7D' | '30D'>('ALL');
+  const [logFilterType, setLogFilterType] = useState<'ALL' | 'SINGLE' | 'BATCH'>('ALL');
+  const [logFilterVia, setLogFilterVia] = useState<string>('ALL');
+  const [logFilterResult, setLogFilterResult] = useState<'ALL' | 'CLEAN' | 'UNVERIFIED' | 'FAILED'>('ALL');
+
+  const logViaOptions = useMemo(
+    () => Array.from(new Set(buffLogs.map((l) => l.accountName).filter(Boolean) as string[])).sort(),
+    [buffLogs]
+  );
+
+  const hasActiveLogFilter =
+    Boolean(logSearchQuery.trim()) ||
+    logFilterReaction !== 'ALL' ||
+    logFilterTime !== 'ALL' ||
+    logFilterType !== 'ALL' ||
+    logFilterVia !== 'ALL' ||
+    logFilterResult !== 'ALL';
+
+  const resetLogFilters = () => {
+    setLogSearchQuery('');
+    setLogFilterReaction('ALL');
+    setLogFilterTime('ALL');
+    setLogFilterType('ALL');
+    setLogFilterVia('ALL');
+    setLogFilterResult('ALL');
+  };
+
+  const filteredBuffLogs = useMemo(() => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const minTime =
+      logFilterTime === 'TODAY'
+        ? startOfToday.getTime()
+        : logFilterTime === '7D'
+          ? Date.now() - 7 * 86400000
+          : logFilterTime === '30D'
+            ? Date.now() - 30 * 86400000
+            : 0;
+    const q = logSearchQuery.toLowerCase().trim();
+
+    return buffLogs.filter((log) => {
+      if (minTime && new Date(log.createdAt).getTime() < minTime) return false;
+      if (logFilterType !== 'ALL' && log.type !== logFilterType) return false;
+      if (logFilterVia !== 'ALL' && log.accountName !== logFilterVia) return false;
+      if (logFilterReaction !== 'ALL' && log.reactionType !== logFilterReaction) return false;
+      if (logFilterResult !== 'ALL') {
+        const c = getLogCounts(log);
+        if (logFilterResult === 'CLEAN' && (c.failed > 0 || c.unverified > 0)) return false;
+        if (logFilterResult === 'UNVERIFIED' && c.unverified === 0) return false;
+        if (logFilterResult === 'FAILED' && c.failed === 0) return false;
+      }
+      if (!q) return true;
+      return (
+        log.targetUrl.toLowerCase().includes(q) ||
+        Boolean(log.accountName?.toLowerCase().includes(q)) ||
+        log.details.some((d) => d.pageName.toLowerCase().includes(q) || d.pageId.includes(q))
+      );
+    });
+  }, [buffLogs, logSearchQuery, logFilterReaction, logFilterTime, logFilterType, logFilterVia, logFilterResult]);
   const [selectedLogDetail, setSelectedLogDetail] = useState<BuffLogEntry | null>(null);
 
   // Tính toán các Fanpage đã từng like link bài viết này trong lịch sử
@@ -1637,6 +1873,31 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       .filter((l) => l.length > 0 && (l.startsWith('http://') || l.startsWith('https://')));
   }, [batchLinksText]);
 
+  // Ước tính thời gian chạy: ưu tiên tốc độ thực tế từ các bài đã hoàn tất, nếu chưa có thì tính theo giãn cách đang chọn
+  const runEstimate = useMemo(() => {
+    const links = buffMode === 'BATCH' ? parsedBatchLinks.length : targetPostUrl.trim() ? 1 : 0;
+    const accounts = selectedPageIds.length;
+    if (links === 0 || accounts === 0) return null;
+
+    const samples = (queueItems as any[])
+      .filter((t) => t.status === 'COMPLETED' && t.result?.durationSec > 0 && t.result?.total > 0)
+      .slice(-20)
+      .map((t) => t.result.durationSec / t.result.total)
+      .sort((a, b) => a - b);
+
+    let perPage: number;
+    let basis: 'history' | 'settings';
+    if (samples.length >= 3) {
+      perPage = samples[Math.floor(samples.length / 2)]; // trung vị, ít bị ảnh hưởng bởi lần chạy bất thường
+      basis = 'history';
+    } else {
+      perPage = delayMs / 1000 / Math.max(1, concurrency) + 3;
+      basis = 'settings';
+    }
+    const perLink = perPage * accounts;
+    return { total: perLink * links, perLink, links, basis };
+  }, [buffMode, parsedBatchLinks.length, targetPostUrl, selectedPageIds.length, queueItems, delayMs, concurrency]);
+
 
   // Bóc tách danh sách Fanpage từ ô nhập hàng loạt
   const parsedBulkPages = useMemo(() => {
@@ -1774,12 +2035,31 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     onError: () => {},
   });
 
-  // Filter pages by search query
+  // Thống kê số lượng Page theo từng Via khi chọn ALL_VIAS
+  const viaGroupCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const p of scannedPages) {
+      const vName = p.viaName || 'Khác';
+      counts[vName] = (counts[vName] || 0) + 1;
+    }
+    return counts;
+  }, [scannedPages]);
+
+  // Filter pages by search query and viaFilter
   const filteredPages = useMemo(() => {
-    if (!pageSearchQuery.trim()) return scannedPages;
+    let list = scannedPages;
+    if (viaFilter !== 'ALL') {
+      list = list.filter((p) => p.viaName === viaFilter || String(p.viaAccountId) === viaFilter);
+    }
+    if (!pageSearchQuery.trim()) return list;
     const q = pageSearchQuery.toLowerCase().trim();
-    return scannedPages.filter((p) => p.name.toLowerCase().includes(q) || p.id.includes(q));
-  }, [scannedPages, pageSearchQuery]);
+    return list.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.id.includes(q) ||
+        (p.viaName && p.viaName.toLowerCase().includes(q))
+    );
+  }, [scannedPages, pageSearchQuery, viaFilter]);
 
   // Chọn nhanh ngẫu nhiên N Fanpage từ dàn Page
   const handleSelectRandomPages = (count: number) => {
@@ -1868,6 +2148,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         message: 'Đang xếp hàng chờ...',
       }));
 
+      setRunTiming({ start: Date.now(), end: null });
       setAutoBuffProgress({
         total: pagesToBuff.length,
         success: 0,
@@ -1941,6 +2222,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           reactionType: selectedReaction,
           selectedPages: selectedPagesPayload,
           delayMs,
+          speedMode,
           enableLike: engagementMode !== 'COMMENT_ONLY',
           enableComment: engagementMode !== 'LIKE_ONLY',
           enableHumanBehavior,
@@ -2054,7 +2336,13 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       if (stopped) {
         message.info(`Đã dừng. ${counts.success} thành công, các Page còn lại được bỏ qua. Đã lưu vào lịch sử.`);
       } else {
-        message.success(`Hoàn thành: ${counts.success} thành công, ${counts.failed} lỗi. Đã lưu vào lịch sử.`);
+        playVictoryChime();
+        notification.success({
+          message: '🎉 CHIẾN DỊCH BUFF HOÀN TẤT!',
+          description: `Đã tương tác thành công ${counts.success}/${details.length} lượt (${Math.round((counts.success / Math.max(1, details.length)) * 100)}%). Báo cáo chi tiết đã được gửi về Telegram của bạn!`,
+          duration: 9,
+          placement: 'topRight',
+        });
       }
     },
     onError: (err: any) => {
@@ -2248,6 +2536,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                 comment: commentLines.length > 0 ? commentLines[pIdx % commentLines.length] : '',
               })),
               delayMs,
+              speedMode,
               enableLike: engagementMode !== 'COMMENT_ONLY',
               enableComment: engagementMode !== 'LIKE_ONLY',
               enableHumanBehavior,
@@ -2336,7 +2625,13 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     if (batchAbortRef.current) {
       message.info('Đã dừng tiến trình chạy nhiều link.');
     } else {
-      message.success('Đã hoàn thành tiến trình chạy nhiều link!');
+      playVictoryChime();
+      notification.success({
+        message: '🎉 HOÀN TẤT CHẠY TẤT CẢ LIÊN KẾT!',
+        description: `Đã chạy xong toàn bộ ${initialOrders.length} bài viết trong danh sách. Báo cáo chi tiết đã lưu vào lịch sử và gửi về Telegram!`,
+        duration: 10,
+        placement: 'topRight',
+      });
     }
   };
 
@@ -2394,6 +2689,15 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     message.success(`Đã chuyển sang Dàn ${fbAccounts.length} Via cá nhân!`);
   };
 
+  // Kiểm tra xem hiện tại có bất kỳ tác vụ buff nào đang chạy không (0 bài thì làm mờ nút)
+  const isAnyBuffRunning = Boolean(
+    autoBuffMutation.isPending ||
+    autoBuffProgress?.status === 'RUNNING' ||
+    isBatchRunning ||
+    queueItems.some((it) => it.status === 'RUNNING') ||
+    (bmOverview?.stats?.runningCount || 0) > 0
+  );
+
   return (
     <div className="space-y-5 max-w-[1440px] mx-auto px-2 sm:px-4 md:px-6 pb-28 md:pb-12">
       {/* THANH TRẠNG THÁI DÀN VIA */}
@@ -2402,7 +2706,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           <div className="font-semibold text-slate-100 text-sm sm:text-base">Dàn Via & Fanpage</div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 mt-1.5">
             <span className="inline-flex items-center gap-1.5">
-              <UserOutlined />
               Via:
               <span className="font-semibold text-emerald-400">{bmOverview?.liveVias ?? fbAccounts.length} hoạt động</span>
               {bmOverview?.deadVias > 0 && (
@@ -2410,15 +2713,12 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               )}
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <ThunderboltFilled />
               Fanpage: <strong className="text-slate-200 font-semibold">{scannedPages.length}</strong>
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <CheckCircleOutlined />
               Đã chống trùng: <strong className="text-slate-200 font-semibold">{bmOverview?.antiOverlap?.totalProtectedInteractions || 0}</strong>
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <BellOutlined />
               Telegram:
               <span className={bmOverview?.system?.telegramConfigured ? 'text-emerald-400 font-semibold' : 'text-slate-500'}>
                 {bmOverview?.system?.telegramConfigured ? 'Đã kết nối' : 'Chưa cấu hình'}
@@ -2429,7 +2729,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <Button
-            icon={<SettingOutlined />}
             onClick={() => {
               fetchSettings();
               setActiveTabKey('system-settings');
@@ -2437,20 +2736,67 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           >
             Cài đặt
           </Button>
-          <Button icon={<SafetyCertificateOutlined />} loading={checkingViaHealth} onClick={handleRunViaHealthCheck}>
+          <Button loading={checkingViaHealth} onClick={handleRunViaHealthCheck}>
             Kiểm tra Via
           </Button>
           {bmOverview?.system?.isEmergencyStopped ? (
-            <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleResumeSystem}>
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={handleResumeSystem}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md shadow-emerald-600/30"
+            >
               Khôi phục hoạt động
             </Button>
+          ) : isAnyBuffRunning ? (
+            <Tooltip title="Đang có bài buff chạy! Bấm để lập tức ngắt tiến trình nhằm bảo vệ tài khoản">
+              <Button
+                danger
+                type="primary"
+                icon={<StopOutlined />}
+                onClick={handleEmergencyStop}
+                className="bg-rose-600 hover:bg-rose-500 text-white font-bold animate-pulse shadow-lg shadow-rose-600/40"
+              >
+                Dừng khẩn cấp
+              </Button>
+            </Tooltip>
           ) : (
-            <Button danger icon={<StopOutlined />} onClick={handleEmergencyStop}>
-              Dừng khẩn cấp
-            </Button>
+            <Tooltip title="Hiện không có tác vụ nào đang chạy (0 bài). Nút sẽ tự động bật sáng khi có bài bắt đầu buff để tránh bấm nhầm!">
+              <Button
+                disabled
+                icon={<StopOutlined />}
+                className="opacity-40 cursor-not-allowed border-slate-700 text-slate-500 bg-slate-900/40"
+              >
+                Dừng khẩn cấp
+              </Button>
+            </Tooltip>
           )}
         </div>
       </div>
+
+      {/* CẢNH BÁO VIA HẾT HẠN COOKIE / CHECKPOINT */}
+      {deadViaList.length > 0 && (
+        <div className="px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="min-w-0 text-sm">
+            <div className="text-amber-200 font-medium">
+              {deadViaList.length} Via cần cập nhật Cookie
+            </div>
+            <div className="text-xs text-amber-200/70 mt-0.5 truncate">
+              {deadViaList
+                .map((v) => `${v.viaName || v.uid} (${v.tokenStatus === 'CHECKPOINT' ? 'checkpoint' : 'hết hạn'})`)
+                .join(' · ')}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button size="small" loading={checkingViaHealth} onClick={handleRunViaHealthCheck}>
+              Kiểm tra lại
+            </Button>
+            <Button size="small" type="primary" onClick={() => setActiveTabKey('via-management')}>
+              Cập nhật Cookie
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* BANNER CẢNH BÁO NẾU HỆ THỐNG ĐANG DỪNG KHẨN CẤP */}
       {bmOverview?.system?.isEmergencyStopped && (
@@ -2476,6 +2822,47 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         </div>
       )}
 
+      {/* Chuyển nhanh: Tạo mới / Hàng đợi / Lịch sử / Săn bài tự động (cùng một trang) */}
+      {(activeTabKey === 'buff-like' || activeTabKey === 'buff-queue' || activeTabKey === 'buff-history' || activeTabKey === 'buff-hunter') && (
+        <div className="flex items-center justify-between gap-3 border-b border-slate-800/80">
+          <div role="tablist" className="flex items-center gap-1 -mb-px">
+            {[
+              { key: 'buff-like', label: 'Tạo mới', count: 0 },
+              { key: 'buff-queue', label: 'Hàng đợi', count: queueItems.filter((i) => i.status === 'QUEUED' || i.status === 'RUNNING').length },
+              { key: 'buff-history', label: 'Lịch sử', count: buffLogs.length },
+              { key: 'buff-hunter', label: '🎯 Săn bài tự động (VIP Like)', count: monitors.length },
+            ].map((t) => {
+              const active = activeTabKey === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveTabKey(t.key)}
+                  className={`px-4 py-2.5 text-sm border-b-2 transition-colors cursor-pointer bg-transparent ${
+                    active
+                      ? 'border-blue-500 text-slate-100 font-semibold'
+                      : 'border-transparent text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {t.label}
+                  {t.count > 0 && (
+                    <span
+                      className={`ml-2 px-1.5 rounded-md text-xs tabular-nums ${
+                        active ? 'bg-blue-500/20 text-blue-300' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {t.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <Tabs
         activeKey={activeTabKey}
         onChange={(k) => setActiveTabKey(k)}
@@ -2489,654 +2876,149 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             label: 'Like & bình luận',
             children: (
               <div className="space-y-5">
-                {/* 3-STEP QUICK GUIDED FLOW FOR UNTRAINED USERS */}
-                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-purple-950/40 border border-blue-500/30 shadow-md">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold text-sm shrink-0">
-                        💡
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-white flex items-center gap-2">
-                          <span>Quy trình 3 bước tăng tương tác tự động</span>
-                          <Tag color="cyan" className="text-[10px] px-1.5 py-0 border-0 rounded-md">Dễ sử dụng 100%</Tag>
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          Hệ thống đã tự động kết nối sẵn dàn Page con &amp; cấu hình an toàn chống quét. Bạn chỉ cần làm theo 3 bước:
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-300 overflow-x-auto pb-1 md:pb-0">
-                      <span className="px-2.5 py-1 rounded-lg bg-blue-950/80 border border-blue-500/40 text-blue-300 flex items-center gap-1.5 shrink-0">
-                        <span className="w-4 h-4 rounded-full bg-blue-500 text-[10px] text-white flex items-center justify-center font-bold">1</span>
-                        <span>Dán Link bài viết</span>
-                      </span>
-                      <span className="text-slate-600">➔</span>
-                      <span className="px-2.5 py-1 rounded-lg bg-indigo-950/80 border border-indigo-500/40 text-indigo-300 flex items-center gap-1.5 shrink-0">
-                        <span className="w-4 h-4 rounded-full bg-indigo-500 text-[10px] text-white flex items-center justify-center font-bold">2</span>
-                        <span>Chọn Cảm xúc &amp; Seeding</span>
-                      </span>
-                      <span className="text-slate-600">➔</span>
-                      <span className="px-2.5 py-1 rounded-lg bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 flex items-center gap-1.5 shrink-0">
-                        <span className="w-4 h-4 rounded-full bg-emerald-500 text-[10px] text-white flex items-center justify-center font-bold">3</span>
-                        <span>Bấm Bắt đầu</span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* TOP HERO COMMAND BAR: DÁN LINK & QUICK PRESETS */}
-                <div className="app-surface p-5 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
-                    <div className="flex items-center gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-lg bg-blue-600/30 border border-blue-500/50 text-blue-400 font-bold flex items-center justify-center text-xs shrink-0">
-                            1
-                          </span>
-                          <span className="text-sm sm:text-base font-bold text-white">
-                            Bước 1: Link bài viết cần tăng tương tác
-                          </span>
-                          {targetPostUrl && (
-                            <span className="px-2.5 py-0.5 rounded-md text-[10px] font-mono font-bold bg-blue-950/90 text-blue-300 border border-blue-700/60 shadow-sm">
-                              {targetPostUrl.includes('/groups/')
-                                ? 'Nhóm Facebook'
-                                : targetPostUrl.includes('/reel')
-                                ? 'Video Reels'
-                                : 'Bài Viết'}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-400 mt-1">
-                          Dán link bài viết Group (kín/công khai), Fanpage, Profile cá nhân hoặc Reels để hệ thống tự động nhận diện.
-                        </p>
-                      </div>
-                    </div>
-
-                    <Segmented
-                      size="middle"
-                      value={buffMode}
-                      onChange={(val) => setBuffMode(val as 'SINGLE' | 'BATCH')}
-                      options={[
-                        { label: '1 link', value: 'SINGLE' },
-                        { label: 'Nhiều link', value: 'BATCH' },
-                      ]}
-                      className="bg-slate-950/80 border border-slate-700/80 p-1 text-xs font-bold text-slate-200"
-                    />
-                  </div>
-
-                  {/* Input link hoặc danh sách link */}
-                  {buffMode === 'SINGLE' ? (
-                    <div>
-                      <PasteLinkInput
-                        value={targetPostUrl}
-                        onChange={(val) => setTargetPostUrl(val)}
-                        placeholder="https://www.facebook.com/groups/.../posts/... hoặc https://www.facebook.com/share/p/..."
-                      />
-
-                      {/* Cảnh báo nếu đã từng like bài viết này */}
-                      {alreadyLikedPagesForUrl.length > 0 && (
-                        <div className="mt-3 p-3 rounded-xl bg-amber-950/40 border border-amber-500/40 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
-                          <span className="text-amber-300 font-semibold flex items-center gap-2">
-                            <InfoCircleOutlined className="text-amber-400 text-sm" />
-                            <span>Đã có <b>{alreadyLikedPagesForUrl.length} Page/Via</b> từng tương tác link này trước đó trong lịch sử</span>
-                          </span>
-                          <Button
-                            size="small"
-                            type="link"
-                            onClick={() => {
-                              const alreadyIds = alreadyLikedPagesForUrl.map((p) => p.pageId);
-                              setSelectedPageIds((prev) => prev.filter((id) => !alreadyIds.includes(id)));
-                              message.success(`Đã tự động bỏ chọn ${alreadyIds.length} tài khoản đã tương tác trước!`);
-                            }}
-                            className="text-xs p-0 h-auto text-amber-400 font-bold hover:underline shrink-0"
-                          >
-                            Bỏ chọn {alreadyLikedPagesForUrl.length} tài khoản này
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-slate-200">
-                          Danh sách link Facebook (Mỗi dòng một link):
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono px-2.5 py-0.5 rounded-md bg-blue-950/90 border border-blue-700/70 text-blue-300 font-bold">
-                            {parsedBatchLinks.length} link hợp lệ
-                          </span>
-                          {batchLinksText && (
-                            <Button
-                              type="link"
-                              size="small"
-                              danger
-                              onClick={() => setBatchLinksText('')}
-                              className="text-xs p-0 h-auto font-semibold"
-                            >
-                              Xóa hết
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                      <Input.TextArea
-                        rows={4}
-                        value={batchLinksText}
-                        onChange={(e) => setBatchLinksText(e.target.value)}
-                        placeholder={`https://www.facebook.com/groups/123456/posts/7891011/\nhttps://www.facebook.com/share/p/1CmWWe4m7g/\nhttps://www.facebook.com/share/p/19ivmH7zUw/`}
-                        className="font-mono text-xs bg-slate-950 text-slate-100 border-slate-700 rounded-xl placeholder:text-slate-500 focus:border-blue-400"
-                      />
-                    </div>
-                  )}
-
-                  {/* 3 CẤU HÌNH NHANH (SMART PRESET TOOLBAR) */}
-                  <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                    <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
-                      Cấu hình nhanh:
-                    </span>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={handleQuickPresetLike24}
-                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
-                      >
-                        Like bằng tất cả Page ({scannedPages.length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleQuickPresetAiSeeding}
-                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
-                      >
-                        Like + bình luận AI
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleQuickPresetVias}
-                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
-                      >
-                        Dùng nick cá nhân ({fbAccounts.length})
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* MAIN 2-COLUMN BENTO GRID */}
-                <Row gutter={[20, 20]}>
-                  {/* CỘT TRÁI (45%): FLEET MANAGER - DÀN TÀI KHOẢN & FANPAGE */}
-                  <Col xs={24} lg={11}>
-                    <div className="app-surface p-5 space-y-4">
-                      {/* Card Header */}
-                      <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
-                        <div className="flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-100">
-                          <span className="w-5 h-5 rounded-md bg-emerald-600/30 border border-emerald-500/50 text-emerald-400 font-bold flex items-center justify-center text-xs shrink-0">
-                            3
-                          </span>
-                          <span>Bước 3: Chọn dàn nick thực hiện</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={<ReloadOutlined spin={scanPagesMutation.isPending || loadingAccounts} />}
-                            loading={scanPagesMutation.isPending || loadingAccounts}
-                            onClick={async () => {
-                              await queryClient.invalidateQueries({ queryKey: ['socialAccounts'] });
-                              await refetchAccounts();
-                              message.success(`Đã cập nhật: ${fbAccounts.length} Via sẵn sàng!`);
-                              handleScanPages();
-                            }}
-                            className="text-slate-300 hover:text-blue-400 text-xs px-2.5 h-7 rounded-lg border border-slate-700 hover:border-blue-500 bg-slate-800/80 font-semibold cursor-pointer"
-                            title="Làm mới dàn Via & Quét thêm Fanpage từ Facebook"
-                          >
-                            Quét lại
-                          </Button>
-                          <Button
-                            type="primary"
-                            size="small"
-                            icon={<SettingOutlined />}
-                            onClick={() => handleOpenManagePages(selectedAccountId)}
-                            className="bg-blue-600 hover:bg-blue-500 text-on-accent font-bold rounded-lg text-xs h-7 px-2.5 shadow-sm border-none cursor-pointer"
-                          >
-                            Quản lý Page ({scannedPages.length})
-                          </Button>
-                        </div>
-                      </div>
-
-                      {/* Dropdown chọn nick mẹ */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <label className="text-xs font-semibold text-slate-300">
-                            Tài khoản Facebook sở hữu Page:
-                          </label>
-                          {currentViaAccount && (
-                            <span className="text-[11px] text-blue-400 font-mono">
-                              c_user: {extractCUser(currentViaAccount.cookieString || currentViaAccount.accessToken) || 'N/A'}
-                            </span>
-                          )}
-                          {selectedAccountId === 'ALL_VIAS' && (
-                            <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                              {actorMode === 'VIAS'
-                                ? `Gộp ${fbAccounts.length} Nick Via (${selectedPageIds.length}/${scannedPages.length})`
-                                : `Gộp ${fbAccounts.length} Via (${scannedPages.length} Fanpage)`}
-                            </span>
-                          )}
-                        </div>
-                        <Select
-                          className="w-full"
-                          size="large"
-                          loading={loadingAccounts}
-                          value={selectedAccountId}
-                          onChange={(val) => {
-                            setSelectedAccountId(val);
-                            if (val === 'CUSTOM') {
-                              setScannedPages([]);
-                              setSelectedPageIds([]);
-                            }
-                          }}
-                          options={[
-                            ...(fbAccounts.length > 1
-                              ? [
-                                  {
-                                    value: 'ALL_VIAS',
-                                    label: `Tất cả nick (${fbAccounts.length}): ${
-                                      fbAccounts
-                                        .slice(0, 4)
-                                        .map((a) => a.pageName || `Via ${String(a.platformAccountId || a.id).slice(-4)}`)
-                                        .join(' + ') +
-                                      (fbAccounts.length > 4 ? ` + ${fbAccounts.length - 4} nick khác` : '')
-                                    }`,
-                                  },
-                                ]
-                              : []),
-                            { value: 'CUSTOM', label: 'Nhập cookie thủ công' },
-                            ...fbAccounts.map((a) => ({
-                              value: a.id,
-                              label: `${a.pageName || `Via ${String(a.platformAccountId || a.id).slice(-4)}`} (${
-                                a.tokenStatus === 'OK' ? 'Cookie sống' : 'Cần kiểm tra'
-                              })`,
-                            })),
-                          ]}
-                        />
-                      </div>
-
-                      {/* Cookie thủ công nếu chọn CUSTOM */}
-                      {selectedAccountId === 'CUSTOM' && (
-                        <div className="space-y-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950/70">
-                          <div className="flex items-center justify-between">
-                            <label className="text-xs font-bold text-slate-200">
-                              Nhập Cookie nick Facebook mẹ:
-                            </label>
-                            <span className="text-[11px] text-slate-400">
-                              (Chứa <b>c_user</b> & <b>xs</b>)
-                            </span>
+                <Row gutter={[20, 20]} align="top">
+                  {/* CỘT TRÁI: 1. Bài viết → 2. Tương tác → 3. Tài khoản */}
+                  <Col xs={24} lg={15}>
+                    <div className="space-y-4">
+                      {/* TOP HERO COMMAND BAR: DÁN LINK & QUICK PRESETS */}
+                      <div className="app-surface p-5 space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                          <div className="flex items-center gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 text-slate-300 font-semibold flex items-center justify-center text-xs shrink-0">
+                                  1
+                                </span>
+                                <span className="text-sm sm:text-base font-semibold text-slate-100">
+                                  Bài viết
+                                </span>
+                                {targetPostUrl && (
+                                  <span className="text-xs text-slate-400">
+                                    {targetPostUrl.includes('/groups/')
+                                      ? 'Nhóm Facebook'
+                                      : targetPostUrl.includes('/reel')
+                                      ? 'Video Reels'
+                                      : 'Bài Viết'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </div>
 
-                          <Row gutter={10}>
-                            <Col span={10}>
-                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                                c_user:
-                              </label>
-                              <Input
-                                placeholder="10008321..."
-                                value={
-                                  customCookie.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1] ||
-                                  (customCookie.includes('=') ? '' : customCookie)
-                                }
-                                onChange={(e) => {
-                                  const cUser = e.target.value.trim();
-                                  const currentXs = customCookie.match(/(?:^|;\s*)xs=([^;]+)/)?.[1] || '';
-                                  setCustomCookie(
-                                    cUser && currentXs
-                                      ? `c_user=${cUser}; xs=${currentXs}`
-                                      : cUser
-                                      ? `c_user=${cUser}`
-                                      : ''
-                                  );
-                                }}
-                                className="font-mono text-xs rounded-xl bg-slate-900 border-slate-700 text-slate-100"
-                              />
-                            </Col>
-                            <Col span={14}>
-                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                                xs:
-                              </label>
-                              <Input.Password
-                                placeholder="27%3ABc0..."
-                                value={customCookie.match(/(?:^|;\s*)xs=([^;]+)/)?.[1] || ''}
-                                onChange={(e) => {
-                                  const xs = e.target.value.trim();
-                                  const currentCUser = customCookie.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1] || '';
-                                  setCustomCookie(
-                                    currentCUser && xs
-                                      ? `c_user=${currentCUser}; xs=${xs}`
-                                      : xs
-                                      ? `xs=${xs}`
-                                      : ''
-                                  );
-                                }}
-                                className="font-mono text-xs rounded-xl bg-slate-900 border-slate-700 text-slate-100"
-                              />
-                            </Col>
-                          </Row>
-
-                          <Input.TextArea
-                            rows={2}
-                            placeholder="Dán toàn bộ cookie dài vào đây..."
-                            value={customCookie}
-                            onChange={(e) => setCustomCookie(e.target.value)}
-                            className="font-mono text-[11px] rounded-xl bg-slate-900 border-slate-700 text-slate-100"
+                          <Segmented
+                            size="middle"
+                            value={buffMode}
+                            onChange={(val) => setBuffMode(val as 'SINGLE' | 'BATCH')}
+                            options={[
+                              { label: '1 link', value: 'SINGLE' },
+                              { label: 'Nhiều link', value: 'BATCH' },
+                            ]}
                           />
                         </div>
-                      )}
 
-                      {/* CHỌN: DÀN FANPAGE VỆ TINH HAY DÀN VIA CÁ NHÂN */}
-                      <div className="p-1 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setActorMode('FANPAGES')}
-                          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                            actorMode === 'FANPAGES'
-                              ? 'bg-blue-600 text-on-accent'
-                              : 'text-slate-400 hover:text-white hover:bg-slate-900'
-                          }`}
-                        >
-                          <span>Page</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950 border border-blue-700 text-blue-300">
-                            {scannedPages.length}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActorMode('VIAS')}
-                          className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                            actorMode === 'VIAS'
-                              ? 'bg-blue-600 text-on-accent'
-                              : 'text-slate-400 hover:text-white hover:bg-slate-900'
-                          }`}
-                        >
-                          <span>Nick cá nhân</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-700 text-emerald-300">
-                            {fbAccounts.length}
-                          </span>
-                        </button>
-                      </div>
+                        {/* Input link hoặc danh sách link */}
+                        {buffMode === 'SINGLE' ? (
+                          <div>
+                            <PasteLinkInput
+                              value={targetPostUrl}
+                              onChange={(val) => setTargetPostUrl(val)}
+                              placeholder="Dán link bài viết Facebook (Group, Fanpage, Profile, Reels)"
+                            />
 
-                      {/* Danh sách Fanpage / Via với Interactive Grid Cards */}
-                      {scannedPages.length > 0 ? (
-                        <div className="space-y-2.5 pt-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-slate-200">
-                              {actorMode === 'VIAS' ? 'Chọn Nick Via tương tác:' : 'Chọn Fanpage tương tác:'}{' '}
-                              <span className="text-blue-400 font-mono font-bold">
-                                ({selectedPageIds.length}/{scannedPages.length})
-                              </span>
-                            </span>
-                            <Checkbox
-                              checked={selectedPageIds.length === scannedPages.length && scannedPages.length > 0}
-                              indeterminate={
-                                selectedPageIds.length > 0 && selectedPageIds.length < scannedPages.length
-                              }
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedPageIds(scannedPages.map((p) => p.id));
-                                } else {
-                                  setSelectedPageIds([]);
-                                }
-                              }}
-                            >
-                              <span className="text-xs text-slate-300 font-semibold">Chọn tất cả</span>
-                            </Checkbox>
-                          </div>
-
-                          {/* Thanh công cụ Chọn Nhanh Số Lượng Page (20, 50, 100, 200, All) */}
-                          {scannedPages.length > 5 && (
-                            <div className="flex items-center gap-1.5 flex-wrap p-2 rounded-xl bg-slate-950/70 border border-slate-800/80">
-                              <span className="text-[11px] text-slate-400 font-semibold">Chọn nhanh:</span>
-                              {[20, 50, 100, 200]
-                                .filter((n) => n <= scannedPages.length)
-                                .map((num) => (
-                                  <Button
-                                    key={num}
-                                    size="small"
-                                    onClick={() => handleSelectRandomPages(num)}
-                                    className="bg-slate-900 border-slate-700/80 hover:border-cyan-500 text-slate-200 text-[11px] font-semibold rounded-lg px-2 h-6"
-                                  >
-                                    ⚡ {num} Page
-                                  </Button>
-                                ))}
-                              <Button
-                                size="small"
-                                onClick={() => {
-                                  setSelectedPageIds(scannedPages.map((p) => p.id));
-                                  message.success(`Đã chọn toàn bộ ${scannedPages.length} Fanpage!`);
-                                }}
-                                className="bg-cyan-950/80 border-cyan-800 text-cyan-300 text-[11px] font-semibold rounded-lg px-2 h-6"
-                              >
-                                👑 Tất cả ({scannedPages.length})
-                              </Button>
-                              {selectedPageIds.length > 0 && (
+                            {/* Cảnh báo nếu đã từng like bài viết này */}
+                            {alreadyLikedPagesForUrl.length > 0 && (
+                              <div className="mt-3 p-3 rounded-xl bg-amber-950/40 border border-amber-500/40 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
+                                <span className="text-amber-300 font-semibold flex items-center gap-2">
+                                  <InfoCircleOutlined className="text-amber-400 text-sm" />
+                                  <span>Đã có <b>{alreadyLikedPagesForUrl.length} Page/Via</b> từng tương tác link này trước đó trong lịch sử</span>
+                                </span>
                                 <Button
                                   size="small"
-                                  onClick={() => setSelectedPageIds([])}
-                                  className="bg-slate-900 border-slate-800 text-slate-400 text-[11px] rounded-lg px-2 h-6"
-                                >
-                                  Bỏ chọn
-                                </Button>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Ô tìm kiếm Page/Via */}
-                          {scannedPages.length > 6 && (
-                            <Input
-                              prefix={<SearchOutlined className="text-slate-400" />}
-                              placeholder={actorMode === 'VIAS' ? 'Tìm Via theo tên hoặc UID...' : 'Tìm Fanpage theo tên hoặc ID...'}
-                              size="middle"
-                              value={pageSearchQuery}
-                              onChange={(e) => setPageSearchQuery(e.target.value)}
-                              className="text-xs rounded-xl bg-slate-950/70 border-slate-700 text-slate-100"
-                            />
-                          )}
-
-                          {/* Grid các Via/Fanpage card */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[360px] overflow-y-auto pr-1">
-                            {filteredPages.map((page) => {
-                              const isChecked = selectedPageIds.includes(page.id);
-                              const cleanName = cleanPageName(page.name);
-                              const avatarInfo = avatarCacheMap[page.id];
-                              const avatarUrl =
-                                page.avatarUrl ||
-                                avatarInfo?.avatarUrl ||
-                                (page.id ? `https://graph.facebook.com/${page.id}/picture?type=square` : '');
-                              return (
-                                <div
-                                  key={page.id}
+                                  type="link"
                                   onClick={() => {
-                                    if (isChecked) {
-                                      setSelectedPageIds(selectedPageIds.filter((id) => id !== page.id));
-                                    } else {
-                                      setSelectedPageIds([...selectedPageIds, page.id]);
-                                    }
+                                    const alreadyIds = alreadyLikedPagesForUrl.map((p) => p.pageId);
+                                    setSelectedPageIds((prev) => prev.filter((id) => !alreadyIds.includes(id)));
+                                    message.success(`Đã tự động bỏ chọn ${alreadyIds.length} tài khoản đã tương tác trước!`);
                                   }}
-                                  className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all ${
-                                    isChecked
-                                      ? 'border-blue-500/80 bg-blue-950/40 text-white /50'
-                                      : 'border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700 hover:bg-slate-900/60'
-                                  }`}
+                                  className="text-xs p-0 h-auto text-amber-400 font-bold hover:underline shrink-0"
                                 >
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <div className="relative w-7 h-7 shrink-0 rounded-lg overflow-hidden bg-slate-800 border border-slate-700/60 shadow-sm flex items-center justify-center">
-                                      {avatarUrl ? (
-                                        <img
-                                          src={avatarUrl}
-                                          alt={cleanName}
-                                          className="w-full h-full object-cover"
-                                          onError={(e) => {
-                                            (e.target as HTMLElement).style.display = 'none';
-                                            const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
-                                            if (fallback) fallback.classList.remove('hidden');
-                                          }}
-                                        />
-                                      ) : null}
-                                      <div
-                                        className={`w-full h-full text-on-accent font-semibold text-[10px] items-center justify-center ${
-                                          actorMode === 'VIAS' ? 'bg-emerald-600' : getAvatarGradient(cleanName)
-                                        } ${avatarUrl ? 'hidden' : 'flex'}`}
-                                      >
-                                        {getInitials(cleanName)}
-                                      </div>
-                                    </div>
-                                    <div className="min-w-0">
-                                      <div className="font-bold text-xs truncate max-w-[125px] sm:max-w-[135px]" title={cleanName}>
-                                        {cleanName}
-                                      </div>
-                                      <div className="flex items-center gap-1 text-[10px] font-mono text-slate-400 truncate">
-                                        <span>ID: {page.id}</span>
-                                        {actorMode === 'VIAS' ? (
-                                          <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 font-sans font-medium">
-                                            Via
-                                          </span>
-                                        ) : (
-                                          page.viaName && selectedAccountId === 'ALL_VIAS' && (
-                                            <span className="text-[9px] px-1 py-0.2 rounded bg-blue-950/80 text-blue-300 border border-blue-800/80 font-sans font-medium">
-                                              {page.viaName}
-                                            </span>
-                                          )
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <Checkbox
-                                    checked={isChecked}
-                                    onChange={(e) => {
-                                      e.stopPropagation();
-                                      if (e.target.checked) {
-                                        setSelectedPageIds([...selectedPageIds, page.id]);
-                                      } else {
-                                        setSelectedPageIds(selectedPageIds.filter((id) => id !== page.id));
-                                      }
-                                    }}
-                                  />
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="p-5 rounded-xl border border-dashed border-slate-800 text-center text-xs text-slate-400 space-y-2">
-                          <p>Chưa có Fanpage nào được tải cho tài khoản này.</p>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenManagePages(selectedAccountId)}
-                            className="text-blue-400 hover:underline font-bold cursor-pointer"
-                          >
-                            Bấm vào đây để nhập danh sách i_user
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </Col>
-
-                  {/* CỘT PHẢI (55%): CONTROL DECK & LIVE MONITOR TERMINAL */}
-                  <Col xs={24} lg={13}>
-                    <div className="space-y-4">
-                      {/* HERO ACTION CARD - LUÔN Ở ĐỈNH TẦM MẮT */}
-                      <div className="app-surface p-5 space-y-3.5">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                          <div className="flex items-center gap-2">
-                            <span className="text-slate-300">
-                              Đã chọn <b className="text-slate-100">{selectedPageIds.length}</b> {actorMode === 'VIAS' ? 'nick cá nhân' : 'Page'}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                            <span>Hình thức: <b className="text-blue-300">{engagementMode === 'LIKE_ONLY' ? 'Chỉ like' : engagementMode === 'COMMENT_ONLY' ? 'Chỉ bình luận' : 'Like + bình luận'}</b></span>
-                            <span>•</span>
-                            <span>Cảm xúc: <b className="text-amber-300">{selectedReaction}</b></span>
-                          </div>
-                        </div>
-
-                        {/* NÚT BẮT ĐẦU BUFF NGAY (HERO CTA) */}
-                        {buffMode === 'SINGLE' && autoBuffMutation.isPending ? (
-                          <Button
-                            danger
-                            type="primary"
-                            size="large"
-                            icon={<StopOutlined />}
-                            onClick={handleStopAutoBuff}
-                            className="w-full h-11 rounded-lg text-sm font-semibold"
-                          >
-                            Dừng ({autoBuffProgress.percent}%)
-                          </Button>
-                        ) : buffMode === 'SINGLE' ? (
-                          <Button
-                            type="primary"
-                            size="large"
-                            icon={<RobotOutlined spin={autoBuffMutation.isPending} />}
-                            loading={autoBuffMutation.isPending}
-                            disabled={selectedPageIds.length === 0 || !targetPostUrl}
-                            onClick={handleStartAutoBuff}
-                            className="w-full h-11 rounded-lg text-sm font-semibold"
-                          >
-                            {autoBuffMutation.isPending
-                              ? 'Đang chạy...'
-                              : actorMode === 'VIAS'
-                              ? `Bắt đầu với ${selectedPageIds.length} nick cá nhân`
-                              : `Bắt đầu với ${selectedPageIds.length} Page`}
-                          </Button>
-                        ) : (
-                          <div>
-                            {!isBatchRunning ? (
-                              <Button
-                                type="primary"
-                                size="large"
-                                icon={<ThunderboltOutlined />}
-                                disabled={parsedBatchLinks.length === 0 || selectedPageIds.length === 0}
-                                onClick={handleStartBatchBuff}
-                                className="w-full h-11 rounded-lg text-sm font-semibold"
-                              >
-                                {parsedBatchLinks.length === 0
-                                  ? 'Chưa có link'
-                                  : `Chạy ${parsedBatchLinks.length} bài (${selectedPageIds.length} tài khoản mỗi bài)`}
-                              </Button>
-                            ) : (
-                              <div className="grid grid-cols-2 gap-2">
-                                <Button
-                                  size="large"
-                                  icon={isBatchPaused ? <CaretRightOutlined /> : <PauseCircleOutlined />}
-                                  onClick={handlePauseBatchBuff}
-                                  className={`font-bold h-12 rounded-xl text-xs sm:text-sm ${
-                                    isBatchPaused
-                                      ? 'bg-emerald-600 text-on-accent hover:bg-emerald-500 border-none'
-                                      : 'bg-amber-600 text-on-accent hover:bg-amber-500 border-none'
-                                  }`}
-                                >
-                                  {isBatchPaused ? 'Tiếp tục' : 'Tạm dừng'}
-                                </Button>
-                                <Button
-                                  size="large"
-                                  danger
-                                  type="primary"
-                                  icon={<StopOutlined />}
-                                  onClick={handleStopBatchBuff}
-                                  className="font-bold h-12 rounded-xl text-xs sm:text-sm"
-                                >
-                                  Dừng hẳn
+                                  Bỏ chọn {alreadyLikedPagesForUrl.length} tài khoản này
                                 </Button>
                               </div>
                             )}
                           </div>
+                        ) : (
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-bold text-slate-200">
+                                Danh sách link Facebook (Mỗi dòng một link):
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-mono px-2.5 py-0.5 rounded-md bg-blue-950/90 border border-blue-700/70 text-blue-300 font-bold">
+                                  {parsedBatchLinks.length} link hợp lệ
+                                </span>
+                                {batchLinksText && (
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    danger
+                                    onClick={() => setBatchLinksText('')}
+                                    className="text-xs p-0 h-auto font-semibold"
+                                  >
+                                    Xóa hết
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                            <Input.TextArea
+                              rows={4}
+                              value={batchLinksText}
+                              onChange={(e) => setBatchLinksText(e.target.value)}
+                              placeholder={`https://www.facebook.com/groups/123456/posts/7891011/\nhttps://www.facebook.com/share/p/1CmWWe4m7g/\nhttps://www.facebook.com/share/p/19ivmH7zUw/`}
+                              className="font-mono text-xs bg-slate-950 text-slate-100 border-slate-700 rounded-xl placeholder:text-slate-500 focus:border-blue-400"
+                            />
+                          </div>
                         )}
+
+                        {/* 3 CẤU HÌNH NHANH (SMART PRESET TOOLBAR) */}
+                        <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                          <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
+                            Cấu hình nhanh:
+                          </span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={handleQuickPresetLike24}
+                              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
+                            >
+                              Like bằng tất cả Page ({scannedPages.length})
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleQuickPresetAiSeeding}
+                              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
+                            >
+                              Like + bình luận AI
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleQuickPresetVias}
+                              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-medium transition-colors cursor-pointer"
+                            >
+                              Dùng nick cá nhân ({fbAccounts.length})
+                            </button>
+                          </div>
+                        </div>
                       </div>
 
                       {/* BẢNG CẤU HÌNH TINH CHỈNH TƯƠNG TÁC */}
                       <div className="p-4 sm:p-5 app-surface space-y-4">
                         <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
-                          <span className="text-xs sm:text-sm font-bold text-slate-100 flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-md bg-indigo-600/30 border border-indigo-500/50 text-indigo-400 font-bold flex items-center justify-center text-xs shrink-0">
+                          <span className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 text-slate-300 font-semibold flex items-center justify-center text-xs shrink-0">
                               2
                             </span>
-                            <span>Bước 2: Chọn cảm xúc &amp; Bình luận Seeding</span>
+                            <span className="text-sm sm:text-base font-semibold text-slate-100">Tương tác</span>
                           </span>
                         </div>
 
@@ -3266,7 +3148,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                 ⚙️ Cài Đặt Nâng Cao &amp; Tốc Độ (Tùy chọn)
                               </span>
                               <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950/80 border border-cyan-800/60 px-2 py-0.5 rounded-full">
-                                {concurrency} luồng • {delayMs / 1000}s giãn cách • {dripFeedMode ? `${dripDurationMinutes}p Drip-feed` : 'Chạy ngay'}
+                                {speedMode === 'TURBO' ? '⚡ Siêu Tốc' : speedMode === 'FAST' ? '🚀 Nhanh' : speedMode === 'SAFE' ? '🛡️ An Toàn' : '⚖️ Chuẩn'} • {concurrency} luồng • {delayMs / 1000}s • {dripFeedMode ? `${dripDurationMinutes}p Drip` : 'Chạy ngay'}
                               </span>
                             </div>
                             <span className="text-xs text-cyan-400 font-bold">
@@ -3277,13 +3159,55 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           {!showAdvancedSettings && (
                             <div className="px-3 pb-2.5 text-[11px] text-slate-400 flex items-center gap-1.5">
                               <CheckCircleFilled className="text-emerald-400 text-xs shrink-0" />
-                              <span>Hệ thống đã tự kích hoạt cấu hình an toàn nhất: 2 luồng song song, mô phỏng người thật &amp; chống checkpoint.</span>
+                              <span>Đang chạy ở chế độ <strong>{speedMode === 'TURBO' ? '⚡ Siêu Tốc' : speedMode === 'FAST' ? '🚀 Nhanh Mượt' : '⚖️ Chuẩn'}</strong> ({concurrency} luồng song song, giãn cách {delayMs / 1000}s).</span>
                             </div>
                           )}
 
                           {showAdvancedSettings && (
                             <div className="p-3 pt-0 border-t border-slate-800/80 space-y-2.5 mt-1">
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
+                                {/* TỐC ĐỘ BUFF (SPEED MODE PRESET) */}
+                                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-cyan-800/60 text-xs shadow-sm sm:col-span-2 gap-2">
+                                  <div>
+                                    <span className="text-cyan-300 font-bold block flex items-center gap-1">
+                                      <ThunderboltFilled className="text-amber-400" /> Tốc Độ Buff (Speed Mode):
+                                    </span>
+                                    <span className="text-[10px] text-slate-400">Tối ưu Playwright, bỏ qua ảnh nặng, phản hồi tức thì</span>
+                                  </div>
+                                  <Segmented
+                                    size="small"
+                                    value={speedMode}
+                                    onChange={(val) => {
+                                      const mode = val as 'TURBO' | 'FAST' | 'NORMAL' | 'SAFE';
+                                      setSpeedMode(mode);
+                                      if (mode === 'TURBO') {
+                                        setDelayMs(1500);
+                                        setEnableHumanBehavior(false);
+                                        setFastSwitch(true);
+                                      } else if (mode === 'FAST') {
+                                        setDelayMs(2500);
+                                        setEnableHumanBehavior(true);
+                                        setFastSwitch(true);
+                                      } else if (mode === 'NORMAL') {
+                                        setDelayMs(3800);
+                                        setEnableHumanBehavior(true);
+                                        setFastSwitch(true);
+                                      } else if (mode === 'SAFE') {
+                                        setDelayMs(6000);
+                                        setEnableHumanBehavior(true);
+                                        setFastSwitch(true);
+                                      }
+                                    }}
+                                    options={[
+                                      { label: '⚡ Siêu Tốc (1.5s)', value: 'TURBO' },
+                                      { label: '🚀 Nhanh (2.5s)', value: 'FAST' },
+                                      { label: '⚖️ Chuẩn (3.8s)', value: 'NORMAL' },
+                                      { label: '🛡️ An Toàn (6s)', value: 'SAFE' },
+                                    ]}
+                                    className="bg-slate-900 border border-slate-700 text-slate-200"
+                                  />
+                                </div>
+
                                 <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-emerald-900/60 text-xs shadow-sm">
                                   <div>
                                     <span className="text-slate-200 font-bold block">Mô phỏng người dùng</span>
@@ -3307,18 +3231,19 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                     size="small"
                                     value={delayMs}
                                     onChange={(val) => setDelayMs(val)}
-                                    className="w-32"
+                                    className="w-36"
                                     options={
                                       engagementMode !== 'LIKE_ONLY'
                                         ? [
-                                            { value: 12000, label: '12-18s (Chuẩn)' },
-                                            { value: 20000, label: '20-28s (Siêu an toàn)' },
-                                            { value: 8000, label: '8-12s (Nhanh)' },
+                                            { value: 6000, label: '⚡ 6s (Nhanh)' },
+                                            { value: 12000, label: '⚖️ 12s (Chuẩn)' },
+                                            { value: 20000, label: '🛡️ 20s (Siêu an toàn)' },
                                           ]
                                         : [
-                                            { value: 3800, label: '3.8-6s (Chuẩn an toàn)' },
-                                            { value: 5000, label: '5.0-8s (Siêu an toàn)' },
-                                            { value: 2500, label: '2.5s (Nhanh)' },
+                                            { value: 1500, label: '⚡ 1.5s (Siêu Tốc)' },
+                                            { value: 2500, label: '🚀 2.5s (Nhanh)' },
+                                            { value: 3800, label: '⚖️ 3.8s (Chuẩn)' },
+                                            { value: 6000, label: '🛡️ 6.0s (An toàn)' },
                                           ]
                                     }
                                   />
@@ -3327,9 +3252,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                 <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-blue-900/60 text-xs shadow-sm">
                                   <div>
                                     <span className="text-blue-300 font-bold block flex items-center gap-1">
-                                      <span>Chế độ Siêu Tốc</span>
+                                      <span>Đổi Page trên bài (Fast-Switch)</span>
                                     </span>
-                                    <span className="text-[10px] text-slate-400">Đổi Page ngay trên bài (tiết kiệm 15s)</span>
+                                    <span className="text-[10px] text-slate-400">Đổi trực tiếp qua Voice Switcher (~0.8s)</span>
                                   </div>
                                   <Checkbox
                                     checked={fastSwitch}
@@ -3345,7 +3270,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                     <span className="text-cyan-300 font-bold block flex items-center gap-1">
                                       <ThunderboltFilled className="text-cyan-400" /> Luồng chạy song song
                                     </span>
-                                    <span className="text-[10px] text-slate-400">Tăng tốc độ buff gấp 2-3 lần</span>
+                                    <span className="text-[10px] text-slate-400">Tăng tốc độ buff gấp 2-4 lần</span>
                                   </div>
                                   <Segmented
                                     size="small"
@@ -3355,6 +3280,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                       { label: '1 Luồng', value: 1 },
                                       { label: '⚡ 2 Luồng (x2)', value: 2 },
                                       { label: '🚀 3 Luồng (x3)', value: 3 },
+                                      { label: '🔥 4 Luồng (x4)', value: 4 },
                                     ]}
                                     className="bg-slate-900 border border-slate-700 text-slate-200"
                                   />
@@ -3485,65 +3411,580 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                         )}
                       </div>
 
-                      {/* BƯỚC 3.5: NÚT BẮT ĐẦU BUFF VÀ TỔNG KẾT HÀNH ĐỘNG (HERO EXECUTION CARD) */}
-                      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-950/70 via-slate-900 to-indigo-950/70 border-2 border-blue-500/40 space-y-3.5 shadow-2xl">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
-                          <div className="text-xs text-slate-200 flex items-center gap-2">
-                            <RocketFilled className="text-blue-400 text-base" />
-                            <span className="font-bold text-sm text-white">Tổng kết thiết lập trước khi bấm:</span>
+                      <div className="app-surface p-5 space-y-4">
+                        {/* Card Header */}
+                        <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 text-slate-300 font-semibold flex items-center justify-center text-xs shrink-0">
+                              3
+                            </span>
+                            <span className="text-sm sm:text-base font-semibold text-slate-100">Tài khoản thực hiện</span>
                           </div>
-                          <div className="flex items-center gap-2 flex-wrap text-xs">
-                            <span className="text-slate-400">
-                              Cảm xúc:{' '}
-                              <b className="text-white">
-                                {(() => {
-                                  const r = REACTIONS.find((x) => x.key === selectedReaction);
-                                  return r ? `${r.emoji} ${r.shortLabel}` : selectedReaction;
-                                })()}
-                              </b>
-                            </span>
-                            <span className="text-slate-600">•</span>
-                            <span className="text-slate-400">
-                              Số lượng: <b className="text-emerald-400 font-mono text-sm">{selectedPageIds.length} Page/Via</b>
-                            </span>
-                            <span className="text-slate-600">•</span>
-                            <span className="text-slate-400">
-                              Tốc độ: <b className="text-cyan-400">{concurrency} luồng</b>
-                            </span>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<ReloadOutlined spin={scanPagesMutation.isPending || loadingAccounts} />}
+                              loading={scanPagesMutation.isPending || loadingAccounts}
+                              onClick={async () => {
+                                await queryClient.invalidateQueries({ queryKey: ['socialAccounts'] });
+                                await refetchAccounts();
+                                message.success(`Đã cập nhật: ${fbAccounts.length} Via sẵn sàng!`);
+                                handleScanPages();
+                              }}
+                              className="text-slate-300 hover:text-blue-400 text-xs px-2.5 h-7 rounded-lg border border-slate-700 hover:border-blue-500 bg-slate-800/80 font-semibold cursor-pointer"
+                              title="Làm mới dàn Via & Quét thêm Fanpage từ Facebook"
+                            >
+                              Quét lại
+                            </Button>
+                            <Button
+                              type="primary"
+                              size="small"
+                              icon={<SettingOutlined />}
+                              onClick={() => handleOpenManagePages(selectedAccountId)}
+                              className="bg-blue-600 hover:bg-blue-500 text-on-accent font-bold rounded-lg text-xs h-7 px-2.5 shadow-sm border-none cursor-pointer"
+                            >
+                              Quản lý Page ({scannedPages.length})
+                            </Button>
                           </div>
                         </div>
 
+                        {/* Dropdown chọn nick mẹ */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <label className="text-xs font-semibold text-slate-300">
+                              Tài khoản Facebook sở hữu Page:
+                            </label>
+                            {currentViaAccount && (
+                              <span className="text-[11px] text-blue-400 font-mono">
+                                c_user: {extractCUser(currentViaAccount.cookieString || currentViaAccount.accessToken) || 'N/A'}
+                              </span>
+                            )}
+                            {selectedAccountId === 'ALL_VIAS' && (
+                              <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                                {actorMode === 'VIAS'
+                                  ? `Gộp ${fbAccounts.length} Nick Via (${selectedPageIds.length}/${scannedPages.length})`
+                                  : `Gộp ${fbAccounts.length} Via (${scannedPages.length} Fanpage)`}
+                              </span>
+                            )}
+                          </div>
+                          <Select
+                            className="w-full"
+                            size="large"
+                            loading={loadingAccounts}
+                            value={selectedAccountId}
+                            onChange={(val) => {
+                              setSelectedAccountId(val);
+                              if (val === 'CUSTOM') {
+                                setScannedPages([]);
+                                setSelectedPageIds([]);
+                              }
+                            }}
+                            options={[
+                              ...(fbAccounts.length > 1
+                                ? [
+                                    {
+                                      value: 'ALL_VIAS',
+                                      label: `Tất cả nick (${fbAccounts.length}): ${
+                                        fbAccounts
+                                          .slice(0, 4)
+                                          .map((a) => a.pageName || `Via ${String(a.platformAccountId || a.id).slice(-4)}`)
+                                          .join(' + ') +
+                                        (fbAccounts.length > 4 ? ` + ${fbAccounts.length - 4} nick khác` : '')
+                                      }`,
+                                    },
+                                  ]
+                                : []),
+                              { value: 'CUSTOM', label: 'Nhập cookie thủ công' },
+                              ...fbAccounts.map((a) => ({
+                                value: a.id,
+                                label: `${a.pageName || `Via ${String(a.platformAccountId || a.id).slice(-4)}`} (${
+                                  a.tokenStatus === 'OK' ? 'Cookie sống' : 'Cần kiểm tra'
+                                })`,
+                              })),
+                            ]}
+                          />
+                        </div>
+
+                        {/* Cookie thủ công nếu chọn CUSTOM */}
+                        {selectedAccountId === 'CUSTOM' && (
+                          <div className="space-y-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950/70">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-slate-200">
+                                Nhập Cookie nick Facebook mẹ:
+                              </label>
+                              <span className="text-[11px] text-slate-400">
+                                (Chứa <b>c_user</b> & <b>xs</b>)
+                              </span>
+                            </div>
+
+                            <Row gutter={10}>
+                              <Col span={10}>
+                                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                                  c_user:
+                                </label>
+                                <Input
+                                  placeholder="10008321..."
+                                  value={
+                                    customCookie.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1] ||
+                                    (customCookie.includes('=') ? '' : customCookie)
+                                  }
+                                  onChange={(e) => {
+                                    const cUser = e.target.value.trim();
+                                    const currentXs = customCookie.match(/(?:^|;\s*)xs=([^;]+)/)?.[1] || '';
+                                    setCustomCookie(
+                                      cUser && currentXs
+                                        ? `c_user=${cUser}; xs=${currentXs}`
+                                        : cUser
+                                        ? `c_user=${cUser}`
+                                        : ''
+                                    );
+                                  }}
+                                  className="font-mono text-xs rounded-xl bg-slate-900 border-slate-700 text-slate-100"
+                                />
+                              </Col>
+                              <Col span={14}>
+                                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                                  xs:
+                                </label>
+                                <Input.Password
+                                  placeholder="27%3ABc0..."
+                                  value={customCookie.match(/(?:^|;\s*)xs=([^;]+)/)?.[1] || ''}
+                                  onChange={(e) => {
+                                    const xs = e.target.value.trim();
+                                    const currentCUser = customCookie.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1] || '';
+                                    setCustomCookie(
+                                      currentCUser && xs
+                                        ? `c_user=${currentCUser}; xs=${xs}`
+                                        : xs
+                                        ? `xs=${xs}`
+                                        : ''
+                                    );
+                                  }}
+                                  className="font-mono text-xs rounded-xl bg-slate-900 border-slate-700 text-slate-100"
+                                />
+                              </Col>
+                            </Row>
+
+                            <Input.TextArea
+                              rows={2}
+                              placeholder="Dán toàn bộ cookie dài vào đây..."
+                              value={customCookie}
+                              onChange={(e) => setCustomCookie(e.target.value)}
+                              className="font-mono text-[11px] rounded-xl bg-slate-900 border-slate-700 text-slate-100"
+                            />
+                          </div>
+                        )}
+
+                        {/* CHỌN: DÀN FANPAGE VỆ TINH HAY DÀN VIA CÁ NHÂN */}
+                        <div className="p-1 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setActorMode('FANPAGES')}
+                            className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                              actorMode === 'FANPAGES'
+                                ? 'bg-blue-600 text-on-accent'
+                                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                            }`}
+                          >
+                            <span>Page</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950 border border-blue-700 text-blue-300">
+                              {scannedPages.length}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActorMode('VIAS')}
+                            className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                              actorMode === 'VIAS'
+                                ? 'bg-blue-600 text-on-accent'
+                                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                            }`}
+                          >
+                            <span>Nick cá nhân</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950 border border-emerald-700 text-emerald-300">
+                              {fbAccounts.length}
+                            </span>
+                          </button>
+                        </div>
+
+                        {/* Danh sách Fanpage / Via với Interactive Grid Cards */}
+                        {scannedPages.length > 0 ? (
+                          <div className="space-y-2.5 pt-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-slate-200">
+                                {actorMode === 'VIAS' ? 'Chọn Nick Via tương tác:' : 'Chọn Fanpage tương tác:'}{' '}
+                                <span className="text-blue-400 font-mono font-bold">
+                                  ({selectedPageIds.length}/{scannedPages.length})
+                                </span>
+                              </span>
+                              <Checkbox
+                                checked={selectedPageIds.length === scannedPages.length && scannedPages.length > 0}
+                                indeterminate={
+                                  selectedPageIds.length > 0 && selectedPageIds.length < scannedPages.length
+                                }
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedPageIds(scannedPages.map((p) => p.id));
+                                  } else {
+                                    setSelectedPageIds([]);
+                                  }
+                                }}
+                              >
+                                <span className="text-xs text-slate-300 font-semibold">Chọn tất cả</span>
+                              </Checkbox>
+                            </div>
+
+                            {/* Thanh công cụ Chọn Nhanh Số Lượng Page (20, 50, 100, 200, All) */}
+                            {scannedPages.length > 5 && (
+                              <div className="flex items-center gap-1.5 flex-wrap p-2 rounded-xl bg-slate-950/70 border border-slate-800/80">
+                                <span className="text-[11px] text-slate-400 font-semibold">Chọn nhanh:</span>
+                                {[20, 50, 100, 200]
+                                  .filter((n) => n <= scannedPages.length)
+                                  .map((num) => (
+                                    <Button
+                                      key={num}
+                                      size="small"
+                                      onClick={() => handleSelectRandomPages(num)}
+                                      className="bg-slate-900 border-slate-700/80 hover:border-cyan-500 text-slate-200 text-[11px] font-semibold rounded-lg px-2 h-6"
+                                    >
+                                      ⚡ {num} Page
+                                    </Button>
+                                  ))}
+                                <Button
+                                  size="small"
+                                  onClick={() => {
+                                    setSelectedPageIds(scannedPages.map((p) => p.id));
+                                    message.success(`Đã chọn toàn bộ ${scannedPages.length} Fanpage!`);
+                                  }}
+                                  className="bg-cyan-950/80 border-cyan-800 text-cyan-300 text-[11px] font-semibold rounded-lg px-2 h-6"
+                                >
+                                  👑 Tất cả ({scannedPages.length})
+                                </Button>
+                                {selectedPageIds.length > 0 && (
+                                  <Button
+                                    size="small"
+                                    onClick={() => setSelectedPageIds([])}
+                                    className="bg-slate-900 border-slate-800 text-slate-400 text-[11px] rounded-lg px-2 h-6"
+                                  >
+                                    Bỏ chọn
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Nút lọc nhanh theo từng Via khi chọn Gộp ALL_VIAS */}
+                            {selectedAccountId === 'ALL_VIAS' && Object.keys(viaGroupCounts).length > 1 && (
+                              <div className="flex items-center gap-1.5 flex-wrap p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                                <span className="text-[11px] font-semibold text-slate-400">Xem theo Via:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setViaFilter('ALL')}
+                                  className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer border ${
+                                    viaFilter === 'ALL'
+                                      ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                                  }`}
+                                >
+                                  Tất cả ({scannedPages.length})
+                                </button>
+                                {Object.entries(viaGroupCounts).map(([vName, count]) => (
+                                  <button
+                                    key={vName}
+                                    type="button"
+                                    onClick={() => setViaFilter(vName)}
+                                    className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer border ${
+                                      viaFilter === vName
+                                        ? 'bg-blue-600 text-white border-blue-500 shadow-sm'
+                                        : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
+                                    }`}
+                                  >
+                                    {vName} ({count})
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Ô tìm kiếm Page/Via */}
+                            {scannedPages.length > 6 && (
+                              <Input
+                                prefix={<SearchOutlined className="text-slate-400" />}
+                                placeholder={actorMode === 'VIAS' ? 'Tìm Via theo tên hoặc UID...' : 'Tìm Fanpage theo tên hoặc ID...'}
+                                size="middle"
+                                value={pageSearchQuery}
+                                onChange={(e) => setPageSearchQuery(e.target.value)}
+                                className="text-xs rounded-xl bg-slate-950/70 border-slate-700 text-slate-100"
+                              />
+                            )}
+
+                            {/* Grid các Via/Fanpage card */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[360px] overflow-y-auto pr-1">
+                              {filteredPages.map((page) => {
+                                const isChecked = selectedPageIds.includes(page.id);
+                                const cleanName = cleanPageName(page.name);
+                                const avatarInfo = avatarCacheMap[page.id];
+                                const avatarUrl =
+                                  page.avatarUrl ||
+                                  avatarInfo?.avatarUrl ||
+                                  (page.id ? `https://graph.facebook.com/${page.id}/picture?type=square` : '');
+                                return (
+                                  <div
+                                    key={page.id}
+                                    onClick={() => {
+                                      if (isChecked) {
+                                        setSelectedPageIds(selectedPageIds.filter((id) => id !== page.id));
+                                      } else {
+                                        setSelectedPageIds([...selectedPageIds, page.id]);
+                                      }
+                                    }}
+                                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all ${
+                                      isChecked
+                                        ? 'border-blue-500/80 bg-blue-950/40 text-white /50'
+                                        : 'border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700 hover:bg-slate-900/60'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <div className="relative w-7 h-7 shrink-0 rounded-lg overflow-hidden bg-slate-800 border border-slate-700/60 shadow-sm flex items-center justify-center">
+                                        {avatarUrl ? (
+                                          <img
+                                            src={avatarUrl}
+                                            alt={cleanName}
+                                            className="w-full h-full object-cover"
+                                            onError={(e) => {
+                                              (e.target as HTMLElement).style.display = 'none';
+                                              const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
+                                              if (fallback) fallback.classList.remove('hidden');
+                                            }}
+                                          />
+                                        ) : null}
+                                        <div
+                                          className={`w-full h-full text-on-accent font-semibold text-[10px] items-center justify-center ${
+                                            actorMode === 'VIAS' ? 'bg-emerald-600' : getAvatarGradient(cleanName)
+                                          } ${avatarUrl ? 'hidden' : 'flex'}`}
+                                        >
+                                          {getInitials(cleanName)}
+                                        </div>
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="font-bold text-xs truncate max-w-[125px] sm:max-w-[135px]" title={cleanName}>
+                                          {cleanName}
+                                        </div>
+                                        <div className="flex items-center gap-1 text-[10px] font-mono text-slate-400 truncate">
+                                          <span>ID: {page.id}</span>
+                                          {actorMode === 'VIAS' ? (
+                                            <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 font-sans font-medium">
+                                              Via
+                                            </span>
+                                          ) : (
+                                            page.viaName && selectedAccountId === 'ALL_VIAS' && (
+                                              <span className="text-[9px] px-1 py-0.2 rounded bg-blue-950/80 text-blue-300 border border-blue-800/80 font-sans font-medium">
+                                                {page.viaName}
+                                              </span>
+                                            )
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <Checkbox
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        e.stopPropagation();
+                                        if (e.target.checked) {
+                                          setSelectedPageIds([...selectedPageIds, page.id]);
+                                        } else {
+                                          setSelectedPageIds(selectedPageIds.filter((id) => id !== page.id));
+                                        }
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-5 rounded-xl border border-dashed border-slate-800 text-center text-xs text-slate-400 space-y-2">
+                            <p>Chưa có Fanpage nào được tải cho tài khoản này.</p>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenManagePages(selectedAccountId)}
+                              className="text-blue-400 hover:underline font-bold cursor-pointer"
+                            >
+                              Bấm vào đây để nhập danh sách i_user
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </Col>
+
+                  {/* CỘT PHẢI (ghim): tóm tắt, nút bắt đầu, tiến trình */}
+                  <Col xs={24} lg={9}>
+                    <div className="space-y-4 lg:sticky lg:top-24">
+                      {/* Tóm tắt + nút bắt đầu */}
+                      <div className="app-surface p-4 sm:p-5 space-y-4">
+                        <div className="text-sm font-semibold text-slate-100">Tóm tắt</div>
+                        <dl className="m-0 space-y-2 text-sm">
+                          {[
+                            {
+                              k: 'Bài viết',
+                              v:
+                                buffMode === 'BATCH'
+                                  ? `${parsedBatchLinks.length} link`
+                                  : targetPostUrl
+                                  ? targetPostUrl.replace(/^https?:\/\/(www\.)?/, '')
+                                  : 'Chưa có',
+                              muted: buffMode === 'SINGLE' ? !targetPostUrl : parsedBatchLinks.length === 0,
+                            },
+                            {
+                              k: 'Hình thức',
+                              v: engagementMode === 'LIKE_ONLY' ? 'Chỉ like' : engagementMode === 'COMMENT_ONLY' ? 'Chỉ bình luận' : 'Like + bình luận',
+                            },
+                            {
+                              k: 'Cảm xúc',
+                              v: (() => {
+                                const r = REACTIONS.find((x) => x.key === selectedReaction);
+                                return r ? `${r.emoji} ${r.shortLabel}` : selectedReaction;
+                              })(),
+                            },
+                            {
+                              k: 'Tài khoản',
+                              v: `${selectedPageIds.length} ${actorMode === 'VIAS' ? 'nick cá nhân' : 'Page'}`,
+                              muted: selectedPageIds.length === 0,
+                            },
+                            { k: 'Tốc độ', v: `${concurrency} luồng · ${delayMs / 1000}s` },
+                            {
+                              k: 'Dự kiến',
+                              v: runEstimate
+                                ? `~${formatDuration(runEstimate.total)}${runEstimate.links > 1 ? ` (${formatDuration(runEstimate.perLink)}/bài)` : ''}`
+                                : 'Chưa đủ thông tin',
+                              muted: !runEstimate,
+                            },
+                          ].map((row) => (
+                            <div key={row.k} className="flex items-center justify-between gap-3">
+                              <dt className="text-slate-400 shrink-0">{row.k}</dt>
+                              <dd className={`m-0 truncate text-right ${row.muted ? 'text-slate-500' : 'text-slate-100'}`}>{row.v}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                        {runEstimate && (
+                          <p className="text-xs text-slate-500 m-0 -mt-2">
+                            {runEstimate.basis === 'history'
+                              ? 'Ước tính từ tốc độ thực tế của các bài đã chạy gần đây.'
+                              : 'Ước tính sơ bộ theo cài đặt tốc độ, chính xác hơn sau vài bài chạy.'}
+                          </p>
+                        )}
+
+                        <Segmented
+                          block
+                          value={runMode}
+                          onChange={(v) => setRunMode(v as 'NOW' | 'QUEUE')}
+                          disabled={autoBuffMutation.isPending || isBatchRunning}
+                          options={[
+                            { label: 'Chạy ngay', value: 'NOW' },
+                            { label: 'Đưa vào hàng đợi', value: 'QUEUE' },
+                          ]}
+                        />
+
+                        {runMode === 'QUEUE' && (
+                          <div className="space-y-2.5 text-sm">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-slate-400 shrink-0">Bắt đầu</span>
+                              <Select
+                                value={queueStartAfter}
+                                onChange={setQueueStartAfter}
+                                className="w-44"
+                                options={[
+                                  { value: 0, label: 'Ngay khi tới lượt' },
+                                  { value: 5, label: 'Sau 5 phút' },
+                                  { value: 15, label: 'Sau 15 phút' },
+                                  { value: 30, label: 'Sau 30 phút' },
+                                  { value: 60, label: 'Sau 1 giờ' },
+                                  { value: 'AT', label: 'Vào giờ cụ thể' },
+                                ]}
+                              />
+                            </div>
+                            {queueStartAfter === 'AT' && (
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-slate-400 shrink-0">Giờ</span>
+                                <Input
+                                  type="time"
+                                  value={queueStartAt}
+                                  onChange={(e) => setQueueStartAt(e.target.value)}
+                                  className="w-44"
+                                />
+                              </div>
+                            )}
+                            {buffMode === 'BATCH' && (
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-slate-400 shrink-0">Giãn cách giữa các bài</span>
+                                <Select
+                                  value={queueStagger}
+                                  onChange={setQueueStagger}
+                                  className="w-44"
+                                  options={[
+                                    { value: 0, label: 'Không giãn cách' },
+                                    { value: 3, label: '3 phút' },
+                                    { value: 5, label: '5 phút' },
+                                    { value: 10, label: '10 phút' },
+                                    { value: 30, label: '30 phút' },
+                                  ]}
+                                />
+                              </div>
+                            )}
+                            <p className="text-xs text-slate-500 m-0">
+                              Hàng đợi chạy với {selectedPageIds.length} tài khoản mỗi bài, hệ thống tự chọn tài khoản khi tới lượt.
+                            </p>
+                          </div>
+                        )}
+
                         {/* Nút bấm Bắt đầu / Dừng khẩn cấp */}
-                        {buffMode === 'SINGLE' && autoBuffMutation.isPending ? (
+                        {runMode === 'QUEUE' ? (
+                          <Button
+                            type="primary"
+                            size="large"
+                            loading={isEnqueueing}
+                            disabled={
+                              selectedPageIds.length === 0 ||
+                              (buffMode === 'BATCH' ? parsedBatchLinks.length === 0 : !targetPostUrl.trim())
+                            }
+                            onClick={handleEnqueueFromForm}
+                            className="w-full h-11 rounded-xl text-sm font-semibold"
+                          >
+                            {(buffMode === 'BATCH' ? parsedBatchLinks.length === 0 : !targetPostUrl.trim())
+                              ? 'Dán link bài viết ở bước 1'
+                              : selectedPageIds.length === 0
+                              ? 'Chọn tài khoản ở bước 3'
+                              : buffMode === 'BATCH'
+                              ? `Thêm ${parsedBatchLinks.length} bài vào hàng đợi`
+                              : 'Thêm vào hàng đợi'}
+                          </Button>
+                        ) : buffMode === 'SINGLE' && autoBuffMutation.isPending ? (
                           <Button
                             danger
                             type="primary"
                             size="large"
-                            icon={<StopOutlined />}
                             onClick={handleStopAutoBuff}
-                            className="w-full h-12 rounded-xl text-base font-bold shadow-lg shadow-rose-500/20"
+                            className="w-full h-11 rounded-xl text-sm font-semibold"
                           >
-                            Dừng khẩn cấp ({autoBuffProgress.percent}%)
+                            Dừng ({autoBuffProgress.percent}%)
                           </Button>
                         ) : buffMode === 'SINGLE' ? (
                           <Button
                             type="primary"
                             size="large"
-                            icon={<RocketFilled className="text-xl" />}
                             loading={autoBuffMutation.isPending}
                             disabled={selectedPageIds.length === 0 || !targetPostUrl}
                             onClick={handleStartAutoBuff}
-                            className="w-full h-13 rounded-xl text-sm sm:text-base font-black bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white shadow-xl shadow-blue-500/40 border-none transition-all cursor-pointer flex items-center justify-center gap-2"
+                            className="w-full h-11 rounded-xl text-sm font-semibold"
                           >
                             {autoBuffMutation.isPending
-                              ? 'Đang thực thi tương tác...'
+                              ? 'Đang chạy...'
                               : !targetPostUrl
-                              ? '⚠️ Vui lòng dán link bài viết ở Bước 1'
+                              ? 'Dán link bài viết ở bước 1'
                               : selectedPageIds.length === 0
-                              ? '⚠️ Vui lòng chọn số lượng Page ở Bước 3'
-                              : actorMode === 'VIAS'
-                              ? `🚀 BẮT ĐẦU TĂNG TƯƠNG TÁC VỚI ${selectedPageIds.length} NICK CÁ NHÂN`
-                              : `🚀 BẮT ĐẦU BUFF VỚI ${selectedPageIds.length} FANPAGE CON`}
+                              ? 'Chọn tài khoản ở bước 3'
+                              : 'Bắt đầu'}
                           </Button>
                         ) : (
                           <div>
@@ -3551,35 +3992,30 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               <Button
                                 type="primary"
                                 size="large"
-                                icon={<RocketFilled />}
                                 disabled={parsedBatchLinks.length === 0 || selectedPageIds.length === 0}
                                 onClick={handleStartBatchBuff}
-                                className="w-full h-13 rounded-xl text-sm sm:text-base font-black bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xl shadow-blue-500/40 border-none transition-all cursor-pointer"
+                                className="w-full h-11 rounded-xl text-sm font-semibold"
                               >
                                 {parsedBatchLinks.length === 0
-                                  ? 'Chưa có link hợp lệ'
-                                  : `🚀 CHẠY ${parsedBatchLinks.length} BÀI (${selectedPageIds.length} TÀI KHOẢN MỖI BÀI)`}
+                                  ? 'Dán link bài viết ở bước 1'
+                                  : selectedPageIds.length === 0
+                                  ? 'Chọn tài khoản ở bước 3'
+                                  : `Chạy ${parsedBatchLinks.length} bài`}
                               </Button>
                             ) : (
                               <div className="grid grid-cols-2 gap-2">
                                 <Button
                                   size="large"
-                                  icon={isBatchPaused ? <CaretRightOutlined /> : <PauseCircleOutlined />}
-                                  onClick={handlePauseBatchBuff}
-                                  className={`font-bold h-12 rounded-xl text-xs sm:text-sm ${
-                                    isBatchPaused
-                                      ? 'bg-emerald-600 text-on-accent hover:bg-emerald-500 border-none'
-                                      : 'bg-amber-600 text-on-accent hover:bg-amber-500 border-none'
-                                  }`}
+                                                                    onClick={handlePauseBatchBuff}
+                                  className="h-11 rounded-xl text-sm font-semibold"
                                 >
                                   {isBatchPaused ? 'Tiếp tục' : 'Tạm dừng'}
                                 </Button>
                                 <Button
                                   danger
                                   size="large"
-                                  icon={<StopOutlined />}
                                   onClick={handleStopBatchBuff}
-                                  className="font-bold h-12 rounded-xl text-xs sm:text-sm"
+                                  className="h-11 rounded-xl text-sm font-semibold"
                                 >
                                   Dừng hẳn
                                 </Button>
@@ -3597,11 +4033,21 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           </span>
                           {autoBuffProgress.status === 'RUNNING' || isBatchRunning ? (
                             <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs font-bold">
-                              <span className="w-2 h-2 rounded-full bg-blue-400"></span> Đang chạy...
+                              <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span> Đang chạy
+                              {autoBuffProgress.status === 'RUNNING' && runTiming.start && (
+                                <span className="font-normal tabular-nums">
+                                  · {formatDuration(Math.max(0, (clockNow - runTiming.start) / 1000))}
+                                </span>
+                              )}
                             </span>
                           ) : autoBuffProgress.status === 'DONE' ? (
                             <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
                               <CheckCircleFilled /> Hoàn tất
+                              {runTiming.start && runTiming.end && (
+                                <span className="font-normal tabular-nums">
+                                  · {formatDuration((runTiming.end - runTiming.start) / 1000)}
+                                </span>
+                              )}
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-slate-800/60 border border-slate-700/60 text-slate-400 text-xs font-medium">
@@ -3624,41 +4070,44 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           </div>
                         ) : (
                           <div className="space-y-3.5">
-                            {/* 4 Metric Badges */}
-                            <Row gutter={[8, 8]}>
-                              <Col span={6}>
-                                <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-center">
-                                  <div className="text-[10px] font-bold text-slate-400 uppercase">Tổng số</div>
-                                  <div className="text-base sm:text-lg font-semibold text-slate-100 mt-0.5">
-                                    {autoBuffProgress.total || batchOrders.length}
+                            {/* 4 ô số liệu: cùng kích thước, nhãn không xuống dòng */}
+                            <div className="grid grid-cols-4 gap-2">
+                              {[
+                                { label: 'Tổng số', value: autoBuffProgress.total || batchOrders.length, box: 'bg-slate-950/80 border-slate-800', lab: 'text-slate-400', num: 'text-slate-100' },
+                                { label: 'Thành công', value: autoBuffProgress.success || batchOrders.filter((o) => o.status === 'COMPLETED').length, box: 'bg-emerald-950/40 border-emerald-800/50', lab: 'text-emerald-400', num: 'text-emerald-300' },
+                                { label: 'Đã like', value: autoBuffProgress.alreadyLiked, box: 'bg-blue-950/40 border-blue-800/50', lab: 'text-blue-400', num: 'text-blue-300' },
+                                { label: 'Lỗi', value: autoBuffProgress.failed || batchOrders.filter((o) => o.status === 'FAILED').length, box: 'bg-rose-950/40 border-rose-800/50', lab: 'text-rose-400', num: 'text-rose-300' },
+                              ].map((m) => (
+                                <div key={m.label} className={`h-[68px] px-1.5 rounded-xl border text-center flex flex-col items-center justify-center ${m.box}`}>
+                                  <div className={`text-[11px] font-medium whitespace-nowrap ${m.lab}`}>{m.label}</div>
+                                  <div className={`text-lg font-semibold tabular-nums leading-tight mt-1 ${m.num}`}>{m.value}</div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Thời gian chạy: luôn hiện khi đang buff */}
+                            {autoBuffProgress.status === 'RUNNING' && runTiming.start && (() => {
+                              const elapsed = Math.max(0, (clockNow - runTiming.start) / 1000);
+                              const finished = autoBuffProgress.success + autoBuffProgress.failed + autoBuffProgress.alreadyLiked;
+                              const remaining =
+                                finished > 0 && autoBuffProgress.total > finished
+                                  ? (elapsed / finished) * (autoBuffProgress.total - finished)
+                                  : null;
+                              return (
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800">
+                                    <div className="text-[11px] text-slate-400">Đã chạy</div>
+                                    <div className="text-base font-semibold text-slate-100 tabular-nums">{formatDuration(elapsed)}</div>
+                                  </div>
+                                  <div className="px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800">
+                                    <div className="text-[11px] text-slate-400">Còn khoảng</div>
+                                    <div className="text-base font-semibold text-slate-100 tabular-nums">
+                                      {remaining !== null ? formatDuration(remaining) : 'Đang tính...'}
+                                    </div>
                                   </div>
                                 </div>
-                              </Col>
-                              <Col span={6}>
-                                <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-center">
-                                  <div className="text-[10px] font-bold text-emerald-400 uppercase">Thành công</div>
-                                  <div className="text-base sm:text-lg font-semibold text-emerald-300 mt-0.5">
-                                    {autoBuffProgress.success || batchOrders.filter((o) => o.status === 'COMPLETED').length}
-                                  </div>
-                                </div>
-                              </Col>
-                              <Col span={6}>
-                                <div className="p-2.5 rounded-xl bg-blue-950/40 border border-blue-800/50 text-center">
-                                  <div className="text-[10px] font-bold text-blue-400 uppercase">Đã like</div>
-                                  <div className="text-base sm:text-lg font-semibold text-blue-300 mt-0.5">
-                                    {autoBuffProgress.alreadyLiked}
-                                  </div>
-                                </div>
-                              </Col>
-                              <Col span={6}>
-                                <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/50 text-center">
-                                  <div className="text-[10px] font-bold text-rose-400 uppercase">Lỗi</div>
-                                  <div className="text-base sm:text-lg font-semibold text-rose-300 mt-0.5">
-                                    {autoBuffProgress.failed || batchOrders.filter((o) => o.status === 'FAILED').length}
-                                  </div>
-                                </div>
-                              </Col>
-                            </Row>
+                              );
+                            })()}
 
                             {/* Glowing Progress Banner when running */}
                             {autoBuffProgress.status === 'RUNNING' && (
@@ -3675,6 +4124,15 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   size={['100%', 6]}
                                   showInfo={false}
                                 />
+                              </div>
+                            )}
+
+                            {autoBuffProgress.status === 'DONE' && runTiming.start && runTiming.end && (
+                              <div className="px-3 py-2 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between text-sm">
+                                <span className="text-slate-400">Thời gian hoàn thành</span>
+                                <span className="font-semibold text-slate-100 tabular-nums">
+                                  {formatDuration((runTiming.end - runTiming.start) / 1000)}
+                                </span>
                               </div>
                             )}
 
@@ -3853,199 +4311,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             ),
           },
           {
-            key: 'buff-view',
-            label: 'Tăng view video',
-            children: (
-              <div className="space-y-4">
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-purple-950/20 border border-purple-500/20 text-xs flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 text-lg">
-                    <PlayCircleOutlined />
-                  </div>
-                  <div>
-                    <div className="font-bold text-slate-200">
-                      Cơ chế Buff View Reels / Video Ẩn Danh (An Toàn Tuyệt Đối)
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">
-                      Lượt xem được chạy mô phỏng qua trình duyệt tự động đa luồng Playwright, hoàn toàn không cần đăng nhập nick Facebook. Không sợ checkpoint, không lo khóa tài khoản và không ảnh hưởng đến dàn Via của bạn.
-                    </div>
-                  </div>
-                </div>
-
-                <Row gutter={[20, 20]}>
-                <Col xs={24} lg={12}>
-                  <Card
-                    title={
-                      <div className="flex items-center gap-2 text-sm font-bold text-slate-100">
-                        <EyeOutlined className="text-emerald-400" /> Cấu hình tăng view
-                      </div>
-                    }
-                    className="app-surface"
-                  >
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                          Link Video / Reels Facebook cần buff View:
-                        </label>
-                        <PasteLinkInput
-                          value={targetViewUrl}
-                          onChange={(val) => setTargetViewUrl(val)}
-                          placeholder="https://www.facebook.com/reel/123456789"
-                        />
-                      </div>
-
-                      <Row gutter={16}>
-                        <Col span={12}>
-                          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                            Số lượng View cần buff:
-                          </label>
-                          <Select
-                            className="w-full"
-                            value={targetViews}
-                            onChange={(v) => setTargetViews(v)}
-                            options={[
-                              { value: 10, label: '10 Lượt xem' },
-                              { value: 20, label: '20 Lượt xem' },
-                              { value: 50, label: '50 Lượt xem' },
-                              { value: 100, label: '100 Lượt xem' },
-                              { value: 200, label: '200 Lượt xem' },
-                            ]}
-                          />
-                        </Col>
-                        <Col span={12}>
-                          <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                            Số luồng chạy song song:
-                          </label>
-                          <Select
-                            className="w-full"
-                            value={viewConcurrency}
-                            onChange={(v) => setViewConcurrency(v)}
-                            options={[
-                              { value: 1, label: '1 Luồng (Máy yếu)' },
-                              { value: 2, label: '2 Luồng (Khuyên dùng)' },
-                              { value: 3, label: '3 Luồng (Nhanh)' },
-                              { value: 5, label: '5 Luồng (Máy mạnh)' },
-                            ]}
-                          />
-                        </Col>
-                      </Row>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                          Thời gian xem mỗi lượt (giây):
-                        </label>
-                        <Select
-                          className="w-full"
-                          value={watchTimeSeconds}
-                          onChange={(v) => setWatchTimeSeconds(v)}
-                          options={[
-                            { value: 5, label: '5 giây (Nhanh nhất)' },
-                            { value: 8, label: '8 giây (Chuẩn Facebook)' },
-                            { value: 12, label: '12 giây (Tốt cho giữ chân)' },
-                            { value: 20, label: '20 giây (Xem lâu)' },
-                          ]}
-                        />
-                      </div>
-
-                      <Button
-                        type="primary"
-                        size="large"
-                        icon={<EyeOutlined spin={buffViewMutation.isPending} />}
-                        loading={buffViewMutation.isPending}
-                        onClick={() => {
-                          if (!targetViewUrl) {
-                            message.warning('Vui lòng nhập Link Video / Reels!');
-                            return;
-                          }
-                          buffViewMutation.mutate();
-                        }}
-                        className="w-full bg-emerald-600 hover:bg-emerald-500 font-bold h-12 rounded-xl text-xs sm:text-sm"
-                      >
-                        Bắt đầu tăng view
-                      </Button>
-                    </div>
-                  </Card>
-                </Col>
-
-                <Col xs={24} lg={12}>
-                  <Card
-                    title={
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                          <EyeOutlined className="text-emerald-400" /> Tiến trình tăng view
-                        </span>
-                        {viewProgress.status !== 'IDLE' && (
-                          <Tag color={viewProgress.status === 'RUNNING' ? 'processing' : 'success'}>
-                            {viewProgress.status === 'RUNNING' ? 'Đang xem...' : 'Hoàn thành'}
-                          </Tag>
-                        )}
-                      </div>
-                    }
-                    className="app-surface h-full"
-                  >
-                    {viewProgress.status === 'IDLE' ? (
-                      <div className="text-center py-20 text-slate-400">
-                        <div className="text-5xl mb-3"></div>
-                        <div className="text-sm font-semibold">Chưa có tiến trình buff view nào.</div>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <Progress
-                          percent={Math.round((viewProgress.done / viewProgress.total) * 100)}
-                          status={viewProgress.status === 'DONE' ? 'success' : 'active'}
-                        />
-                        <div className="text-center font-bold text-lg text-slate-100">
-                          {viewProgress.done} / {viewProgress.total} Views đã hoàn tất
-                        </div>
-                      </div>
-                    )}
-                  </Card>
-                </Col>
-              </Row>
-              </div>
-            ),
-          },
-          {
-            key: 'post-hunter',
-            label: (
-              <span className="flex items-center gap-1.5">
-                <RobotOutlined className="text-blue-400" />
-                <span>Tự săn bài mới</span>
-                {monitors.filter((m) => m.status === 'ACTIVE').length > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-blue-500/20 text-blue-300 font-mono font-bold border border-blue-500/40">
-                    {monitors.filter((m) => m.status === 'ACTIVE').length}
-                  </span>
-                )}
-              </span>
-            ),
-            children: (
-              <PostHunterTab
-                workerBaseUrl={WORKER_BASE_URL}
-                monitors={monitors}
-                queueItems={queueItems}
-                autoBuffOwnPosts={Boolean(systemSettings.autoBuffOwnPosts)}
-                maxPagesPerPost={systemSettings.maxPagesPerPost || 150}
-                onRefresh={() => {
-                  fetchBuffMonitors();
-                  fetchBuffQueue();
-                }}
-                onAdd={(prefillUrl) => handleOpenAddMonitorModal(undefined, prefillUrl)}
-                onEdit={(mon) => handleOpenAddMonitorModal(mon as BuffMonitor)}
-                onToggle={handleToggleMonitor}
-                onDelete={handleDeleteMonitor}
-                onScanNow={handleScanNowMonitor}
-                onQueueUrl={(url) => {
-                  setQueueUrlInput(url);
-                  setActiveTabKey('buff-queue');
-                }}
-                onOpenQueue={() => setActiveTabKey('buff-queue')}
-                onOpenSettings={() => {
-                  fetchSettings();
-                  setIsSettingsModalOpen(true);
-                }}
-              />
-            ),
-          },
-          {
             key: 'buff-queue',
             label: (
               <span className="flex items-center gap-1.5">
@@ -4059,314 +4324,25 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               </span>
             ),
             children: (
-              <div className="space-y-4">
-                {/* Auto Hunter Pipeline Banner */}
-                <div className="app-surface p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <ThunderboltOutlined className="text-amber-400 text-base" />
-                      <span className="font-bold text-slate-100 text-sm">
-                        Hàng đợi tự động
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-                      Cơ chế hàng đợi an toàn: Các bài viết phát hiện từ module quét hoặc thêm thủ công sẽ được xếp lịch chạy ngầm tuần tự (FIFO) với độ trễ tự nhiên, chống checkpoint và chia tải đều cho dàn Via.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="small"
-                      icon={<ReloadOutlined />}
-                      onClick={() => fetchBuffQueue()}
-                      className="bg-slate-900 border-slate-700 text-slate-200"
-                    >
-                      Làm mới
-                    </Button>
-                    <Button
-                      size="small"
-                      danger
-                      onClick={handleClearCompletedQueue}
-                      className="text-xs"
-                    >
-                      Dọn dẹp bài đã xong
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Form nạp bài vào hàng đợi */}
-                <Card
-                  title={
-                    <div className="flex items-center gap-2 text-sm font-bold text-slate-100">
-                      <PlusOutlined className="text-blue-400" /> Nạp bài viết vào hàng đợi ngầm
-                    </div>
-                  }
-                  className="app-surface"
-                >
-                  <Row gutter={[16, 16]}>
-                    <Col xs={24} md={12}>
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-slate-300">Link bài viết Facebook:</label>
-                        <Input
-                          placeholder="https://www.facebook.com/share/p/... hoặc link Fanpage/Group"
-                          value={queueUrlInput}
-                          onChange={(e) => setQueueUrlInput(e.target.value)}
-                          className="bg-slate-900 border-slate-700 text-slate-100 rounded-lg text-xs"
-                        />
-                      </div>
-                    </Col>
-                    <Col xs={12} sm={6} md={3}>
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-slate-300">Số Like:</label>
-                        <InputNumber
-                          min={5}
-                          max={500}
-                          value={queueTargetLikes}
-                          onChange={(v) => setQueueTargetLikes(v || 30)}
-                          className="w-full bg-slate-900 border-slate-700 text-slate-100"
-                        />
-                      </div>
-                    </Col>
-                    <Col xs={12} sm={6} md={4}>
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-slate-300">Cảm xúc:</label>
-                        <Select
-                          value={queueReaction}
-                          onChange={(v) => setQueueReaction(v)}
-                          className="w-full"
-                          options={[
-                            { value: 'RANDOM_POSITIVE', label: 'Tự nhiên (Like+Love+Care)' },
-                            { value: 'LIKE', label: '100% LIKE' },
-                            { value: 'LOVE', label: '100% LOVE' },
-                            { value: 'RANDOM_ALL', label: 'Ngẫu nhiên tất cả' },
-                          ]}
-                        />
-                      </div>
-                    </Col>
-                    <Col xs={12} sm={6} md={3}>
-                      <div className="space-y-1">
-                        <label className="text-xs font-semibold text-slate-300">Chờ sau đăng:</label>
-                        <Select
-                          value={queueDelayMinutes}
-                          onChange={(v) => setQueueDelayMinutes(v)}
-                          className="w-full"
-                          options={[
-                            { value: 0, label: 'Chạy ngay' },
-                            { value: 2, label: '2 phút' },
-                            { value: 3, label: '3 phút (Chuẩn)' },
-                            { value: 5, label: '5 phút (An toàn)' },
-                            { value: 10, label: '10 phút' },
-                          ]}
-                        />
-                      </div>
-                    </Col>
-                    <Col xs={12} sm={6} md={2} className="flex items-end">
-                      <Button
-                        type="primary"
-                        icon={<PlusOutlined />}
-                        loading={queueLoading}
-                        onClick={handleAddQueueTask}
-                        className="w-full font-semibold"
-                      >
-                        Thêm
-                      </Button>
-                    </Col>
-                  </Row>
-                </Card>
-
-                {/* Danh sách Task trong hàng đợi (Dạng Bảng) */}
-                <Card
-                  title={
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-slate-100">
-                        Danh sách bài viết trong hàng đợi ({queueItems.length})
-                      </span>
-                      <span className="text-xs text-slate-400 font-normal">
-                        Tự động làm mới mỗi 10 giây
-                      </span>
-                    </div>
-                  }
-                  className="app-surface p-0 overflow-hidden"
-                >
-                  <Table
-                    dataSource={queueItems}
-                    rowKey="id"
-                    pagination={{ pageSize: 10, showTotal: (total) => `Tổng cộng ${total} bài viết` }}
-                    scroll={{ x: 900 }}
-                    className="ant-table-dark-custom"
-                    locale={{
-                      emptyText: (
-                        <div className="py-12 text-center text-slate-400 text-xs">
-                          Hàng đợi đang trống. Các bài viết mới từ Module Quét hoặc thêm ở trên sẽ tự động xuất hiện ở đây.
-                        </div>
-                      ),
-                    }}
-                    columns={[
-                      {
-                        title: 'Trạng Thái',
-                        dataIndex: 'status',
-                        key: 'status',
-                        width: 140,
-                        render: (status: string, task: any) => {
-                          const isQueued = status === 'QUEUED';
-                          const isRunning = status === 'RUNNING';
-                          const isCompleted = status === 'COMPLETED';
-
-                          if (isQueued) {
-                            return (
-                              <Tag color="warning" className="font-semibold text-xs py-0.5 px-2 rounded-md">
-                                Đang Chờ
-                              </Tag>
-                            );
-                          }
-                          if (isRunning) {
-                            return (
-                              <Tag color="processing" icon={<LoadingOutlined spin />} className="font-semibold text-xs py-0.5 px-2 rounded-md">
-                                {task.progress?.total ? `Buff ${task.progress.done}/${task.progress.total}` : 'Đang Buff...'}
-                              </Tag>
-                            );
-                          }
-                          if (isCompleted) {
-                            return (
-                              <Tag color="success" className="font-semibold text-xs py-0.5 px-2 rounded-md">
-                                Hoàn Tất
-                              </Tag>
-                            );
-                          }
-                          return (
-                            <Tag color="error" className="font-semibold text-xs py-0.5 px-2 rounded-md">
-                              Thất Bại
-                            </Tag>
-                          );
-                        },
-                      },
-                      {
-                        title: 'Bài Viết Facebook & Nguồn',
-                        dataIndex: 'targetUrl',
-                        key: 'targetUrl',
-                        render: (url: string, task: any) => {
-                          const isHunter = String(task.source || '').startsWith('POST_HUNTER');
-                          const isAutoOwn = task.source === 'AUTO_OWN_POST';
-                          return (
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <Tag color={isHunter ? 'cyan' : isAutoOwn ? 'purple' : 'default'} className="text-[10px] m-0 font-medium border-0 rounded">
-                                  {isHunter ? `Post Hunter${task.monitorName ? `: ${task.monitorName}` : ''}` : isAutoOwn ? `Bài App Đăng${task.topic === 'GROUP' ? ' (Nhóm)' : task.topic === 'FANPAGE' ? ' (Page)' : ''}` : 'Thủ Công'}
-                                </Tag>
-                                {task.runAfter && task.status === 'QUEUED' && (
-                                  <span className="text-[10px] text-amber-400 font-mono">
-                                    • Lên lịch: {new Date(task.runAfter).toLocaleTimeString()}
-                                  </span>
-                                )}
-                              </div>
-                              <a
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-blue-400 hover:text-blue-300 font-mono block truncate max-w-sm hover:underline"
-                              >
-                                {url}
-                              </a>
-                            </div>
-                          );
-                        },
-                      },
-                      {
-                        title: 'Mục Tiêu & Cảm Xúc',
-                        key: 'targetLikes',
-                        width: 180,
-                        render: (_, task: any) => {
-                          const reactionObj = REACTIONS.find((r) => r.key === task.reactionType);
-                          return (
-                            <div className="space-y-1">
-                              <div className="text-xs font-semibold text-slate-200">
-                                {task.targetLikes === 'ALL' ? 'Xoay vòng Page' : `${task.targetLikes || 30} Lượt Like`}
-                              </div>
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
-                                {reactionObj ? `${reactionObj.emoji} ${reactionObj.shortLabel}` : task.reactionType}
-                              </span>
-                            </div>
-                          );
-                        },
-                      },
-                      {
-                        title: 'Tiến Độ / Kết Quả',
-                        key: 'result',
-                        width: 170,
-                        render: (_, task: any) => {
-                          if (task.status === 'COMPLETED' && task.result) {
-                            return (
-                              <Tag color="success" className="font-mono text-xs font-bold py-0.5 px-2">
-                                Thành công {task.result.success}/{task.result.total}
-                              </Tag>
-                            );
-                          }
-                          if (task.status === 'FAILED' && task.error) {
-                            return (
-                              <Tooltip title={task.error}>
-                                <span className="text-rose-400 text-xs truncate block max-w-[150px]">
-                                  Lỗi: {task.error}
-                                </span>
-                              </Tooltip>
-                            );
-                          }
-                          if (task.status === 'RUNNING' && task.progress) {
-                            return (
-                              <div className="space-y-1">
-                                <Progress
-                                  percent={Math.round((task.progress.done / task.progress.total) * 100)}
-                                  size="small"
-                                  status="active"
-                                />
-                                <div className="text-[11px] font-mono text-slate-400 text-right">
-                                  {task.progress.done}/{task.progress.total}
-                                </div>
-                              </div>
-                            );
-                          }
-                          return <span className="text-slate-500 text-xs font-mono">—</span>;
-                        },
-                      },
-                      {
-                        title: 'Thao Tác',
-                        key: 'actions',
-                        width: 110,
-                        align: 'right',
-                        render: (_, task: any) => (
-                          <div className="flex items-center justify-end gap-1">
-                            {task.status === 'QUEUED' && (
-                              <Tooltip title="Chạy ngay">
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  icon={<ThunderboltOutlined className="text-amber-400" />}
-                                  onClick={() => handleRunNowQueueTask(task.id)}
-                                />
-                              </Tooltip>
-                            )}
-                            <Tooltip title="Mở link Facebook">
-                              <Button
-                                type="text"
-                                size="small"
-                                icon={<ExportOutlined className="text-blue-400" />}
-                                onClick={() => window.open(task.targetUrl, '_blank')}
-                              />
-                            </Tooltip>
-                            <Tooltip title="Xoá khỏi hàng đợi">
-                              <Button
-                                type="text"
-                                size="small"
-                                danger
-                                icon={<DeleteOutlined />}
-                                onClick={() => handleRemoveQueueTask(task.id)}
-                              />
-                            </Tooltip>
-                          </div>
-                        ),
-                      },
-                    ]}
-                  />
-                </Card>
-              </div>
+              <BuffQueueTab
+                workerBaseUrl={WORKER_BASE_URL}
+                queueItems={queueItems}
+                fbAccounts={fbAccounts}
+                scannedPages={scannedPages}
+                onRefresh={fetchBuffQueue}
+                onRunNow={handleRunNowQueueTask}
+                onRetry={handleRetryQueueTask}
+                onRemove={handleRemoveQueueTask}
+                onClearCompleted={handleClearCompletedQueue}
+                onEmergencyStop={handleEmergencyStop}
+                onResume={handleResumeSystem}
+                isEmergencyStopped={Boolean(bmOverview?.system?.isEmergencyStopped)}
+                totalAvailablePages={scannedPages.length || 50}
+                onCreateNew={() => {
+                  setRunMode('QUEUE');
+                  setActiveTabKey('buff-like');
+                }}
+              />
             ),
           },
           {
@@ -4410,43 +4386,23 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
                 {/* Filter and Actions Bar */}
                 <Card className="app-surface p-0">
-                  <div className="flex flex-wrap items-center justify-between gap-3 p-3">
-                    <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+                  <div className="p-3 space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Input
                         prefix={<SearchOutlined className="text-slate-400" />}
-                        placeholder="Tìm kiếm theo link bài viết hoặc tên Page..."
+                        placeholder="Tìm theo link bài viết, Via hoặc tên Page..."
                         value={logSearchQuery}
                         onChange={(e) => setLogSearchQuery(e.target.value)}
-                        className="rounded-xl bg-slate-900 border-slate-700 text-xs"
+                        className="flex-1 min-w-[240px]"
                         allowClear
                       />
-                      <Select
-                        value={logFilterReaction}
-                        onChange={(v) => setLogFilterReaction(v)}
-                        className="w-36"
-                        options={[
-                          { value: 'ALL', label: 'Tất cả cảm xúc' },
-                          ...REACTIONS.map((r) => ({
-                            value: r.key,
-                            label: `${r.emoji} ${r.shortLabel}`,
-                          })),
-                        ]}
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2">
                       {buffLogs.length > 0 && (
                         <>
-                          <Button
-                            icon={<ExportOutlined />}
-                            onClick={handleExportLogsToCsv}
-                            className="bg-slate-900 border-slate-700 text-slate-200 hover:border-cyan-500 text-xs font-semibold rounded-xl"
-                          >
-                            Xuất Báo Cáo CSV
+                          <Button onClick={handleExportLogsToCsv} disabled={filteredBuffLogs.length === 0}>
+                            {hasActiveLogFilter ? `Xuất CSV (${filteredBuffLogs.length})` : 'Xuất CSV'}
                           </Button>
                           <Button
                             danger
-                            type="dashed"
                           onClick={() => {
                             modal.confirm({
                               title: 'Xoá toàn bộ lịch sử buff?',
@@ -4465,12 +4421,81 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               },
                             });
                           }}
-                          className="text-xs font-semibold rounded-xl"
+                          type="text"
                         >
                           Xoá lịch sử
                         </Button>
                         </>
                       )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Select
+                        value={logFilterTime}
+                        onChange={setLogFilterTime}
+                        className="w-36"
+                        options={[
+                          { value: 'ALL', label: 'Mọi thời gian' },
+                          { value: 'TODAY', label: 'Hôm nay' },
+                          { value: '7D', label: '7 ngày qua' },
+                          { value: '30D', label: '30 ngày qua' },
+                        ]}
+                      />
+                      <Select
+                        value={logFilterType}
+                        onChange={setLogFilterType}
+                        className="w-32"
+                        options={[
+                          { value: 'ALL', label: 'Mọi loại' },
+                          { value: 'SINGLE', label: 'Đơn lẻ' },
+                          { value: 'BATCH', label: 'Hàng loạt' },
+                        ]}
+                      />
+                      <Select
+                        value={logFilterVia}
+                        onChange={setLogFilterVia}
+                        className="w-48"
+                        showSearch
+                        optionFilterProp="label"
+                        options={[
+                          { value: 'ALL', label: 'Tất cả Via' },
+                          ...logViaOptions.map((v) => ({ value: v, label: v })),
+                        ]}
+                      />
+                      <Select
+                        value={logFilterResult}
+                        onChange={setLogFilterResult}
+                        className="w-40"
+                        options={[
+                          { value: 'ALL', label: 'Mọi kết quả' },
+                          { value: 'CLEAN', label: 'Thành công hết' },
+                          { value: 'UNVERIFIED', label: 'Có chưa xác minh' },
+                          { value: 'FAILED', label: 'Có lỗi' },
+                        ]}
+                      />
+                      <Select
+                        value={logFilterReaction}
+                        onChange={(v) => setLogFilterReaction(v)}
+                        className="w-36"
+                        options={[
+                          { value: 'ALL', label: 'Mọi cảm xúc' },
+                          ...REACTIONS.map((r) => ({
+                            value: r.key,
+                            label: `${r.emoji} ${r.shortLabel}`,
+                          })),
+                        ]}
+                      />
+
+                      <div className="ml-auto flex items-center gap-3 text-xs text-slate-400">
+                        {hasActiveLogFilter && (
+                          <Button type="link" size="small" onClick={resetLogFilters} className="px-0 text-xs">
+                            Xoá bộ lọc
+                          </Button>
+                        )}
+                        <span className="tabular-nums">
+                          {filteredBuffLogs.length} / {buffLogs.length} lượt
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </Card>
@@ -4492,129 +4517,111 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                 ) : (
                   <Card className="app-surface p-0 overflow-hidden">
                     <Table<BuffLogEntry>
-                      dataSource={buffLogs.filter((log) => {
-                        if (logFilterReaction !== 'ALL' && log.reactionType !== logFilterReaction) return false;
-                        if (!logSearchQuery.trim()) return true;
-                        const q = logSearchQuery.toLowerCase().trim();
-                        return (
-                          log.targetUrl.toLowerCase().includes(q) ||
-                          log.accountName?.toLowerCase().includes(q) ||
-                          log.details.some((d) => d.pageName.toLowerCase().includes(q) || d.pageId.includes(q))
-                        );
-                      })}
+                      dataSource={filteredBuffLogs}
                       rowKey="id"
                       pagination={{ pageSize: 10, showTotal: (t) => `Tổng cộng ${t} lượt buff` }}
                       scroll={{ x: 1000 }}
                       className="ant-table-dark-custom"
                       columns={[
                         {
-                          title: 'Thời Gian',
+                          title: 'Thời gian',
                           dataIndex: 'createdAt',
                           key: 'createdAt',
-                          width: 150,
+                          width: 160,
                           sorter: (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
                           defaultSortOrder: 'descend',
                           render: (val: string, log) => (
-                            <div className="space-y-1">
-                              <div className="font-mono text-xs text-slate-200 font-semibold">
-                                {new Date(val).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            <div className="leading-tight">
+                              <div className="text-sm text-slate-100 tabular-nums">
+                                {new Date(val).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
                               </div>
-                              <div className="text-[11px] text-slate-400 font-mono">
-                                {new Date(val).toLocaleDateString('vi-VN')}
+                              <div className="text-xs text-slate-500 mt-1 tabular-nums whitespace-nowrap">
+                                {new Date(val).toLocaleDateString('vi-VN')} · {log.type === 'BATCH' ? 'Hàng loạt' : 'Đơn lẻ'}
                               </div>
-                              <Tag color={log.type === 'BATCH' ? 'purple' : 'blue'} className="text-[9px] px-1 py-0 border-0 leading-tight">
-                                {log.type === 'BATCH' ? 'Hàng loạt' : 'Đơn lẻ'}
-                              </Tag>
                             </div>
                           ),
                         },
                         {
-                          title: 'Bài Viết Facebook & Nick Mẹ',
+                          title: 'Bài viết',
                           key: 'targetUrl',
                           render: (_, log) => (
-                            <div className="space-y-1.5 min-w-0">
+                            <div className="min-w-0 leading-tight">
                               <a
                                 href={log.targetUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="font-mono text-xs text-blue-400 hover:text-blue-300 truncate block max-w-sm hover:underline"
+                                title={log.targetUrl}
+                                className="text-sm text-slate-100 hover:text-blue-400 truncate block max-w-sm"
                               >
-                                {log.targetUrl}
+                                {log.targetUrl.replace(/^https?:\/\/(www\.)?/, '')}
                               </a>
                               {log.accountName && (
-                                <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                                  <span>Via thực hiện:</span>
-                                  <Tag color="cyan" className="font-semibold text-[10px] m-0 border-0">
-                                    {log.accountName}
-                                  </Tag>
+                                <div className="text-xs text-slate-500 mt-1 truncate max-w-sm">
+                                  Via: <span className="text-slate-300">{log.accountName}</span>
                                 </div>
                               )}
                             </div>
                           ),
                         },
                         {
-                          title: 'Cảm Xúc',
+                          title: 'Cảm xúc',
                           dataIndex: 'reactionType',
                           key: 'reactionType',
-                          width: 140,
+                          width: 120,
                           render: (reactionType: string) => {
                             const reactionObj = REACTIONS.find((r) => r.key === reactionType) || REACTIONS[0];
                             return (
-                              <Tag color="geekblue" className="font-semibold text-xs px-2 py-0.5 m-0 border-0 flex items-center gap-1.5 w-fit">
+                              <span className="inline-flex items-center gap-1.5 text-sm text-slate-200">
                                 <span>{reactionObj.emoji}</span>
-                                <span>{reactionObj.shortLabel}</span>
-                              </Tag>
+                                {reactionObj.shortLabel}
+                              </span>
                             );
                           },
                         },
                         {
-                          title: 'Kết Quả Tương Tác',
+                          title: 'Kết quả',
                           key: 'counts',
-                          width: 250,
+                          width: 200,
                           render: (_, log) => {
                             const counts = getLogCounts(log);
+                            const extras = [
+                              counts.comments > 0 && { text: `${counts.comments} bình luận`, cls: 'text-slate-400' },
+                              counts.alreadyLiked > 0 && { text: `${counts.alreadyLiked} đã like trước`, cls: 'text-slate-400' },
+                              counts.unverified > 0 && { text: `${counts.unverified} chưa xác minh`, cls: 'text-amber-400' },
+                              counts.failed > 0 && { text: `${counts.failed} lỗi`, cls: 'text-rose-400' },
+                            ].filter(Boolean) as { text: string; cls: string }[];
                             return (
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <Tag color="success" className="m-0 text-xs font-bold" icon={<CheckCircleFilled />}>
-                                  {counts.success} thành công
-                                </Tag>
-                                {counts.comments > 0 && (
-                                  <Tag color="cyan" className="m-0 text-xs font-bold" icon={<CommentOutlined />}>
-                                    {counts.comments} cmt
-                                  </Tag>
-                                )}
-                                {counts.alreadyLiked > 0 && (
-                                  <Tag color="blue" className="m-0 text-xs" icon={<CheckOutlined />}>
-                                    {counts.alreadyLiked} đã like trước
-                                  </Tag>
-                                )}
-                                {counts.failed > 0 && (
-                                  <Tag color="error" className="m-0 text-xs">
-                                    {counts.failed} lỗi
-                                  </Tag>
-                                )}
-                                {counts.unverified > 0 && (
-                                  <Tag color="gold" className="m-0 text-xs">
-                                    {counts.unverified} chưa xác minh
-                                  </Tag>
+                              <div className="leading-tight">
+                                <div className="text-sm text-slate-200">
+                                  <span className="font-semibold text-emerald-400 tabular-nums">{counts.success}</span> thành công
+                                </div>
+                                {extras.length > 0 && (
+                                  <div className="text-xs mt-1">
+                                    {extras.map((e, i) => (
+                                      <span key={e.text} className={e.cls}>
+                                        {i > 0 && <span className="text-slate-600"> · </span>}
+                                        {e.text}
+                                      </span>
+                                    ))}
+                                  </div>
                                 )}
                               </div>
                             );
                           },
                         },
                         {
-                          title: 'Dàn Fanpage',
+                          title: 'Fanpage',
                           key: 'details',
-                          width: 140,
+                          width: 150,
                           render: (_, log) => {
                             const counts = getLogCounts(log);
                             const pct = (n: number) => counts.total > 0 ? `${(n / counts.total) * 100}%` : '0%';
                             return (
-                              <div className="space-y-1">
-                                <div className="text-xs font-bold text-slate-200">{counts.total} Fanpage</div>
-                                <div className="flex h-1.5 rounded-full overflow-hidden bg-slate-800 w-24">
+                              <div className="leading-tight">
+                                <div className="text-sm text-slate-200 tabular-nums">{counts.total} Page</div>
+                                <div className="flex h-1 rounded-full overflow-hidden bg-slate-800 w-full max-w-[112px] mt-2">
                                   <div className="bg-emerald-500" style={{ width: pct(counts.success) }} />
-                                  <div className="bg-blue-500" style={{ width: pct(counts.alreadyLiked) }} />
+                                  <div className="bg-slate-500" style={{ width: pct(counts.alreadyLiked) }} />
                                   <div className="bg-amber-500" style={{ width: pct(counts.unverified) }} />
                                   <div className="bg-rose-500" style={{ width: pct(counts.failed) }} />
                                 </div>
@@ -4623,18 +4630,13 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           },
                         },
                         {
-                          title: 'Thao Tác',
+                          title: '',
                           key: 'actions',
-                          width: 150,
+                          width: 120,
                           align: 'right',
                           render: (_, log) => (
-                            <div className="flex items-center justify-end gap-1.5">
-                              <Button
-                                size="small"
-                                icon={<EyeOutlined />}
-                                onClick={() => setSelectedLogDetail(log)}
-                                className="rounded-lg text-xs bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200"
-                              >
+                            <div className="flex items-center justify-end gap-1">
+                              <Button size="small" type="text" onClick={() => setSelectedLogDetail(log)} className="text-xs text-slate-300">
                                 Chi tiết
                               </Button>
                               <Dropdown
@@ -4643,7 +4645,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   items: [
                                     {
                                       key: 'rerun',
-                                      icon: <ThunderboltOutlined />,
                                       label: 'Buff lại bài này',
                                       onClick: () => {
                                         setTargetPostUrl(log.targetUrl);
@@ -4654,14 +4655,13 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                     },
                                     {
                                       key: 'open',
-                                      icon: <ExportOutlined />,
                                       label: 'Mở trên Facebook',
                                       onClick: () => window.open(log.targetUrl, '_blank'),
                                     },
                                   ],
                                 }}
                               >
-                                <Button size="small" type="text" icon={<MoreOutlined />} />
+                                <Button size="small" type="text" icon={<MoreOutlined />} className="text-slate-400" />
                               </Dropdown>
                             </div>
                           ),
@@ -4671,6 +4671,33 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                   </Card>
                 )}
               </div>
+            ),
+          },
+          {
+            key: 'buff-hunter',
+            label: `Săn bài tự động (${monitors.length})`,
+            children: (
+              <PostHunterTab
+                workerBaseUrl={WORKER_BASE_URL}
+                monitors={monitors as any}
+                queueItems={queueItems}
+                autoBuffOwnPosts={Boolean(bmOverview?.system?.autoBuffOwnPosts)}
+                maxPagesPerPost={Number(bmOverview?.system?.maxPagesPerPost) || 60}
+                onRefresh={fetchBuffMonitors}
+                onAdd={(url) => handleOpenAddMonitorModal(undefined, url)}
+                onEdit={(m) => handleOpenAddMonitorModal(m as any)}
+                onToggle={handleToggleMonitor}
+                onDelete={handleDeleteMonitor}
+                onScanNow={handleScanNowMonitor}
+                onQueueUrl={(url) => {
+                  setTargetPostUrl(url);
+                  setActiveTabKey('buff-like');
+                }}
+                onOpenQueue={() => setActiveTabKey('buff-queue')}
+                onOpenSettings={() => {
+                  setActiveTabKey('system-settings');
+                }}
+              />
             ),
           },
           {
@@ -4687,18 +4714,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                 dbStatus={props.dbStatus}
                 onCheckDb={props.onCheckDb}
                 onNavigateToBuff={() => setActiveTabKey('buff-like')}
-              />
-            ),
-          },
-          {
-            key: 'avatar-studio',
-            label: 'Cập Nhật Avatar Page',
-            children: (
-              <PageAvatarStudio
-                accounts={accounts as any[]}
-                onRefresh={() => {
-                  refetchAccounts();
-                }}
               />
             ),
           },

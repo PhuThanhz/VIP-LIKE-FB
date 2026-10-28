@@ -1,6 +1,6 @@
 /**
  * VIPLIKE RADIANT - BACKEND SERVER
- * Tích hợp trực tiếp với MySQL Workbench (autopost_saas), Playwright Automation & Gemini AI
+ * Tích hợp trực tiếp với MySQL Workbench (viplike_radiant), Playwright Automation & Gemini AI
  */
 
 const express = require('express');
@@ -11,6 +11,7 @@ const crypto = require('crypto');
 require('dotenv').config();
 
 const db = require('./db');
+const store = require('./state-store');
 const fbBuffTool = require('./fb-buff-tool');
 const {
   isEmergencyStopped,
@@ -20,6 +21,11 @@ const {
   notifyViaDead,
   notifyBuffCompleted,
   notifyPostHunted,
+  notifyQueueIdle,
+  notifyQueueTrouble,
+  sendAlert,
+  formatDurationVi,
+  startCommandListener,
   sendTelegramMessage,
 } = require('./telegram-alert');
 const {
@@ -38,106 +44,126 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Trong vài giây đầu, dữ liệu đang được nạp từ MySQL: chặn request để không đọc/ghi lệch dữ liệu
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS' || store.isReady()) return next();
+  return res.status(503).json({ success: false, error: 'Hệ thống đang khởi động, vui lòng thử lại sau vài giây.' });
+});
+
 // Đảm bảo thư mục lưu trữ dữ liệu tồn tại
 const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const BUFF_QUEUE_FILE = path.join(DATA_DIR, 'buff_queue.json');
-const BUFF_HISTORY_FILE = path.join(DATA_DIR, 'buff_history.json');
-const BUFF_MONITORS_FILE = path.join(DATA_DIR, 'buff_monitors.json');
-
 // =============================================================================
-// 1. DATA HELPERS (QUEUE, HISTORY, MONITORS) - TỐI ƯU IN-MEMORY & DEBOUNCED I/O
+// 1. DATA HELPERS (QUEUE, HISTORY, MONITORS)
+//    Lưu qua state-store: MySQL (bảng app_state) là nguồn chính, file JSON trong data/ là bản dự phòng.
 // =============================================================================
-
-let cachedBuffQueue = null;
-let saveQueueTimer = null;
 
 function loadBuffQueue() {
-  if (cachedBuffQueue) return cachedBuffQueue;
-  try {
-    if (fs.existsSync(BUFF_QUEUE_FILE)) {
-      const data = JSON.parse(fs.readFileSync(BUFF_QUEUE_FILE, 'utf-8'));
-      if (Array.isArray(data.items)) {
-        cachedBuffQueue = data;
-        return cachedBuffQueue;
-      }
-    }
-  } catch (e) {
-    console.warn('[BuffQueue] ⚠️ Không đọc được queue, khởi tạo lại:', e.message);
-  }
-  cachedBuffQueue = { items: [] };
-  return cachedBuffQueue;
+  const data = store.read('buff_queue');
+  if (data && Array.isArray(data.items)) return data;
+  console.warn('[BuffQueue] ⚠️ Dữ liệu hàng đợi sai định dạng, khởi tạo lại.');
+  return store.write('buff_queue', { items: [] });
 }
 
 function saveBuffQueue(queueData) {
-  cachedBuffQueue = queueData;
-  if (saveQueueTimer) clearTimeout(saveQueueTimer);
-  saveQueueTimer = setTimeout(() => {
-    try {
-      const tmp = `${BUFF_QUEUE_FILE}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(cachedBuffQueue, null, 2));
-      fs.renameSync(tmp, BUFF_QUEUE_FILE);
-    } catch (e) {
-      console.warn('[BuffQueue] ⚠️ Lỗi lưu file hàng đợi:', e.message);
-    }
-  }, 200);
+  store.write('buff_queue', queueData);
+  syncBuffQueueToMysql(queueData).catch(() => {});
 }
 
-let cachedBuffHistory = null;
-let saveHistoryTimer = null;
+async function syncBuffQueueToMysql(queueData) {
+  try {
+    const p = db.getPool();
+    const items = queueData?.items || [];
+    for (const it of items) {
+      if (!it.id) continue;
+      const targetUrl = it.targetUrl || it.normalizedUrl || '';
+      const targetLikes = Number(it.targetLikes) || 30;
+      const reactionType = it.reactionType || 'RANDOM_POSITIVE';
+      const delayMinutes = Number(it.delayMinutes) || 5;
+      const enableComment = it.enableComment ? 1 : 0;
+      const commentList = JSON.stringify(it.comments || []);
+      let status = 'WAITING';
+      if (it.status === 'COMPLETED') status = 'COMPLETED';
+      else if (it.status === 'RUNNING') status = 'RUNNING';
+      else if (it.status === 'FAILED') status = 'FAILED';
+      else if (it.status === 'PAUSED') status = 'PAUSED';
+
+      const progressLikes = Number(it.progress?.done ?? it.result?.success ?? 0);
+      const progressComments = 0;
+      const scheduleTime = it.runAfter ? new Date(it.runAfter) : new Date();
+      const createdAt = it.addedAt ? new Date(it.addedAt) : new Date();
+      const completedAt = it.finishedAt ? new Date(it.finishedAt) : null;
+
+      await p.execute(
+        `INSERT INTO buff_queue (id, target_url, target_likes, reaction_type, delay_minutes, enable_comment, comment_list, status, progress_likes, progress_comments, schedule_time, created_at, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           target_url = VALUES(target_url),
+           target_likes = VALUES(target_likes),
+           reaction_type = VALUES(reaction_type),
+           status = VALUES(status),
+           progress_likes = VALUES(progress_likes),
+           completed_at = VALUES(completed_at)`,
+        [
+          it.id,
+          targetUrl,
+          targetLikes,
+          reactionType,
+          delayMinutes,
+          enableComment,
+          commentList,
+          status,
+          progressLikes,
+          progressComments,
+          scheduleTime,
+          createdAt,
+          completedAt,
+        ]
+      );
+    }
+  } catch (_) {}
+}
 
 function loadBuffHistory() {
-  if (cachedBuffHistory) return cachedBuffHistory;
-  try {
-    if (fs.existsSync(BUFF_HISTORY_FILE)) {
-      cachedBuffHistory = JSON.parse(fs.readFileSync(BUFF_HISTORY_FILE, 'utf-8'));
-      return cachedBuffHistory;
-    }
-  } catch (e) {
-    console.warn('[BuffHistory] ⚠️ Không đọc được history:', e.message);
-  }
-  cachedBuffHistory = {};
-  return cachedBuffHistory;
+  const data = store.read('buff_history');
+  if (data && typeof data === 'object' && !Array.isArray(data)) return data;
+  return store.write('buff_history', {});
 }
 
 function saveBuffHistory(historyData) {
-  cachedBuffHistory = historyData;
-  if (saveHistoryTimer) clearTimeout(saveHistoryTimer);
-  saveHistoryTimer = setTimeout(() => {
-    try {
-      const tmp = `${BUFF_HISTORY_FILE}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(cachedBuffHistory, null, 2));
-      fs.renameSync(tmp, BUFF_HISTORY_FILE);
-    } catch (e) {
-      console.warn('[BuffHistory] ⚠️ Lỗi lưu file history:', e.message);
-    }
-  }, 300);
+  store.write('buff_history', historyData);
+  syncBuffHistoryToMysql(historyData).catch(() => {});
 }
 
+async function syncBuffHistoryToMysql(historyData) {
+  try {
+    const p = db.getPool();
+    const entries = Object.entries(historyData || {});
+    for (const [url, item] of entries) {
+      const targetUrl = item.url || item.normalizedUrl || url;
+      const reaction = item.reactionType || 'LIKE';
+      const status = 'COMPLETED';
+      const createdAt = item.lastBuffedAt ? new Date(item.lastBuffedAt) : new Date();
+      await p.execute(
+        `INSERT INTO buff_history (user_id, target_url, page_id, page_name, interaction_type, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [1, targetUrl, 'ALL_PAGES', `Đã tương tác (${item.totalSuccess || 1} lượt)`, reaction, status, createdAt]
+      );
+    }
+  } catch (_) {}
+}
 
 function loadBuffMonitors() {
-  try {
-    if (fs.existsSync(BUFF_MONITORS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(BUFF_MONITORS_FILE, 'utf-8'));
-      if (Array.isArray(data.monitors)) return data;
-    }
-  } catch (e) {
-    console.warn('[PostHunter] ⚠️ Không đọc được file monitors:', e.message);
-  }
+  const data = store.read('buff_monitors');
+  if (data && Array.isArray(data.monitors)) return data;
   return { monitors: [] };
 }
 
 function saveBuffMonitors(data) {
-  try {
-    const tmp = `${BUFF_MONITORS_FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-    fs.renameSync(tmp, BUFF_MONITORS_FILE);
-  } catch (e) {
-    console.warn('[PostHunter] ⚠️ Lỗi lưu file monitors:', e.message);
-  }
+  store.write('buff_monitors', data);
 }
 
 function parseTargetLikes(value, fallback = 30) {
@@ -218,11 +244,27 @@ const deadBuffVias = new Map();
 const DEAD_VIA_TTL_MS = 60 * 60 * 1000;
 const DEAD_VIA_ERR_RE = /hết hạn|checkpoint|đăng nhập|xác minh/i;
 
-function markBuffViaDeadIfCookieError(via, err) {
-  if (!via?.uid || !DEAD_VIA_ERR_RE.test(err?.message || '')) return false;
-  deadBuffVias.set(via.uid, Date.now() + DEAD_VIA_TTL_MS);
-  console.warn(`[BuffQueue] 🚫 Via ${via.viaName} (UID ${via.uid}) lỗi cookie/checkpoint → tạm bỏ qua 1h.`);
-  return true;
+// Khi một lượt chạy báo lỗi cookie: xác minh lại bằng phiên đăng nhập thật; nếu đúng là hết hạn/checkpoint
+// thì ghi trạng thái vào MySQL (để giao diện hiện cảnh báo) và gửi Telegram. Tránh báo nhầm vì lỗi tạm thời.
+async function confirmAndRecordDeadVia(via) {
+  try {
+    const status = await fbBuffTool.validateViaSession(via.cookieString, { proxyUrl: via.proxyUrl, timeoutMs: 18000 });
+    if (status.isLive || (status.status !== 'EXPIRED' && status.status !== 'CHECKPOINT')) return;
+    await db.updateTokenStatus(via.id, status.status).catch(() => {});
+    notifyViaDead(
+      { uid: via.uid, viaName: via.viaName, proxyUrl: via.proxyUrl, tokenStatus: status.status },
+      status.status === 'CHECKPOINT' ? 'Facebook yêu cầu xác minh (checkpoint)' : 'Cookie hết hạn hoặc đã đăng xuất'
+    ).catch(() => {});
+  } catch (e) {
+    console.warn(`[ViaHealth] ⚠️ Không xác minh được Via ${via.viaName}: ${e.message}`);
+  }
+}
+
+/** Sau một lỗi lấy Page của Via: xác minh Cookie thật (tối đa 1 lần/giờ cho mỗi Via) và cảnh báo nếu đã chết */
+function verifyViaAfterRunError(via) {
+  if (!via?.uid || typeof via.id !== 'number' || !via.cookieString || isBuffViaDead(via.uid)) return;
+  deadBuffVias.set(via.uid, Date.now() + DEAD_VIA_TTL_MS); // dùng làm mốc "vừa kiểm tra"
+  confirmAndRecordDeadVia(via);
 }
 
 function isBuffViaDead(uid) {
@@ -251,7 +293,6 @@ async function resolveViaProxy(cookieString, explicitProxy = '') {
 // =============================================================================
 // AUTHENTICATION, JWT (RFC 7519 HMAC-SHA256) & ACCESS CONTROL
 // =============================================================================
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const JWT_SECRET_FILE = path.join(DATA_DIR, '.jwt_secret');
 
 // Mật khẩu lưu dạng: scrypt$<saltHex>$<hashHex>
@@ -313,30 +354,21 @@ function createSeedAdmin() {
 }
 
 function loadUsers() {
-  if (fs.existsSync(USERS_FILE)) {
-    let data;
-    try {
-      data = JSON.parse(fs.readFileSync(USERS_FILE, 'utf-8'));
-    } catch (e) {
-      // Không ghi đè file hỏng để tránh mất tài khoản
-      console.error('[Auth] ❌ users.json bị lỗi định dạng, không thể đọc:', e.message);
-      return [];
-    }
-    if (Array.isArray(data) && data.length > 0) {
-      // Chuyển mật khẩu dạng chữ thường (plaintext) sang scrypt một lần duy nhất
-      const migrated = [];
-      for (const u of data) {
-        if (u.password && !isHashedPassword(u.password)) {
-          u.password = hashPasswordSync(u.password);
-          migrated.push(u.username);
-        }
+  const data = store.read('users');
+  if (Array.isArray(data) && data.length > 0) {
+    // Chuyển mật khẩu dạng chữ thường (plaintext) sang scrypt một lần duy nhất
+    const migrated = [];
+    for (const u of data) {
+      if (u.password && !isHashedPassword(u.password)) {
+        u.password = hashPasswordSync(u.password);
+        migrated.push(u.username);
       }
-      if (migrated.length > 0) {
-        saveUsers(data);
-        console.log(`[Auth] 🔐 Đã mã hóa mật khẩu (scrypt) cho tài khoản: ${migrated.join(', ')}`);
-      }
-      return data;
     }
+    if (migrated.length > 0) {
+      saveUsers(data);
+      console.log(`[Auth] 🔐 Đã mã hóa mật khẩu (scrypt) cho tài khoản: ${migrated.join(', ')}`);
+    }
+    return data;
   }
   const seeded = [createSeedAdmin()];
   saveUsers(seeded);
@@ -344,9 +376,10 @@ function loadUsers() {
 }
 
 function saveUsers(users) {
+  store.write('users', users);
   try {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
-  } catch (e) {}
+    db.syncUsersToDb(users).catch(() => {});
+  } catch (_) {}
 }
 
 function publicUser(user) {
@@ -649,8 +682,6 @@ function authenticateJwt(req, res, next) {
     '/api/license/activate',
     '/api/license/status',
     '/api/buff-cached-pages',
-    '/api/avatars/cached-status',
-    '/api/avatars/presets',
   ];
 
   const currentPath = req.path.toLowerCase();
@@ -778,19 +809,68 @@ app.get('/api/db/test', async (req, res) => {
   return res.json(result);
 });
 
+// -----------------------------------------------------------------------------
+// TÀI KHOẢN VIA: chuẩn hoá Cookie, che dữ liệu nhạy cảm, chặn trùng
+// -----------------------------------------------------------------------------
+const MYSQL_SAVE_WARNING =
+  'Chưa lưu được vào MySQL, dữ liệu mới chỉ được lưu tạm trên máy này. Hãy kiểm tra kết nối MySQL rồi thử lại.';
+
+/**
+ * Nhận Cookie dạng chuỗi thường ("c_user=...; xs=...") hoặc "UID|PASS|2FA|COOKIE".
+ * Trả về cookie đã tách sạch, UID, và valid=true khi có đủ c_user + xs.
+ */
+function normalizeFbCookie(input) {
+  let cookie = String(input || '').trim();
+  if (cookie.includes('|')) {
+    const parts = cookie.split('|').map((p) => p.trim());
+    const cookiePart = parts.find((p) => /c_user=/.test(p)) || parts.find((p) => /(?:^|;\s*)xs=/.test(p)) || '';
+    const uidPart = /^[0-9]{6,}$/.test(parts[0]) ? parts[0] : '';
+    cookie = cookiePart;
+    if (cookie && uidPart && !/c_user=/.test(cookie)) cookie = `c_user=${uidPart}; ${cookie}`;
+  }
+  const uid = cookie.match(/(?:^|;\s*)c_user=([^;\s]+)/)?.[1] || '';
+  const hasXs = /(?:^|;\s*)xs=[^;\s]+/.test(cookie);
+  return { cookie, uid, valid: Boolean(uid && hasXs) };
+}
+
+function maskProxyUrl(proxy) {
+  const v = String(proxy || '');
+  if (!v) return '';
+  if (v.includes('@')) return v.replace(/\/\/[^@]*@/, '//***@').replace(/^[^/@]*:[^/@]*@/, '***@');
+  const parts = v.split(':');
+  return parts.length > 2 ? `${parts[0]}:${parts[1]}:***` : v;
+}
+
+/** Tài khoản không phải ADMIN chỉ thấy UID, không thấy Cookie hay mật khẩu proxy */
+function redactAccountForNonAdmin(acc) {
+  const uid =
+    (acc.cookieString || acc.accessToken || '').match(/(?:^|;\s*)c_user=([^;\s]+)/)?.[1] || acc.platformAccountId || '';
+  const safeCookie = uid && /^[0-9]+$/.test(uid) ? `c_user=${uid}` : '';
+  return { ...acc, cookieString: safeCookie, accessToken: safeCookie, proxyUrl: maskProxyUrl(acc.proxyUrl) };
+}
+
+function findViaByUid(rows, uid) {
+  return rows.find((r) => {
+    if (r.platform === 'FACEBOOK_GROUP') return false;
+    const own = (r.cookieString || r.accessToken || '').match(/(?:^|;\s*)c_user=([^;\s]+)/)?.[1];
+    return own === uid;
+  });
+}
+
 // Lấy danh sách toàn bộ tài khoản Via & Fanpage từ MySQL Workbench
 app.get('/api/connections', async (req, res) => {
   try {
     const accounts = await db.getSocialAccounts();
-    return res.json(accounts);
+    const isAdmin = req.user?.role === 'ADMIN';
+    return res.json(isAdmin ? accounts : accounts.map(redactAccountForNonAdmin));
   } catch (err) {
     console.error('[API /connections] ❌ Lỗi:', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Thêm tài khoản Via mới vào MySQL Workbench
-app.post('/api/connections', async (req, res) => {
+// Thêm tài khoản Via mới vào MySQL Workbench (chỉ ADMIN)
+app.post('/api/connections', requireAdmin, async (req, res) => {
   try {
     const {
       pageName = '',
@@ -800,42 +880,109 @@ app.post('/api/connections', async (req, res) => {
       accountType = 'PERSONAL_PROFILE_COOKIE',
     } = req.body;
 
-    if (!cookieString) {
+    if (!String(cookieString).trim()) {
       return res.status(400).json({ success: false, error: 'Thiếu Cookie Facebook (cookieString)' });
+    }
+
+    let finalCookie = String(cookieString).trim();
+    if (accountType === 'PERSONAL_PROFILE_COOKIE') {
+      const norm = normalizeFbCookie(cookieString);
+      if (!norm.valid) {
+        return res.status(400).json({
+          success: false,
+          error: 'Cookie không hợp lệ: cần có đủ c_user và xs (hoặc dạng UID|PASS|2FA|COOKIE chứa 2 giá trị này).',
+        });
+      }
+      finalCookie = norm.cookie;
+
+      const existing = findViaByUid(await db.getSocialAccounts(), norm.uid);
+      if (existing) {
+        return res.status(409).json({
+          success: false,
+          error: `Via này đã có trong hệ thống (${existing.pageName || norm.uid}). Dùng "Đổi Cookie" nếu muốn cập nhật.`,
+          existingId: existing.id,
+        });
+      }
     }
 
     const created = await db.addSocialAccount({
       pageName,
-      cookieString,
+      cookieString: finalCookie,
       proxyUrl,
       platform,
       accountType,
     });
 
-    return res.json({ success: true, account: created });
+    const { dbSaved, ...account } = created;
+    return res.json({ success: true, account, ...(dbSaved === false ? { warning: MYSQL_SAVE_WARNING } : {}) });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Cập nhật tài khoản trong MySQL Workbench
-app.put('/api/connections/:id', async (req, res) => {
+// Cập nhật tài khoản trong MySQL Workbench (chỉ ADMIN)
+app.put('/api/connections/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { pageName, cookieString, proxyUrl, tokenStatus } = req.body;
-    await db.updateSocialAccount(id, { pageName, cookieString, proxyUrl, tokenStatus });
-    return res.json({ success: true });
+    const { pageName, proxyUrl, tokenStatus } = req.body;
+    let { cookieString } = req.body;
+    if (cookieString !== undefined) {
+      const norm = normalizeFbCookie(cookieString);
+      if (!norm.valid) {
+        return res.status(400).json({ success: false, error: 'Cookie không hợp lệ: cần có đủ c_user và xs.' });
+      }
+      cookieString = norm.cookie;
+    }
+    const result = await db.updateSocialAccount(id, { pageName, cookieString, proxyUrl, tokenStatus });
+    return res.json({ success: true, ...(result.dbSaved === false ? { warning: MYSQL_SAVE_WARNING } : {}) });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Cập nhật Cookie mới cho Via (theo UID) — chỉ ADMIN
+app.post('/api/vias/update-cookie', requireAdmin, async (req, res) => {
+  try {
+    const { uid, cookieString, proxyUrl } = req.body;
+    if (!cookieString || !String(cookieString).trim()) {
+      return res.status(400).json({ success: false, error: 'Vui lòng cung cấp chuỗi Cookie Facebook mới!' });
+    }
+
+    const norm = normalizeFbCookie(cookieString);
+    if (!norm.valid) {
+      return res.status(400).json({ success: false, error: 'Cookie không hợp lệ: cần có đủ c_user và xs.' });
+    }
+    const targetUid = uid || norm.uid;
+    if (uid && /^[0-9]+$/.test(String(uid)) && norm.uid && String(uid) !== norm.uid) {
+      return res.status(400).json({
+        success: false,
+        error: `Cookie này thuộc tài khoản ${norm.uid}, không khớp với Via ${uid}. Hãy kiểm tra lại.`,
+      });
+    }
+
+    // 1. Cập nhật vào DB & Cache cho UID này
+    const result = await db.updateViaCookieByUid(targetUid, norm.cookie, proxyUrl);
+
+    // 2. Gỡ bỏ khỏi danh sách đen deadBuffVias để hàng đợi tự động sử dụng lại
+    deadBuffVias.delete(targetUid);
+
+    console.log(`[ViaManager] 🔄 Đã cập nhật Cookie mới thành công cho Via UID: ${targetUid}`);
+    return res.json({
+      success: true,
+      message: `Đã cập nhật Cookie mới cho Via UID ${targetUid}`,
+      ...(result?.dbSaved === false ? { warning: MYSQL_SAVE_WARNING } : {}),
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // Xóa tài khoản khỏi MySQL Workbench
-app.delete('/api/connections/:id', async (req, res) => {
+app.delete('/api/connections/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    await db.deleteSocialAccount(id);
-    return res.json({ success: true });
+    const result = await db.deleteSocialAccount(id);
+    return res.json({ success: true, ...(result.dbSaved === false ? { warning: MYSQL_SAVE_WARNING } : {}) });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -902,8 +1049,8 @@ app.post('/api/buff-get-pages', async (req, res) => {
   }
 });
 
-// Lấy danh sách Fanpage đã cache từ trước (kèm trạng thái Avatar chuẩn)
-app.get('/api/buff-cached-pages', (req, res) => {
+// Lấy danh sách Fanpage từ MySQL Workbench facebook_page_accesses (kèm trạng thái Avatar chuẩn)
+app.get('/api/buff-cached-pages', async (req, res) => {
   try {
     const { uid } = req.query;
     const avatarCache = avatarTool.loadAvatarCache() || {};
@@ -912,7 +1059,13 @@ app.get('/api/buff-cached-pages', (req, res) => {
     if (uid) {
       pages = fbBuffTool.getCachedPages(String(uid)) || [];
       if (!pages || pages.length === 0) {
-        // Fallback 1: Tìm trong accounts_cache
+        // Nạp trực tiếp từ bảng facebook_page_accesses trên MySQL Workbench
+        try {
+          pages = await db.getFacebookPageAccesses(1, String(uid));
+        } catch (e) {}
+      }
+      if (!pages || pages.length === 0) {
+        // Fallback: Tìm trong accounts_cache
         try {
           const cachedAccounts = db.loadAccountsCache() || [];
           const matched = cachedAccounts.filter(
@@ -948,18 +1101,23 @@ app.get('/api/buff-cached-pages', (req, res) => {
       return res.json({ success: true, uid, count: enrichedPages.length, pages: enrichedPages });
     }
 
-    // Nếu không truyền UID, trả về toàn bộ cache từ avatar_status_cache
+    // Nếu không truyền UID, ưu tiên nạp toàn bộ từ bảng facebook_page_accesses trên MySQL
     try {
-      const pageList = Object.values(avatarCache).map((p) => ({
-        id: String(p.pageId),
-        name: p.name || p.pageName || `Fanpage ${String(p.pageId).slice(-4)}`,
-        url: `https://www.facebook.com/${p.pageId}`,
-        hasAvatar: Boolean(p.hasAvatar && !p.isSilhouette),
-        isSilhouette: Boolean(p.isSilhouette || !p.hasAvatar),
-        avatarUrl: p.avatarUrl || '',
-      }));
-      if (pageList.length > 0) {
-        return res.json({ success: true, count: pageList.length, pages: pageList });
+      const dbPages = await db.getFacebookPageAccesses(1, null);
+      if (dbPages.length > 0) {
+        const enrichedList = dbPages.map((p) => {
+          const id = String(p.id);
+          const av = avatarCache[id];
+          return {
+            id,
+            name: p.name,
+            url: p.url,
+            hasAvatar: Boolean(av && av.hasAvatar && !av.isSilhouette),
+            isSilhouette: Boolean(!av || av.isSilhouette || !av.hasAvatar),
+            avatarUrl: av?.avatarUrl || '',
+          };
+        });
+        return res.json({ success: true, count: enrichedList.length, pages: enrichedList });
       }
     } catch (e) {}
 
@@ -970,15 +1128,16 @@ app.get('/api/buff-cached-pages', (req, res) => {
   }
 });
 
-// Lưu / cập nhật thủ công danh sách Page vào cache
-app.post('/api/buff-cache-pages', (req, res) => {
+// Lưu / cập nhật thủ công danh sách Page vào MySQL facebook_page_accesses và cache
+app.post('/api/buff-cache-pages', async (req, res) => {
   try {
     const { uid, pages, viaName = '' } = req.body;
     if (!uid || !Array.isArray(pages)) {
       return res.status(400).json({ success: false, error: 'Thiếu uid hoặc pages' });
     }
     fbBuffTool.setCachedPages(String(uid), pages, viaName);
-    return res.json({ success: true, message: `Đã lưu cache ${pages.length} Page cho UID ${uid}` });
+    await db.saveFacebookPageAccesses(pages, uid, viaName);
+    return res.json({ success: true, message: `Đã lưu MySQL Workbench và cache ${pages.length} Page cho UID ${uid}` });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -1025,6 +1184,7 @@ app.post('/api/buff-like', async (req, res) => {
     reactionType = 'LIKE',
     selectedPages = [],
     delayMs = 1500,
+    speedMode = 'NORMAL',
     enableLike = true,
     enableComment = false,
     enableHumanBehavior = true,
@@ -1047,11 +1207,13 @@ app.post('/api/buff-like', async (req, res) => {
     const proxyPool = Array.isArray(sysSettings.proxyPool) ? sysSettings.proxyPool : [];
     const proxyUrl = await resolveViaProxy(cookieString, explicitProxy);
     const laneUid = fbBuffTool.getUserIdFromCookie(cookieString);
+    const startMs = Date.now();
     const result = await withBuffLane(laneUid, () =>
       fbBuffTool.buffLikesWithPages(cookieString, targetUrl, {
         reactionType,
         selectedPages,
         delayMs,
+        speedMode,
         enableLike,
         enableComment,
         enableHumanBehavior,
@@ -1061,11 +1223,26 @@ app.post('/api/buff-like', async (req, res) => {
         comments,
         proxyUrl,
         proxyPool,
-        concurrency: Math.max(1, Math.min(3, parseInt(concurrency, 10) || 1)),
+        concurrency: Math.max(1, Math.min(5, parseInt(concurrency, 10) || 1)),
         dripFeedMode: Boolean(dripFeedMode),
         dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
       })
     );
+
+    const durationSec = Math.max(1, Math.round((Date.now() - startMs) / 1000));
+    const totalCount = selectedPages?.length || result?.total || 0;
+    const successCount = result?.successCount ?? (result?.details ? result.details.filter((d) => d.status === 'SUCCESS' || d.status === 'ALREADY_LIKED').length : 0);
+    const failedCount = result?.failedCount ?? (result?.details ? result.details.filter((d) => d.status === 'ERROR' || d.status === 'FAILED' || d.status === 'NO_BUTTON').length : 0);
+
+    notifyBuffCompleted({
+      targetUrl,
+      success: successCount,
+      total: totalCount,
+      failed: failedCount,
+      durationSec,
+      reactionType,
+    }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo hoàn tất buff:', err.message));
+
     return res.json({ success: true, result });
   } catch (err) {
     console.error('[Buff API] ❌ Lỗi Buff Like/Comment:', err.message);
@@ -1134,6 +1311,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
     reactionType = 'LIKE',
     selectedPages = [],
     delayMs = 1500,
+    speedMode = 'NORMAL',
     enableLike = true,
     enableComment = false,
     enableHumanBehavior = true,
@@ -1212,6 +1390,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
         reactionType,
         selectedPages,
         delayMs,
+        speedMode,
         enableLike,
         enableComment,
         enableHumanBehavior,
@@ -1221,7 +1400,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
         comments,
         proxyUrl,
         proxyPool,
-        concurrency: Math.max(1, Math.min(3, parseInt(concurrency, 10) || 1)),
+        concurrency: Math.max(1, Math.min(5, parseInt(concurrency, 10) || 1)),
         dripFeedMode: Boolean(dripFeedMode),
         dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
         // CHỈ DỪNG KHI NGƯỜI DÙNG BẤM NÚT DỪNG HOẶC DỪNG KHẨN CẤP.
@@ -1273,6 +1452,21 @@ app.post('/api/buff-like-stream', async (req, res) => {
       }
       activeLiveBuffSession.updatedAt = new Date().toISOString();
     }
+
+    const streamStartMs = activeLiveBuffSession?.startedAt ? new Date(activeLiveBuffSession.startedAt).getTime() : Date.now();
+    const durationSec = Math.max(1, Math.round((Date.now() - streamStartMs) / 1000));
+    const totalCount = selectedPages?.length || result?.total || 0;
+    const successCount = result?.successCount ?? (result?.details ? result.details.filter((d) => d.status === 'SUCCESS' || d.status === 'ALREADY_LIKED').length : 0);
+    const failedCount = result?.failedCount ?? (result?.details ? result.details.filter((d) => d.status === 'ERROR' || d.status === 'FAILED' || d.status === 'NO_BUTTON').length : 0);
+
+    notifyBuffCompleted({
+      targetUrl,
+      success: successCount,
+      total: totalCount,
+      failed: failedCount,
+      durationSec,
+      reactionType,
+    }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo stream xong:', err.message));
 
     sendEvent('done', { result });
     res.end();
@@ -1338,6 +1532,7 @@ function addBuffQueueTask(taskPayload) {
     enableComment: Boolean(taskPayload.enableComment),
     comments: Array.isArray(taskPayload.comments) ? taskPayload.comments : [],
     delayMinutes: delayMin,
+    speedMode: taskPayload.speedMode || 'FAST',
     addedAt: new Date().toISOString(),
     runAfter: new Date(Date.now() + delayMin * 60 * 1000).toISOString(),
     status: 'QUEUED',
@@ -1375,6 +1570,73 @@ app.post('/api/buff-queue/add', async (req, res) => {
       });
     }
     return res.json({ success: true, task: result.task });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/buff-queue/batch-add', async (req, res) => {
+  try {
+    if (!(await checkLicenseOrReject(req, res))) return;
+    const {
+      urls = [],
+      targetLikes = 30,
+      reactionType = 'RANDOM_POSITIVE',
+      delayMinutes = 0,
+      enableLike = true,
+      enableComment = false,
+      comments = [],
+      speedMode = 'FAST',
+      staggerMinutes = 3,
+    } = req.body;
+
+    if (!Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({ success: false, error: 'Thiếu danh sách urls' });
+    }
+
+    const baseDelay = parseDelayMinutes(delayMinutes);
+    const stagger = Math.max(0, Number(staggerMinutes) || 0);
+
+    const added = [];
+    const skipped = [];
+    const alreadyQueued = [];
+
+    urls.forEach((u, idx) => {
+      const cleanUrl = String(u || '').trim();
+      if (!cleanUrl) return;
+
+      const calculatedDelay = baseDelay + idx * stagger;
+      const result = addBuffQueueTask({
+        targetUrl: cleanUrl,
+        targetLikes,
+        reactionType,
+        enableLike,
+        enableComment,
+        comments,
+        speedMode,
+        delayMinutes: calculatedDelay,
+        source: 'BATCH_MANUAL',
+      });
+
+      if (result.skipped) {
+        skipped.push({ url: cleanUrl, reason: 'Đã buff trước đó' });
+      } else if (result.alreadyQueued) {
+        alreadyQueued.push({ url: cleanUrl, taskId: result.task?.id });
+      } else if (result.task) {
+        added.push(result.task);
+      }
+    });
+
+    return res.json({
+      success: true,
+      totalReceived: urls.length,
+      addedCount: added.length,
+      skippedCount: skipped.length,
+      alreadyQueuedCount: alreadyQueued.length,
+      added,
+      skipped,
+      alreadyQueued,
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -1503,6 +1765,21 @@ async function executeQueueTask(task) {
       if (matched) {
         targetVias = [matched];
       } else {
+        // Bài được gắn với 1 Via cụ thể nhưng Via đó đang bị đánh dấu lỗi: không dùng lại Cookie cũ đã chết
+        const pinnedUid = fbBuffTool.getUserIdFromCookie(task.cookieString);
+        const deadRow = pinnedUid
+          ? (await db.getSocialAccounts()).find(
+              (r) =>
+                r.platform !== 'FACEBOOK_GROUP' &&
+                (r.cookieString || r.accessToken || '').match(/(?:^|;\s*)c_user=([^;\s]+)/)?.[1] === pinnedUid &&
+                (r.tokenStatus === 'EXPIRED' || r.tokenStatus === 'CHECKPOINT')
+            )
+          : null;
+        if (deadRow) {
+          throw new Error(
+            `Via ${deadRow.pageName || pinnedUid} đang ${deadRow.tokenStatus === 'CHECKPOINT' ? 'bị checkpoint' : 'hết hạn Cookie'}. Hãy cập nhật Cookie ở trang Via & Fanpage rồi bấm Thử lại.`
+          );
+        }
         targetVias = [
           {
             id: 'task_via',
@@ -1535,6 +1812,7 @@ async function executeQueueTask(task) {
           });
         } catch (e) {
           console.warn(`[BuffQueue Worker] ⚠️ Không lấy được page từ via ${via.viaName}:`, e.message);
+          verifyViaAfterRunError({ ...via, uid });
           continue;
         }
       }
@@ -1605,6 +1883,7 @@ async function executeQueueTask(task) {
       const res = await withBuffLane(laneUid, () =>
         fbBuffTool.buffLikesWithPages(group.cookieString, task.targetUrl, {
           reactionType: task.reactionType || 'RANDOM_POSITIVE',
+          speedMode: task.speedMode || 'FAST',
           selectedPages: group.pages,
           delayMs: 3500,
           enableLike: task.enableLike !== false,
@@ -1627,6 +1906,16 @@ async function executeQueueTask(task) {
               const t = qd.items.find((it) => it.id === task.id);
               if (t) {
                 t.progress = { done: totalDone, total: pagesToBuff.length, success: totalSuccess };
+                t.pageDetails = t.pageDetails || [];
+                t.pageDetails.push({
+                  pageId: ev.pageId,
+                  pageName: ev.pageName,
+                  status: ev.status,
+                  reaction: ev.reaction || task.reactionType,
+                  comment: ev.comment || '',
+                  error: ev.error || null,
+                  time: new Date().toLocaleTimeString(),
+                });
                 saveBuffQueue(qd);
               }
             }
@@ -1678,6 +1967,13 @@ async function executeQueueTask(task) {
     }).catch(() => {});
 
     console.log(`[BuffQueue Worker] ✅ Hoàn tất Task ${task.id}: Thành công ${totalSuccess}/${pagesToBuff.length} (${durationSec}s)`);
+
+    consecutiveQueueFailures = 0;
+    const stillBusy = loadBuffQueue().items.some(
+      (it) => it.id !== task.id && (it.status === 'QUEUED' || it.status === 'RUNNING')
+    );
+    if (!stillBusy) notifyQueueIdle({ completedCount: queueCompletedSinceIdle + 1 }).catch(() => {});
+    queueCompletedSinceIdle = stillBusy ? queueCompletedSinceIdle + 1 : 0;
   } catch (err) {
     console.error(`[BuffQueue Worker] ❌ Task ${task.id} lỗi:`, err.message);
     const qd = loadBuffQueue();
@@ -1689,12 +1985,25 @@ async function executeQueueTask(task) {
       t.attempts = (t.attempts || 0) + 1;
       saveBuffQueue(qd);
     }
+    consecutiveQueueFailures += 1;
+    if (consecutiveQueueFailures === 3) {
+      notifyQueueTrouble({
+        consecutiveFailures: consecutiveQueueFailures,
+        lastError: err.message,
+        lastUrl: task.targetUrl,
+      }).catch(() => {});
+    }
   } finally {
     activeBuffTaskIds.delete(task.id);
   }
 }
 
+// Đếm bài thất bại liên tiếp / số bài đã xong từ lần hàng đợi trống gần nhất (phục vụ thông báo Telegram)
+let consecutiveQueueFailures = 0;
+let queueCompletedSinceIdle = 0;
+
 async function runQueueWorker() {
+  if (!store.isReady()) return;
   if (isEmergencyStopped()) return;
   if (activeBuffTaskIds.size >= MAX_PARALLEL_BUFF) return;
 
@@ -1988,6 +2297,7 @@ app.post('/api/buff-monitors/:id/scan-now', async (req, res) => {
 // Post Hunter Background Scheduler
 let isHunterScanning = false;
 async function runHunterScheduler() {
+  if (!store.isReady()) return;
   if (isHunterScanning || isEmergencyStopped()) return;
   const data = loadBuffMonitors();
   const activeMonitors = (data.monitors || []).filter((m) => m.status === 'ACTIVE');
@@ -2136,6 +2446,196 @@ app.post('/api/buff-vias/health-check', async (req, res) => {
   }
 });
 
+// =============================================================================
+// KIỂM TRA ĐỊNH KỲ VIA HẾT HẠN COOKIE / CHECKPOINT → CẬP NHẬT TRẠNG THÁI + CẢNH BÁO TELEGRAM
+// =============================================================================
+const VIA_HEALTH_INTERVAL_MS = 30 * 60 * 1000;
+const VIA_HEALTH_FIRST_RUN_MS = 3 * 60 * 1000;
+let isViaHealthScanning = false;
+
+async function runScheduledViaHealthCheck() {
+  if (!store.isReady() || isViaHealthScanning) return;
+  // Nhường chỗ cho tác vụ đang chạy để không tranh tài nguyên trình duyệt
+  if (isHunterScanning || activeLiveBuffSession) return;
+  try {
+    if (loadBuffSettings().isEmergencyStopped) return;
+    if (loadBuffQueue().items.some((it) => it.status === 'RUNNING')) return;
+  } catch (e) {
+    return;
+  }
+
+  isViaHealthScanning = true;
+  try {
+    // getLiveVias chỉ trả về Via chưa bị đánh dấu lỗi → mỗi Via chỉ bị cảnh báo 1 lần khi vừa chuyển sang lỗi
+    const vias = (await db.getLiveVias()).filter((v) => typeof v.id === 'number');
+    if (vias.length === 0) return;
+    console.log(`[ViaHealth] ⏱️ Kiểm tra định kỳ ${vias.length} Via...`);
+
+    for (const via of vias) {
+      if (loadBuffSettings().isEmergencyStopped) break;
+      try {
+        const status = await fbBuffTool.validateViaSession(via.cookieString, {
+          proxyUrl: via.proxyUrl,
+          timeoutMs: 18000,
+        });
+        // Chỉ coi là lỗi khi chắc chắn (hết hạn / checkpoint); lỗi mạng hoặc timeout bỏ qua để không báo nhầm
+        if (status.isLive || (status.status !== 'EXPIRED' && status.status !== 'CHECKPOINT')) continue;
+
+        await db.updateTokenStatus(via.id, status.status).catch(() => {});
+        notifyViaDead(
+          {
+            uid: via.uid || fbBuffTool.getUserIdFromCookie(via.cookieString),
+            viaName: via.viaName,
+            proxyUrl: via.proxyUrl,
+            tokenStatus: status.status,
+          },
+          status.status === 'CHECKPOINT' ? 'Facebook yêu cầu xác minh (checkpoint)' : 'Cookie hết hạn hoặc đã đăng xuất'
+        ).catch(() => {});
+      } catch (err) {
+        console.warn(`[ViaHealth] ⚠️ Bỏ qua Via ${via.viaName || via.id}: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    console.warn(`[ViaHealth] ⚠️ Kiểm tra định kỳ thất bại: ${err.message}`);
+  } finally {
+    isViaHealthScanning = false;
+  }
+}
+
+setTimeout(() => {
+  runScheduledViaHealthCheck();
+  setInterval(runScheduledViaHealthCheck, VIA_HEALTH_INTERVAL_MS);
+}, VIA_HEALTH_FIRST_RUN_MS);
+
+// =============================================================================
+// TELEGRAM: BÁO CÁO HẰNG NGÀY + LỆNH /status
+// =============================================================================
+async function getViaCounts() {
+  let total = 0;
+  let dead = 0;
+  try {
+    const seen = new Set();
+    for (const row of await db.getSocialAccounts()) {
+      if (row.platform === 'FACEBOOK_GROUP' || !row.cookieString) continue;
+      const m = row.cookieString.match(/(?:^|;\s*)c_user=([^;]+)/);
+      if (!m || seen.has(m[1])) continue;
+      seen.add(m[1]);
+      total++;
+      if (row.tokenStatus === 'EXPIRED' || row.tokenStatus === 'CHECKPOINT') dead++;
+    }
+  } catch (e) {
+    return null;
+  }
+  return { total, dead, live: total - dead };
+}
+
+function summarizeQueueSince(sinceMs) {
+  const items = loadBuffQueue().items || [];
+  const finished = items.filter((it) => it.finishedAt && new Date(it.finishedAt).getTime() >= sinceMs);
+  const done = finished.filter((it) => it.status === 'COMPLETED');
+  return {
+    completed: done.length,
+    failed: finished.filter((it) => it.status === 'FAILED').length,
+    success: done.reduce((a, it) => a + (it.result?.success || 0), 0),
+    total: done.reduce((a, it) => a + (it.result?.total || 0), 0),
+    totalSec: done.reduce((a, it) => a + (it.result?.durationSec || 0), 0),
+    queued: items.filter((it) => it.status === 'QUEUED').length,
+    running: items.filter((it) => it.status === 'RUNNING').length,
+  };
+}
+
+async function buildStatusText() {
+  const st = loadBuffSettings();
+  const q = summarizeQueueSince(Date.now() - 24 * 3600 * 1000);
+  const v = await getViaCounts();
+  return [
+    `📊 <b>[TÌNH TRẠNG HỆ THỐNG]</b>`,
+    `━━━━━━━━━━━━━━━━━━`,
+    st.isEmergencyStopped ? `⛔ <b>Đang DỪNG KHẨN CẤP</b> — gửi /resume để khôi phục` : `🟢 Đang hoạt động bình thường`,
+    v ? `👤 Via: ${v.live}/${v.total} hoạt động${v.dead ? ` · <b>${v.dead} cần cập nhật Cookie</b>` : ''}` : `👤 Via: không đọc được dữ liệu`,
+    `📋 Hàng đợi: ${q.running} đang chạy · ${q.queued} đang chờ`,
+    `📈 24 giờ qua: ${q.completed} bài xong · ${q.failed} thất bại`,
+  ].join('\n');
+}
+
+async function buildDailyReport() {
+  const q = summarizeQueueSince(Date.now() - 24 * 3600 * 1000);
+  const v = await getViaCounts();
+  const rate = q.total > 0 ? Math.round((q.success / q.total) * 100) : 0;
+  return [
+    `🗓️ <b>[BÁO CÁO 24 GIỜ QUA]</b>`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `✅ Bài hoàn tất: <b>${q.completed}</b>${q.failed ? ` · ❌ thất bại: <b>${q.failed}</b>` : ''}`,
+    `❤️ Lượt thành công: <b>${q.success}</b> / ${q.total}${q.total ? ` (${rate}%)` : ''}`,
+    `⏱️ Tổng thời gian chạy: ${formatDurationVi(q.totalSec)}`,
+    v ? `👤 Via: ${v.live}/${v.total} hoạt động${v.dead ? ` · <b>${v.dead} cần cập nhật Cookie</b>` : ''}` : '',
+    `📋 Đang chờ trong hàng đợi: ${q.queued}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+async function runDailyReportTick() {
+  if (!store.isReady()) return;
+  try {
+    const st = loadBuffSettings();
+    if (!st.dailyReportEnabled || !st.telegramBotToken || !st.telegramChatId) return;
+    const now = new Date();
+    const today = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+    if (now.getHours() !== Number(st.dailyReportHour) || st.lastDailyReportDate === today) return;
+    saveBuffSettings({ lastDailyReportDate: today }); // ghi trước để không gửi lặp nếu có lỗi giữa chừng
+    await sendAlert(await buildDailyReport());
+  } catch (err) {
+    console.warn(`[DailyReport] ⚠️ ${err.message}`);
+  }
+}
+setInterval(runDailyReportTick, 60 * 1000);
+
+// Nhận lệnh /status /stop /resume từ Telegram
+startCommandListener({ getStatusText: buildStatusText });
+
+// Lấy dữ liệu báo cáo tổng quan ngày (cho trang Săn bài & VIP Like)
+app.get('/api/buff-daily-report', async (req, res) => {
+  try {
+    const q = summarizeQueueSince(Date.now() - 24 * 3600 * 1000);
+    const v = await getViaCounts();
+    const rate = q.total > 0 ? Math.round((q.success / q.total) * 100) : 0;
+    const history = loadBuffHistory();
+    const historyList = Object.values(history);
+    const today24h = historyList.filter(
+      (h) => h.lastBuffedAt && Date.now() - new Date(h.lastBuffedAt).getTime() < 24 * 3600 * 1000
+    );
+    return res.json({
+      success: true,
+      report: {
+        completedPosts: q.completed,
+        failedPosts: q.failed,
+        totalLikesSuccess: q.success,
+        totalLikesTarget: q.total,
+        successRate: rate,
+        runningTimeSec: q.totalSec,
+        queuedCount: q.queued,
+        liveVias: v?.live || 0,
+        totalVias: v?.total || 0,
+        todayHistoryCount: today24h.length,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Bấm nút gửi báo cáo tổng kết 24h về Telegram
+app.post('/api/buff-daily-report/send', async (req, res) => {
+  try {
+    const reportText = await buildDailyReport();
+    const result = await sendAlert(reportText, { critical: true });
+    return res.json({ success: true, message: 'Đã gửi báo cáo tổng kết ngày về Telegram!', result });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Tổng quan sức khỏe hệ thống (truy vấn trực tiếp MySQL Workbench)
 app.get('/api/buff-vias/overview', async (req, res) => {
   try {
@@ -2221,31 +2721,150 @@ app.get('/api/buff-vias/overview', async (req, res) => {
 // 8. API ROUTES - CÀI ĐẶT HỆ THỐNG & DỪNG KHẨN CẤP
 // =============================================================================
 
+let cachedTelegramBotInfo = null;
+let lastBotTokenChecked = '';
+
+async function getTelegramBotInfo(token) {
+  if (!token) return null;
+  if (cachedTelegramBotInfo && lastBotTokenChecked === token) return cachedTelegramBotInfo;
+  try {
+    const axios = require('axios');
+    const resp = await axios.get(`https://api.telegram.org/bot${token}/getMe`, { timeout: 4000 });
+    if (resp.data?.ok) {
+      cachedTelegramBotInfo = {
+        id: resp.data.result.id,
+        firstName: resp.data.result.first_name,
+        username: resp.data.result.username,
+      };
+      lastBotTokenChecked = token;
+      return cachedTelegramBotInfo;
+    }
+  } catch {}
+  return null;
+}
+
+// Token thật chỉ trả về cho ADMIN (để hiện/sửa trên giao diện); tài khoản khác chỉ thấy bản che
 function publicBuffSettings(s) {
   const maskedToken = s.telegramBotToken
     ? `${s.telegramBotToken.slice(0, 6)}...${s.telegramBotToken.slice(-4)}`
     : '';
   return {
     ...s,
-    telegramBotToken: '',
+    telegramBotToken: s.telegramBotToken || '',
     telegramBotTokenMasked: maskedToken,
     hasBotToken: Boolean(s.telegramBotToken),
   };
 }
 
-app.get('/api/buff-settings', (req, res) => {
+app.get('/api/buff-settings', async (req, res) => {
   try {
-    return res.json({ success: true, settings: publicBuffSettings(loadBuffSettings()) });
+    const raw = loadBuffSettings();
+    const botInfo = await getTelegramBotInfo(raw.telegramBotToken);
+    return res.json({
+      success: true,
+      settings: {
+        ...publicBuffSettings(raw),
+        botInfo,
+      },
+    });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-app.post('/api/buff-settings', requireAdmin, (req, res) => {
+app.post('/api/buff-settings', requireAdmin, async (req, res) => {
   try {
     const updated = saveBuffSettings(req.body);
     if (!updated) return res.status(500).json({ success: false, error: 'Không lưu được file cài đặt' });
-    return res.json({ success: true, settings: publicBuffSettings(updated) });
+    const botInfo = await getTelegramBotInfo(updated.telegramBotToken);
+    try {
+      const db = require('./db');
+      await db.syncTelegramSettingsToDb({ ...updated, botInfo });
+    } catch {}
+    return res.json({ success: true, settings: { ...publicBuffSettings(updated), botInfo } });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Lấy lịch sử thông báo Telegram lưu trong MySQL
+app.get('/api/telegram/history', async (req, res) => {
+  try {
+    const db = require('./db');
+    const limit = parseInt(req.query.limit || '50', 10);
+    const notifications = await db.getTelegramNotifications(limit);
+    return res.json({ success: true, notifications });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Bắn thử các tình huống thực tế để người dùng thấy Telegram giúp gì
+app.post('/api/telegram/test-scenario', async (req, res) => {
+  try {
+    const { scenario = 'TEST' } = req.body;
+    const now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+    let text = '';
+
+    if (scenario === 'BUFF_COMPLETED') {
+      text = [
+        `🎉 <b>[MÔ PHỎNG: BUFF HOÀN TẤT CHIẾN DỊCH]</b>`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `🔗 <b>Bài viết:</b> <a href="https://facebook.com/groups/947583488284655/posts/1174580982251570">Nhóm Facebook VIP 947583488...</a>`,
+        `❤️ <b>Loại Reaction:</b> LIKE & LOVE (Yêu thích)`,
+        `✅ <b>Thành công:</b> <b>26 / 26</b> Page (100%)`,
+        `❌ <b>Thất bại:</b> 0`,
+        `⏱️ <b>Thời gian xử lý:</b> 42s (2 luồng song song)`,
+        `⏰ <b>Hoàn tất lúc:</b> ${now}`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `✨ <i>Chiến dịch hoàn thành xuất sắc, toàn bộ Page an toàn!</i>`,
+      ].join('\n');
+    } else if (scenario === 'VIA_DEAD') {
+      text = [
+        `⚠️ <b>[MÔ PHỎNG: CẢNH BÁO VIA DIE / CHECKPOINT]</b>`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `🚨 <b>Phát hiện tài khoản Via cần xử lý ngay:</b>`,
+        `👤 <b>Tên Via:</b> (4) Facebook`,
+        `🆔 <b>UID:</b> <code>100009194846268</code>`,
+        `❌ <b>Trạng thái:</b> Cookie hết hạn / Yêu cầu xác minh`,
+        `⏰ <b>Thời điểm phát hiện:</b> ${now}`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `🛡️ <i>Hệ thống đã tự động cách ly Via này để tránh bị khóa dàn Page con!</i>`,
+      ].join('\n');
+    } else if (scenario === 'EMERGENCY_STOP') {
+      text = [
+        `🛑 <b>[MÔ PHỎNG: BÁO ĐỘNG DỪNG KHẨN CẤP]</b>`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `👤 <b>Người kích hoạt:</b> Quản trị viên (Admin)`,
+        `⚠️ <b>Lý do:</b> Kiểm tra an toàn định kỳ hệ thống`,
+        `⏰ <b>Thời gian:</b> ${now}`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `⛔ <i>Tất cả trình duyệt Playwright và Hàng đợi Queue đã được đóng ngay lập tức!</i>`,
+      ].join('\n');
+    } else if (scenario === 'HUNTER') {
+      text = [
+        `🎯 <b>[MÔ PHỎNG: SĂN BÀI VIẾT MỚI THÀNH CÔNG]</b>`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `📢 <b>Nguồn theo dõi:</b> Fanpage "VIPLIKE RADIANT OFFICIAL"`,
+        `🔗 <b>Bài viết mới:</b> <a href="https://facebook.com/viplike/posts/123456789">facebook.com/viplike/posts/123456789</a>`,
+        `⏳ <b>Kế hoạch:</b> Tự động buff 50 Like sau 3 phút nữa`,
+        `⏰ <b>Phát hiện lúc:</b> ${now}`,
+      ].join('\n');
+    } else {
+      text = [
+        `🤖 <b>[TEST THÀNH CÔNG: VIPLIKE RADIANT OPS BOT]</b>`,
+        `━━━━━━━━━━━━━━━━━━`,
+        `✅ Kết nối Telegram Bot thông suốt 100%!`,
+        `⏰ Thời gian: ${now}`,
+        `🛡️ <i>Dữ liệu đã được lưu trữ và kiểm soát trực tiếp trong MySQL Database!</i>`,
+      ].join('\n');
+    }
+
+    const result = await sendTelegramMessage(text, 'HTML');
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.reason || 'Không gửi được tin nhắn' });
+    }
+    return res.json({ success: true, message: 'Đã gửi mô phỏng về Telegram và lưu vào Database!', result });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -2254,11 +2873,12 @@ app.post('/api/buff-settings', requireAdmin, (req, res) => {
 app.post('/api/buff-settings/test-telegram', async (req, res) => {
   try {
     const { botToken, chatId } = req.body;
+    const now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
     const customMsg = [
       `🤖 <b>[TEST THÀNH CÔNG: VIPLIKE RADIANT OPS BOT]</b>`,
       `━━━━━━━━━━━━━━━━━━`,
       `✅ Kết nối Telegram Bot thông suốt 100%!`,
-      `⏰ Thời gian: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`,
+      `⏰ Thời gian: ${now}`,
       `🛡️ <i>Hệ thống giám sát và bảo vệ dàn Via & Fanpage đã sẵn sàng 24/7!</i>`,
     ].join('\n');
 
@@ -2271,6 +2891,18 @@ app.post('/api/buff-settings/test-telegram', async (req, res) => {
         { chat_id: chatId, text: customMsg, parse_mode: 'HTML' },
         { timeout: 8000 }
       );
+      const msgId = resp.data?.result?.message_id || null;
+      try {
+        const db = require('./db');
+        await db.saveTelegramNotification({
+          chatId,
+          eventType: 'TEST',
+          title: 'TEST THÀNH CÔNG: VIPLIKE RADIANT OPS BOT',
+          message: customMsg.replace(/<[^>]*>/g, ''),
+          status: 'SENT',
+          telegramMessageId: msgId,
+        });
+      } catch {}
       result = { success: true, data: resp.data };
     } else {
       result = await sendTelegramMessage(customMsg);
@@ -2431,378 +3063,32 @@ app.post('/api/license/admin/update-status', requireAdmin, async (req, res) => {
   }
 });
 
-// =============================================================================
-// API CẬP NHẬT AVATAR CHO DÀN FANPAGE (PAGE AVATAR STUDIO)
-// =============================================================================
-
-// 1. Lấy danh sách Preset kho ảnh đại diện mẫu
-app.get('/api/avatars/presets', (req, res) => {
-  try {
-    const presets = avatarTool.getAvatarPresets();
-    return res.json({ success: true, ...presets });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// 1.1 Lấy nhanh cache trạng thái Avatar đã lưu
-app.get('/api/avatars/cached-status', (req, res) => {
-  try {
-    const cache = avatarTool.loadAvatarCache();
-    const items = Object.values(cache);
-    return res.json({
-      success: true,
-      results: cache,
-      stats: {
-        total: items.length,
-        hasAvatar: items.filter((i) => i.hasAvatar).length,
-        missingAvatar: items.filter((i) => !i.hasAvatar).length,
-      },
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// 2. Quét trạng thái Avatar của dàn Page (Chính xác 100% qua Switcher / Cache / Graph)
-app.post('/api/avatars/check-status', async (req, res) => {
-  try {
-    const { pageIds = [], motherViaId = null, deepScan = false } = req.body;
-
-    const allAccounts = await db.getSocialAccounts();
-    let finalCookie = '';
-    let finalProxy = '';
-
-    if (motherViaId) {
-      const viaAcc = allAccounts.find(
-        (a) => String(a.id) === String(motherViaId) || a.platformAccountId === String(motherViaId)
-      );
-      if (viaAcc) {
-        finalCookie = viaAcc.cookieString || viaAcc.accessToken;
-        finalProxy = viaAcc.proxyUrl;
-      }
-    }
-
-    if (!finalCookie) {
-      const motherVia = allAccounts.find(
-        (a) => (a.accountType === 'PERSONAL_PROFILE_COOKIE' || a.platform === 'FACEBOOK_PROFILE') && (a.cookieString || a.accessToken)
-      );
-      if (motherVia) {
-        finalCookie = motherVia.cookieString || motherVia.accessToken;
-        finalProxy = motherVia.proxyUrl;
-      }
-    }
-
-    // Nếu người dùng yêu cầu quét sâu trực tiếp từ Facebook Profile Switcher
-    if (deepScan && finalCookie) {
-      console.log('[AvatarStudio] 🔍 Bắt đầu quét sâu trạng thái Avatar qua Facebook Switcher...');
-      const deepResult = await avatarTool.scanLiveFanpageAvatars(finalCookie, { maxRounds: 45, proxyUrl: finalProxy });
-      return res.json(deepResult);
-    }
-
-    let targets = pageIds;
-
-    // Nếu không truyền pageIds cụ thể, lấy từ DB và cache
-    if (!targets || targets.length === 0) {
-      const pagesCache = fbBuffTool.loadPagesCache();
-      const cachedPagesForVia = motherViaId ? (pagesCache[String(motherViaId)]?.pages || []) : [];
-
-      targets = cachedPagesForVia.map((p) => ({ id: p.id, name: p.name }));
-
-      if (targets.length === 0) {
-        targets = allAccounts
-          .filter((a) => a.platform !== 'FACEBOOK_GROUP')
-          .map((a) => ({ id: a.platformAccountId || a.id, name: a.pageName }));
-      }
-    }
-
-    const checkResult = await avatarTool.checkPagesAvatarStatus(targets);
-    return res.json({ success: true, ...checkResult });
-  } catch (err) {
-    console.error('[API /avatars/check-status] ❌ Lỗi:', err.message);
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Biến quản lý tác vụ cập nhật avatar đang chạy để có thể dừng (stop)
-let activeAvatarUpdateCancel = null;
-
-app.post('/api/avatars/stop', (req, res) => {
-  if (activeAvatarUpdateCancel) {
-    activeAvatarUpdateCancel();
-    activeAvatarUpdateCancel = null;
-    return res.json({ success: true, message: 'Đã gửi lệnh dừng cập nhật Avatar' });
-  }
-  return res.json({ success: true, message: 'Không có tác vụ nào đang chạy' });
-});
-
-// 3. Cập nhật Avatar hàng loạt với Realtime Progress qua Server-Sent Events (SSE)
-app.post('/api/avatars/update-stream', async (req, res) => {
-  if (!(await checkLicenseOrReject(req, res))) return;
-
-  const {
-    motherViaId,
-    cookieString: providedCookie,
-    pages = [],
-    presetCategory = 'RANDOM_MIX',
-    customImages = [],
-    delaySeconds = 4,
-    proxyUrl: providedProxy,
-  } = req.body;
-
-  // Thiết lập SSE Headers
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-
-  const sendEvent = (eventData) => {
-    res.write(`data: ${JSON.stringify(eventData)}\n\n`);
-  };
-
-  let isCancelled = false;
-  activeAvatarUpdateCancel = () => {
-    isCancelled = true;
-    sendEvent({ type: 'STOPPED', message: 'Tác vụ đã được người dùng bấm dừng.' });
-  };
-
-  req.on('close', () => {
-    isCancelled = true;
-    activeAvatarUpdateCancel = null;
-  });
-
-  try {
-    let finalCookie = providedCookie;
-    let finalProxy = providedProxy;
-
-    // Tìm cookie từ nick Mẹ trong DB nếu không truyền trực tiếp
-    if (!finalCookie && motherViaId) {
-      const allAccounts = await db.getSocialAccounts();
-      const viaAcc = allAccounts.find(
-        (a) => String(a.id) === String(motherViaId) || a.platformAccountId === String(motherViaId)
-      );
-      if (viaAcc) {
-        finalCookie = viaAcc.cookieString || viaAcc.accessToken;
-        if (!finalProxy) finalProxy = viaAcc.proxyUrl;
-      }
-    }
-
-    if (!finalCookie) {
-      sendEvent({ type: 'ERROR', error: 'Không tìm thấy Cookie của tài khoản Mẹ để thao tác!' });
-      return res.end();
-    }
-
-    sendEvent({
-      type: 'INIT',
-      total: pages.length,
-      message: `Bắt đầu cập nhật Avatar cho ${pages.length} trang Facebook...`,
-    });
-
-    const result = await avatarTool.bulkUpdateFanpageAvatars(
-      finalCookie,
-      pages,
-      {
-        presetCategory,
-        customImages,
-        delaySeconds: Number(delaySeconds) || 4,
-        proxyUrl: finalProxy || '',
-        shouldStop: () => isCancelled,
-      },
-      (progressEvt) => {
-        sendEvent(progressEvt);
-      }
-    );
-
-    sendEvent({
-      type: 'DONE',
-      success: true,
-      total: result.total,
-      updatedCount: result.updatedCount,
-      details: result.details,
-    });
-  } catch (err) {
-    console.error('[API /avatars/update-stream] ❌ Lỗi:', err.message);
-    sendEvent({ type: 'ERROR', error: err.message });
-  } finally {
-    activeAvatarUpdateCancel = null;
-    res.end();
-  }
-});
-
-// =============================================================================
-// CẬP NHẬT ẢNH BÌA HÀNG LOẠT CHO FANPAGE (COVER PHOTO STUDIO)
-// =============================================================================
-
-let activeCoverUpdateCancel = null;
-
-// Lấy danh sách Preset ảnh bìa mẫu
-app.get('/api/covers/presets', (req, res) => {
-  try {
-    const presets = avatarTool.getCoverPresets();
-    return res.json({ success: true, ...presets });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Lấy cache trạng thái ảnh bìa đã lưu
-app.get('/api/covers/cached-status', (req, res) => {
-  try {
-    const cache = avatarTool.loadCoverCache();
-    const items = Object.values(cache);
-    return res.json({
-      success: true,
-      results: cache,
-      stats: {
-        total: items.length,
-        hasCover: items.filter((i) => i.hasCover).length,
-      },
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Dừng cập nhật ảnh bìa
-app.post('/api/covers/stop', (req, res) => {
-  if (activeCoverUpdateCancel) {
-    activeCoverUpdateCancel();
-    activeCoverUpdateCancel = null;
-    return res.json({ success: true, message: 'Đã gửi lệnh dừng cập nhật Ảnh Bìa' });
-  }
-  return res.json({ success: true, message: 'Không có tác vụ nào đang chạy' });
-});
-
-// Cập nhật Ảnh Bìa hàng loạt qua SSE Stream
-app.post('/api/covers/update-stream', async (req, res) => {
-  if (!(await checkLicenseOrReject(req, res))) return;
-
-  const {
-    motherViaId,
-    cookieString: providedCookie,
-    pages = [],
-    presetCategory = 'RANDOM_COVER',
-    customImages = [],
-    delaySeconds = 4,
-    proxyUrl: providedProxy,
-  } = req.body;
-
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
-    Connection: 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-
-  const sendEvent = (eventData) => {
-    res.write(`data: ${JSON.stringify(eventData)}\n\n`);
-  };
-
-  let isCancelled = false;
-  activeCoverUpdateCancel = () => {
-    isCancelled = true;
-    sendEvent({ type: 'STOPPED', message: 'Tác vụ đã được người dùng bấm dừng.' });
-  };
-
-  req.on('close', () => {
-    isCancelled = true;
-    activeCoverUpdateCancel = null;
-  });
-
-  try {
-    let finalCookie = providedCookie;
-    let finalProxy = providedProxy;
-
-    if (!finalCookie && motherViaId) {
-      const allAccounts = await db.getSocialAccounts();
-      const viaAcc = allAccounts.find(
-        (a) => String(a.id) === String(motherViaId) || a.platformAccountId === String(motherViaId)
-      );
-      if (viaAcc) {
-        finalCookie = viaAcc.cookieString || viaAcc.accessToken;
-        if (!finalProxy) finalProxy = viaAcc.proxyUrl;
-      }
-    }
-
-    if (!finalCookie) {
-      sendEvent({ type: 'ERROR', error: 'Không tìm thấy Cookie của tài khoản Mẹ để thao tác!' });
-      return res.end();
-    }
-
-    sendEvent({
-      type: 'INIT',
-      total: pages.length,
-      message: `Bắt đầu cập nhật Ảnh Bìa cho ${pages.length} trang Facebook...`,
-    });
-
-    const result = await avatarTool.bulkUpdateFanpageCovers(
-      finalCookie,
-      pages,
-      {
-        presetCategory,
-        customImages,
-        delaySeconds: Number(delaySeconds) || 4,
-        proxyUrl: finalProxy || '',
-        shouldStop: () => isCancelled,
-      },
-      (progressEvt) => {
-        sendEvent(progressEvt);
-      }
-    );
-
-    sendEvent({
-      type: 'DONE',
-      success: true,
-      total: result.total,
-      updatedCount: result.updatedCount,
-      details: result.details,
-    });
-  } catch (err) {
-    console.error('[API /covers/update-stream] ❌ Lỗi:', err.message);
-    sendEvent({ type: 'ERROR', error: err.message });
-  } finally {
-    activeCoverUpdateCancel = null;
-    res.end();
-  }
-});
-
-// 4. API upload ảnh đại diện tùy chỉnh (Base64)
-app.post('/api/avatars/upload-custom', (req, res) => {
-  try {
-    const { base64Data } = req.body;
-    if (!base64Data) {
-      return res.status(400).json({ success: false, error: 'Thiếu dữ liệu ảnh base64' });
-    }
-    const cleanBase64 = base64Data.replace(/^data:image\/\w+;base64,/, '');
-    const extMatch = base64Data.match(/^data:image\/(\w+);base64,/);
-    const ext = extMatch ? extMatch[1] : 'jpg';
-    const safeName = `custom_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.${ext}`;
-    const targetPath = path.join(DATA_DIR, 'custom_avatars', safeName);
-
-    fs.writeFileSync(targetPath, Buffer.from(cleanBase64, 'base64'));
-    return res.json({
-      success: true,
-      filename: safeName,
-      filePath: targetPath,
-      url: `/api/avatars/custom-image/${safeName}`,
-    });
-  } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// 5. Phục vụ ảnh custom đã tải lên
-app.get('/api/avatars/custom-image/:filename', (req, res) => {
-  const filePath = path.join(DATA_DIR, 'custom_avatars', path.basename(req.params.filename));
-  if (fs.existsSync(filePath)) {
-    return res.sendFile(filePath);
-  }
-  return res.status(404).send('Không tìm thấy ảnh');
-});
-
 // Khởi động server
+
+// Nạp dữ liệu từ MySQL (hoặc chuyển JSON cũ lên MySQL lần đầu) rồi mới nhận request
+store
+  .init(db)
+  .then((r) => {
+    console.log(
+      r.dbOk
+        ? `[StateStore] ✅ Đã nạp dữ liệu từ MySQL${r.pendingSync.length ? ` (chờ đồng bộ: ${r.pendingSync.join(', ')})` : ''}.`
+        : '[StateStore] ⚠️ MySQL không dùng được, đang chạy bằng file JSON dự phòng; sẽ tự đồng bộ lại khi MySQL sống.'
+    );
+  })
+  .catch((err) => console.error('[StateStore] ❌ Lỗi khởi tạo:', err.message));
+
+// Tắt server: ghi nốt dữ liệu đang chờ
+let isShuttingDown = false;
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, async () => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    try {
+      await Promise.race([store.flush(), new Promise((r) => setTimeout(r, 4000))]);
+    } catch (_) {}
+    process.exit(0);
+  });
+}
 
 app.listen(PORT, async () => {
   console.log(`\n================================================================`);

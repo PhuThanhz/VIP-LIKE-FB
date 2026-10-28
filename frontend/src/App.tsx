@@ -8,6 +8,7 @@ import LoginPage from './components/auth/LoginPage';
 import api from './config/axios';
 import { DEFAULT_NAV_KEY } from './config/navigation';
 import { DARK_THEME } from './theme/antdTheme';
+import { WallpaperProvider } from './theme/WallpaperContext';
 import type { DbStatus } from './types/dbStatus';
 import {
   AUTH_EXPIRED_EVENT,
@@ -59,7 +60,7 @@ const useDbStatus = () => {
           applyDbStatus({
             connected: true,
             usingCache: false,
-            database: res.data.config?.database || 'autopost_saas',
+            database: res.data.config?.database || 'viplike_radiant',
             loading: false,
           });
         } else {
@@ -130,25 +131,22 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
   }, []);
 
   return (
-    <Layout className="min-h-screen !bg-app">
+    <Layout className="min-h-screen !bg-transparent">
       <Sidebar
         activeTabKey={activeTabKey}
         onSelectTab={handleSelectTab}
         collapsed={collapsed}
         onBreakpoint={handleBreakpoint}
-        onToggleCollapse={handleToggleCollapse}
         stats={stats}
       />
 
-      <Layout className="!bg-app flex flex-col min-h-screen">
+      <Layout className="!bg-transparent flex flex-col min-h-screen">
         <Header
           activeTabKey={activeTabKey}
           onOpenViaManager={openViaManager}
           onOpenSettings={openSettings}
           collapsed={collapsed}
           onToggleCollapse={handleToggleCollapse}
-          dbStatus={dbStatus}
-          onCheckDb={checkDb}
           currentUser={currentUser}
           onLogout={onLogout}
         />
@@ -232,7 +230,9 @@ export const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <ConfigProvider theme={DARK_THEME}>
-        <ThemedApp />
+        <WallpaperProvider>
+          <ThemedApp />
+        </WallpaperProvider>
       </ConfigProvider>
     </QueryClientProvider>
   );

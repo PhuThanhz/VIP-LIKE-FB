@@ -11,6 +11,7 @@ import {
   Badge,
   Tooltip,
   Drawer,
+  Modal,
   Row,
   Col,
   Avatar,
@@ -19,6 +20,7 @@ import {
   Typography,
 } from 'antd';
 import {
+  KeyOutlined,
   PlusOutlined,
   DeleteOutlined,
   ReloadOutlined,
@@ -231,6 +233,70 @@ const ShowMoreButton: React.FC<{ remaining: number; onClick: () => void }> = ({ 
     </Button>
   ) : null;
 
+/** Các trường Cookie Facebook nhập riêng (c_user và xs là bắt buộc) */
+const COOKIE_FIELDS: { key: string; label: string; required?: boolean; hint: string }[] = [
+  { key: 'c_user', label: 'c_user', required: true, hint: 'UID, dãy số' },
+  { key: 'xs', label: 'xs', required: true, hint: 'Chuỗi dài, có dấu %3A' },
+  { key: 'datr', label: 'datr', hint: 'Tuỳ chọn' },
+  { key: 'sb', label: 'sb', hint: 'Tuỳ chọn' },
+];
+
+const parseCookieParts = (cookie: string): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const f of COOKIE_FIELDS) {
+    const m = new RegExp(`(?:^|;\\s*)${f.key}=([^;]*)`).exec(cookie || '');
+    if (m) out[f.key] = m[1].trim();
+  }
+  return out;
+};
+
+const composeCookie = (parts: Record<string, string>) =>
+  COOKIE_FIELDS.filter((f) => parts[f.key]?.trim())
+    .map((f) => `${f.key}=${parts[f.key].trim()}`)
+    .join('; ');
+
+/** Ô nhập Cookie dùng được trong Form.Item: dán cả chuỗi hoặc nhập từng ô */
+const CookieInput: React.FC<{
+  value?: string;
+  onChange?: (v: string) => void;
+  mode: 'paste' | 'fields';
+}> = ({ value = '', onChange, mode }) => {
+  if (mode === 'paste') {
+    return (
+      <Input.TextArea
+        rows={3}
+        value={value}
+        onChange={(e) => onChange?.(e.target.value)}
+        placeholder="Dán Cookie vào đây"
+        className="font-mono text-xs"
+      />
+    );
+  }
+  const parts = parseCookieParts(value);
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {COOKIE_FIELDS.map((f) => (
+        <div key={f.key}>
+          <div className="flex items-baseline justify-between mb-1">
+            <label className="text-xs text-slate-300 font-mono">
+              {f.label}
+              {f.required && <span className="text-rose-400"> *</span>}
+            </label>
+            <span className="text-[11px] text-slate-500">{f.hint}</span>
+          </div>
+          <Input
+            value={parts[f.key] || ''}
+            onChange={(e) => onChange?.(composeCookie({ ...parts, [f.key]: e.target.value }))}
+            placeholder={f.key}
+            className="font-mono text-xs h-10"
+            autoComplete="off"
+          />
+        </div>
+      ))}
+    </div>
+  );
+};
+
 export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   accounts = [],
   loading = false,
@@ -246,6 +312,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   // Input states
   const [linkOrUidInput, setLinkOrUidInput] = useState('');
   const [cookieInputVal, setCookieInputVal] = useState('');
+  const [cookieMode, setCookieMode] = useState<'paste' | 'fields'>('paste');
   const [bulkInputText, setBulkInputText] = useState('');
 
   // Quản lý Fanpage của Via
@@ -259,6 +326,10 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
   // Modal Thêm thủ công Fanpage cho một Via trong Drawer
   const [manualAddText, setManualAddText] = useState('');
+  const [manualAddMode, setManualAddMode] = useState<'fields' | 'bulk'>('fields');
+  const [manualRows, setManualRows] = useState<Array<{ id: string; name: string }>>([
+    { id: '', name: '' },
+  ]);
   const [isAddingManualToDrawer, setIsAddingManualToDrawer] = useState(false);
 
   // Quản lý kiểm tra sức khỏe Fanpage
@@ -278,6 +349,16 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     country?: string;
     error?: string;
   } | null>(null);
+
+  // Modal Cập nhật / Đổi Cookie cho Via (Tách 2 dòng: c_user và xs)
+  const [updateCookieModalVia, setUpdateCookieModalVia] = useState<MotherViaAccount | null>(null);
+  const [cookieCUser, setCookieCUser] = useState('');
+  const [cookieXs, setCookieXs] = useState('');
+  const [rawCookieInput, setRawCookieInput] = useState('');
+  const [showRawCookieInput, setShowRawCookieInput] = useState(false);
+  const [newProxyInput, setNewProxyInput] = useState('');
+  const [autoRescanAfterUpdate, setAutoRescanAfterUpdate] = useState(true);
+  const [isUpdatingCookie, setIsUpdatingCookie] = useState(false);
 
   // Search filter
   const [searchText, setSearchText] = useState('');
@@ -668,7 +749,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       // Tên Via Mẹ
       const finalPageName = values.pageName?.trim() || `Via ${finalUid}`;
 
-      await api.post('/connections', {
+      const addRes = await api.post('/connections', {
         pageName: finalPageName,
         platformAccountId: finalUid,
         cookieString: cookieStr,
@@ -677,7 +758,8 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         accountType: 'PERSONAL_PROFILE_COOKIE',
       });
 
-      message.success(`Đã thêm thành công Via Mẹ: [${finalPageName}] (UID: ${finalUid})!`);
+      message.success(`Đã thêm Via ${finalPageName} (UID: ${finalUid})`);
+      if (addRes.data?.warning) message.warning({ content: addRes.data.warning, duration: 8 });
       form.resetFields();
       setLinkOrUidInput('');
       setCookieInputVal('');
@@ -706,6 +788,8 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     message.loading({ content: `Đang xử lý nạp ${lines.length} Via vào hệ thống...`, key: 'bulkAdd' });
 
     let successCount = 0;
+    let duplicateCount = 0;
+    let dbWarning = false;
     let failCount = 0;
 
     for (const line of lines) {
@@ -740,7 +824,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
         if (!cookie) continue;
 
-        await api.post('/connections', {
+        const bulkRes = await api.post('/connections', {
           pageName: name,
           platformAccountId: uid || `via_${Date.now()}`,
           cookieString: cookie,
@@ -749,8 +833,10 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
           accountType: 'PERSONAL_PROFILE_COOKIE',
         });
         successCount++;
-      } catch (e) {
-        failCount++;
+        if (bulkRes.data?.warning) dbWarning = true;
+      } catch (e: any) {
+        if (e?.response?.status === 409) duplicateCount++;
+        else failCount++;
       }
     }
 
@@ -760,13 +846,16 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
     if (successCount > 0) {
       message.success({
-        content: `Đã nạp thành công ${successCount} Via vào hệ thống!${failCount > 0 ? ` (${failCount} lỗi)` : ''}`,
+        content: `Đã nạp thành công ${successCount} Via vào hệ thống!${duplicateCount > 0 ? ` ${duplicateCount} Via đã có sẵn nên bỏ qua.` : ''}${failCount > 0 ? ` (${failCount} lỗi)` : ''}`,
         key: 'bulkAdd',
         duration: 4,
       });
+    } else if (duplicateCount > 0 && failCount === 0) {
+      message.info({ content: `Cả ${duplicateCount} Via đã có sẵn trong hệ thống, không thêm mới.`, key: 'bulkAdd' });
     } else {
-      message.error({ content: 'Không thêm được Via nào. Vui lòng kiểm tra định dạng Cookie!', key: 'bulkAdd' });
+      message.error({ content: 'Không thêm được Via nào. Vui lòng kiểm tra định dạng Cookie (cần đủ c_user và xs)!', key: 'bulkAdd' });
     }
+    if (dbWarning) message.warning({ content: 'Chưa lưu được vào MySQL, dữ liệu mới chỉ lưu tạm trên máy này. Hãy kiểm tra kết nối MySQL.', duration: 8 });
   };
 
   // Kiểm tra sống/chết của Cookie riêng từng Via Mẹ
@@ -804,8 +893,9 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   // Xóa Via Mẹ
   const handleDeleteVia = async (via: MotherViaAccount) => {
     try {
-      await api.delete(`/connections/${via.id}`);
+      const delRes = await api.delete(`/connections/${via.id}`);
       message.success(`Đã xóa tài khoản Via [${via.pageName}] khỏi hệ thống`);
+      if (delRes.data?.warning) message.warning({ content: delRes.data.warning, duration: 8 });
       onRefresh();
     } catch (err: any) {
       message.error(err.response?.data?.error || err.message);
@@ -823,14 +913,48 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     }
   };
 
-  // Thêm Page thủ công vào Via đang mở Drawer
+  // Thêm Page thủ công vào Via đang mở Drawer (hỗ trợ cả từng ô riêng & dán hàng loạt)
   const handleSaveManualToDrawer = async () => {
-    if (!selectedMotherVia || !manualAddText.trim()) {
-      message.warning('Vui lòng nhập ít nhất 1 dòng ID_PAGE | Tên Page hoặc link Facebook!');
-      return;
-    }
+    if (!selectedMotherVia) return;
     const uid = selectedMotherVia.uid;
-    const parsed = parseFanpagesInput(manualAddText);
+    let parsed: FanpageItem[] = [];
+
+    if (manualAddMode === 'fields') {
+      const validRows = manualRows.filter((r) => r.id && r.id.trim());
+      if (validRows.length === 0) {
+        message.warning('Vui lòng điền ít nhất 1 ô ID Fanpage hoặc Link Page!');
+        return;
+      }
+      for (const r of validRows) {
+        let cleanId = r.id.trim();
+        const name = r.name.trim();
+        let url = '';
+        if (cleanId.includes('facebook.com')) {
+          url = cleanId;
+          const idMatch = cleanId.match(/(?:id=|\/profile\.php\?id=|\/pages\/[^/]+\/|\/)([0-9]{8,})/);
+          if (idMatch) cleanId = idMatch[1];
+          else {
+            const vanityMatch = cleanId.match(/facebook\.com\/([a-zA-Z0-9._-]+)/);
+            cleanId = vanityMatch ? vanityMatch[1] : cleanId;
+          }
+        }
+        cleanId = cleanId.replace(/[^0-9a-zA-Z._-]/g, '');
+        if (cleanId) {
+          parsed.push({
+            id: cleanId,
+            name: name || `Fanpage ${cleanId}`,
+            url: url || `https://www.facebook.com/${cleanId}`,
+          });
+        }
+      }
+    } else {
+      if (!manualAddText.trim()) {
+        message.warning('Vui lòng nhập ít nhất 1 dòng ID_PAGE | Tên Page hoặc link Facebook!');
+        return;
+      }
+      parsed = parseFanpagesInput(manualAddText);
+    }
+
     if (parsed.length === 0) {
       message.error('Không tìm thấy ID Fanpage hợp lệ trong nội dung đã nhập!');
       return;
@@ -852,6 +976,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     await persistPagesForVia(uid, merged, selectedMotherVia.pageName || `Via ${uid}`);
     message.success(`Đã thêm ${newCount} Fanpage mới vào Via [${selectedMotherVia.pageName}]!`);
     setManualAddText('');
+    setManualRows([{ id: '', name: '' }]);
     setIsAddingManualToDrawer(false);
   };
 
@@ -871,6 +996,116 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     const uid = selectedMotherVia.uid;
     await persistPagesForVia(uid, [], selectedMotherVia.pageName);
     message.info('Đã xóa toàn bộ danh sách Fanpage quét của Via này');
+  };
+
+  // Mở modal cập nhật Cookie cho 1 Via cụ thể (tách sẵn c_user & xs)
+  const handleOpenUpdateCookieModal = (record: MotherViaAccount) => {
+    setUpdateCookieModalVia(record);
+    const existingCookie = record.cookieString || '';
+    const matchCUser = existingCookie.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1] || record.uid || '';
+    const matchXs = existingCookie.match(/(?:^|;\s*)xs=([^;]+)/)?.[1] || '';
+    setCookieCUser(matchCUser);
+    setCookieXs(matchXs);
+    setRawCookieInput(existingCookie);
+    setShowRawCookieInput(false);
+    setNewProxyInput(record.proxyUrl || '');
+    setAutoRescanAfterUpdate(true);
+  };
+
+  // Tự động phân tích khi gõ/dán vào dòng c_user
+  const handleCUserChange = (val: string) => {
+    let raw = val.trim();
+    if (raw.includes('xs=') || raw.includes(';')) {
+      const cMatch = raw.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1];
+      const xsMatch = raw.match(/(?:^|;\s*)xs=([^;]+)/)?.[1];
+      if (cMatch) setCookieCUser(cMatch);
+      if (xsMatch) setCookieXs(xsMatch);
+      if (!cMatch && !xsMatch) setCookieCUser(raw);
+    } else {
+      raw = raw.replace(/^c_user=/i, '').replace(/;$/, '').trim();
+      setCookieCUser(raw);
+    }
+  };
+
+  // Tự động phân tích khi gõ/dán vào dòng xs
+  const handleXsChange = (val: string) => {
+    let raw = val.trim();
+    if (raw.includes('c_user=') || raw.includes(';')) {
+      const cMatch = raw.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1];
+      const xsMatch = raw.match(/(?:^|;\s*)xs=([^;]+)/)?.[1];
+      if (cMatch) setCookieCUser(cMatch);
+      if (xsMatch) setCookieXs(xsMatch);
+      if (!cMatch && !xsMatch) setCookieXs(raw);
+    } else {
+      raw = raw.replace(/^xs=/i, '').replace(/;$/, '').trim();
+      setCookieXs(raw);
+    }
+  };
+
+  // Khi dán toàn bộ chuỗi gộp
+  const handleRawCookieChange = (val: string) => {
+    setRawCookieInput(val);
+    const cMatch = val.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1];
+    const xsMatch = val.match(/(?:^|;\s*)xs=([^;]+)/)?.[1];
+    if (cMatch) setCookieCUser(cMatch);
+    if (xsMatch) setCookieXs(xsMatch);
+  };
+
+  // Lưu Cookie mới cho Via (ghép từ 2 dòng c_user & xs)
+  const handleSaveNewCookie = async () => {
+    if (!updateCookieModalVia) return;
+
+    let finalCookie = '';
+    const cleanCUser = cookieCUser.trim();
+    const cleanXs = cookieXs.trim();
+
+    if (cleanCUser && cleanXs) {
+      finalCookie = `c_user=${cleanCUser}; xs=${cleanXs};`;
+    } else if (rawCookieInput.trim()) {
+      finalCookie = rawCookieInput.trim();
+    }
+
+    if (!finalCookie || (!finalCookie.includes('c_user=') && !cleanCUser) || (!finalCookie.includes('xs=') && !cleanXs)) {
+      message.error('Vui lòng điền đủ cả 2 dòng: c_user và xs!');
+      return;
+    }
+
+    try {
+      setIsUpdatingCookie(true);
+      const res = await api.post('/vias/update-cookie', {
+        uid: cleanCUser || updateCookieModalVia.uid,
+        cookieString: finalCookie,
+        proxyUrl: newProxyInput.trim(),
+      });
+
+      if (res.data?.success) {
+        message.success(`Đã cập nhật Cookie mới thành công cho Via [${updateCookieModalVia.pageName}]!`);
+        if (res.data?.warning) message.warning({ content: res.data.warning, duration: 8 });
+
+        // Quét lại Fanpage nếu người dùng chọn
+        if (autoRescanAfterUpdate) {
+          handleScanPagesForVia({
+            ...updateCookieModalVia,
+            uid: cleanCUser || updateCookieModalVia.uid,
+            cookieString: finalCookie,
+            proxyUrl: newProxyInput.trim(),
+          });
+        }
+
+        setUpdateCookieModalVia(null);
+        setCookieCUser('');
+        setCookieXs('');
+        setRawCookieInput('');
+        setNewProxyInput('');
+        onRefresh();
+      } else {
+        message.error(res.data?.error || 'Không thể cập nhật Cookie');
+      }
+    } catch (err: any) {
+      message.error(err.response?.data?.error || err.message || 'Lỗi cập nhật Cookie');
+    } finally {
+      setIsUpdatingCookie(false);
+    }
   };
 
   // Thống kê tổng số Fanpage trên toàn bộ hệ thống
@@ -980,171 +1215,108 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   }, [currentScannedPages, currentDbPages]);
 
   // Handler mới nhất cho các nút trong bảng, để cột không phải tạo lại mỗi lần render
-  const rowHandlersRef = useRef({ handleScanPagesForVia, handleTestViaProxy, handleTestViaLive, handleDeleteVia });
-  rowHandlersRef.current = { handleScanPagesForVia, handleTestViaProxy, handleTestViaLive, handleDeleteVia };
+  const rowHandlersRef = useRef({ handleScanPagesForVia, handleTestViaProxy, handleTestViaLive, handleDeleteVia, handleOpenUpdateCookieModal });
+  rowHandlersRef.current = { handleScanPagesForVia, handleTestViaProxy, handleTestViaLive, handleDeleteVia, handleOpenUpdateCookieModal };
 
   const viaColumns = useMemo<ColumnsType<MotherViaAccount>>(
     () => [
     {
-      title: 'Tài Khoản Via Mẹ (Profile)',
+      title: 'Via',
       key: 'accountInfo',
       render: (_: any, record: MotherViaAccount) => {
         const uid = record.uid;
+        const hasProfile = uid && /^[0-9]+$/.test(uid);
         return (
-          <div className="flex items-center gap-3 py-1">
-            <div className="relative">
-              <Avatar
-                src={fbAvatarSrc(uid)}
-                icon={<UserOutlined />}
-                size={44}
-                className="shrink-0 bg-slate-800 border border-slate-700 shadow-sm"
-              />
-              {record.isProfileRow && (
-                <div
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-amber-500/90 text-slate-950 flex items-center justify-center text-[10px] shadow"
-                  title="Tài khoản Via Mẹ (Profile)"
-                >
-                  <CrownOutlined />
-                </div>
-              )}
-            </div>
-
+          <div className="flex items-center gap-3 py-0.5 min-w-0">
+            <Avatar
+              src={fbAvatarSrc(uid)}
+              icon={<UserOutlined />}
+              size={40}
+              className="shrink-0 bg-slate-800 border border-slate-700"
+            />
             <div className="min-w-0">
-              <div className="font-bold text-slate-100 text-sm flex items-center gap-2">
-                <span className="truncate max-w-[180px]">{record.pageName || `Via ${uid}`}</span>
-                {record.isProfileRow ? (
-                  <Tag color="gold" className="text-[10px] font-semibold rounded px-1.5 py-0 border-0 leading-tight">
-                    👑 Via Mẹ
-                  </Tag>
-                ) : (
-                  <Tag color="cyan" className="text-[10px] font-mono rounded px-1.5 py-0 border-0 leading-tight">
-                    Account
-                  </Tag>
-                )}
-              </div>
-              <div className="text-[11px] text-slate-400 font-mono mt-0.5 flex items-center gap-2">
-                <span>UID: <span className="text-cyan-400 font-semibold">{uid}</span></span>
-                <Tooltip title="Sao chép UID">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<CopyOutlined className="text-[10px] text-slate-400 hover:text-cyan-300" />}
-                    onClick={() => {
-                      navigator.clipboard.writeText(uid);
-                      message.success(`Đã sao chép UID: ${uid}`);
-                    }}
-                    className="p-0 h-4 w-4"
-                  />
-                </Tooltip>
-              </div>
-            </div>
-          </div>
-        );
-      },
-    },
-    {
-      title: 'Link Profile Facebook',
-      key: 'facebookLink',
-      width: 170,
-      render: (_: any, record: MotherViaAccount) => {
-        const uid = record.uid;
-        const fbUrl = `https://www.facebook.com/${uid}`;
-        return (
-          <div className="space-y-1">
-            {uid && /^[0-9]+$/.test(uid) ? (
-              <a
-                href={fbUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 hover:underline font-medium"
+              {hasProfile ? (
+                <a
+                  href={`https://www.facebook.com/${uid}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Mở trang cá nhân trên Facebook"
+                  className="block text-sm font-medium text-slate-100 hover:text-blue-400 truncate max-w-[200px]"
+                >
+                  {record.pageName || `Via ${uid}`}
+                </a>
+              ) : (
+                <span className="block text-sm font-medium text-slate-100 truncate max-w-[200px]">
+                  {record.pageName || `Via ${uid}`}
+                </span>
+              )}
+              <button
+                type="button"
+                title="Sao chép UID"
+                onClick={() => {
+                  navigator.clipboard.writeText(uid);
+                  message.success(`Đã sao chép UID: ${uid}`);
+                }}
+                className="text-xs text-slate-500 hover:text-slate-300 tabular-nums bg-transparent border-0 p-0 cursor-pointer"
               >
-                <FacebookFilled className="text-sm" /> Mở Profile FB
-              </a>
-            ) : (
-              <span className="text-slate-500 text-xs italic">Không có link</span>
-            )}
-            <div className="text-[11px] text-slate-500">
-              Gốc: #{record.id} ({record.rawAccounts.length} bản ghi DB)
+                {uid}
+              </button>
             </div>
           </div>
         );
       },
     },
     {
-      title: 'Dàn Fanpage & Nhóm Trực Thuộc',
+      title: 'Fanpage',
       key: 'pages',
       render: (_: any, record: MotherViaAccount) => {
         const uid = record.uid;
         const isScanning = scanningUids.has(uid);
         const totalCount = record.totalUniquePagesCount || record.scannedPages.length;
+        const parts = [
+          `${record.scannedPages.length} đã quét`,
+          record.dbPages.length > 0 ? `${record.dbPages.length} đã lưu` : '',
+          record.dbGroups.length > 0 ? `${record.dbGroups.length} nhóm` : '',
+        ].filter(Boolean);
 
         return (
-          <div className="space-y-2 py-1">
-            {/* Tags đếm số lượng */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <Tag
-                color={record.scannedPages.length > 0 ? 'cyan' : 'default'}
-                className="font-mono text-xs font-bold rounded-lg px-2 py-0.5 border-0 flex items-center gap-1"
-              >
-                <ThunderboltOutlined />
-                <span>{record.scannedPages.length > 0 ? `${record.scannedPages.length} Page Quét` : '0 Page quét'}</span>
-              </Tag>
-
-              {record.dbPages.length > 0 && (
-                <Tag color="purple" className="text-xs rounded-lg px-2 py-0.5 border-0 flex items-center gap-1">
-                  <AppstoreOutlined />
-                  <span>{record.dbPages.length} Page DB</span>
-                </Tag>
-              )}
-
-              {record.dbGroups.length > 0 && (
-                <Tag color="blue" className="text-xs rounded-lg px-2 py-0.5 border-0 flex items-center gap-1">
-                  <TeamOutlined />
-                  <span>{record.dbGroups.length} Nhóm</span>
-                </Tag>
-              )}
-            </div>
-
-            {/* Các nút hành động thao tác với dàn Page của Via này */}
-            <div className="flex items-center gap-2 pt-0.5">
-              <Tooltip title="Mở trình duyệt Playwright quét toàn bộ Fanpage được quản lý bởi nick này">
+          <div className="space-y-1.5 py-0.5">
+            <div className="text-sm text-slate-300 tabular-nums">{parts.join(' · ')}</div>
+            <div className="flex items-center gap-1">
+              <Tooltip title="Mở trình duyệt để quét các Fanpage mà Via này quản lý">
                 <Button
                   size="small"
                   type="primary"
                   loading={isScanning}
-                  icon={<ThunderboltOutlined />}
                   onClick={() => rowHandlersRef.current.handleScanPagesForVia(record)}
-                  className="bg-cyan-600 hover:bg-cyan-500 text-xs rounded-lg font-semibold border-0 h-7 px-2.5"
                 >
                   {isScanning ? 'Đang quét...' : 'Quét Page'}
                 </Button>
               </Tooltip>
-
               <Button
                 size="small"
-                icon={<EyeOutlined />}
+                type="text"
                 onClick={() => {
                   setSelectedMotherVia(record);
                   setIsPageDrawerOpen(true);
                   setDrawerActiveTab('scanned');
                 }}
-                className="bg-slate-900 border-slate-700 hover:border-cyan-500 text-cyan-300 text-xs rounded-lg font-semibold h-7 px-2.5"
+                className="text-slate-300"
               >
-                Xem Dàn Page ({totalCount})
+                Xem ({totalCount})
               </Button>
-
-              <Tooltip title="Dán danh sách ID / Link Fanpage thủ công cho riêng Via này">
+              <Tooltip title="Dán danh sách ID / link Fanpage thủ công cho riêng Via này">
                 <Button
                   size="small"
-                  icon={<PlusOutlined />}
+                  type="text"
                   onClick={() => {
                     setSelectedMotherVia(record);
                     setIsPageDrawerOpen(true);
                     setIsAddingManualToDrawer(true);
                   }}
-                  className="bg-slate-800/80 border-slate-700 text-slate-300 text-xs rounded-lg h-7 px-2"
+                  className="text-slate-300"
                 >
-                  + Dán Page
+                  Thêm
                 </Button>
               </Tooltip>
             </div>
@@ -1153,80 +1325,69 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       },
     },
     {
-      title: 'Proxy Riêng',
+      title: 'Proxy',
       key: 'proxyUrl',
-      width: 200,
+      width: 190,
       render: (_: any, record: MotherViaAccount) => {
         const val = record.proxyUrl;
         const health = viaProxyHealthMap[record.id];
         const isTesting = testingProxyVias.has(record.id);
 
-        return val ? (
-          <div className="flex flex-col gap-1 items-start">
-            <div className="flex items-center gap-1.5">
+        if (!val) return <span className="text-sm text-slate-500">Mạng máy</span>;
+        return (
+          <div className="leading-tight">
+            <div className="flex items-center gap-2">
               <Tooltip title={val}>
-                <Tag color="blue" className="font-mono text-xs rounded-lg px-2 py-0.5 border-0 flex items-center gap-1 max-w-[130px] truncate">
-                  <GlobalOutlined /> {val.replace(/:[^:]+@/, ':***@').slice(0, 14)}...
-                </Tag>
+                <span className="text-sm text-slate-300 truncate max-w-[120px] tabular-nums">
+                  {val.replace(/:[^:]+@/, ':***@').replace(/^[a-z0-9]+:\/\//i, '').slice(0, 18)}
+                </span>
               </Tooltip>
-              <Tooltip title="Kiểm tra kết nối và độ trễ Proxy này ngay">
-                <Button
-                  size="small"
-                  type="text"
-                  loading={isTesting}
-                  onClick={() => rowHandlersRef.current.handleTestViaProxy(record)}
-                  className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-950/40 px-1 py-0 h-6 text-xs rounded font-semibold"
-                >
-                  ⚡ Test
-                </Button>
-              </Tooltip>
+              <Button
+                size="small"
+                type="link"
+                loading={isTesting}
+                onClick={() => rowHandlersRef.current.handleTestViaProxy(record)}
+                className="p-0 h-auto text-xs"
+              >
+                Kiểm tra
+              </Button>
             </div>
             {health && (
-              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                health.success ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-              }`}>
-                {health.success ? `● LIVE (${health.latencyMs}ms · ${health.country || 'Global'})` : '● DEAD / LỖI'}
-              </span>
+              <div className={`text-xs mt-1 ${health.success ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {health.success ? `Hoạt động · ${health.latencyMs}ms${health.country ? ` · ${health.country}` : ''}` : 'Không kết nối được'}
+              </div>
             )}
           </div>
-        ) : (
-          <span className="text-slate-500 text-xs italic flex items-center gap-1">
-            <CompassOutlined /> Direct (Mạng máy)
-          </span>
         );
       },
     },
     {
-      title: 'Trạng Thái Nick',
+      title: 'Trạng thái',
       key: 'tokenStatus',
-      width: 140,
+      width: 150,
       render: (_: any, record: MotherViaAccount) => {
         const isLive = record.tokenStatus === 'OK';
         const isTesting = testingCookieIds.has(record.id);
+        const statusText = isLive
+          ? 'Hoạt động'
+          : record.tokenStatus === 'CHECKPOINT'
+          ? 'Checkpoint'
+          : 'Hết hạn';
         return (
           <div className="flex items-center gap-2">
-            {isLive ? (
-              <Badge
-                status="success"
-                text={<span className="text-emerald-400 font-bold text-xs">LIVE</span>}
-              />
-            ) : (
-              <Badge
-                status="error"
-                text={<span className="text-rose-400 font-bold text-xs">{record.tokenStatus || 'CHECKPOINT'}</span>}
-              />
-            )}
-
-            <Tooltip title="Kiểm tra Cookie còn sống hay đã checkpoint">
+            <span className={`inline-flex items-center gap-1.5 text-sm ${isLive ? 'text-emerald-400' : 'text-rose-400'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+              {statusText}
+            </span>
+            <Tooltip title="Kiểm tra Cookie còn sống hay không">
               <Button
                 size="small"
-                type="text"
+                type="link"
                 loading={isTesting}
-                icon={<SyncOutlined className="text-[11px]" />}
                 onClick={() => rowHandlersRef.current.handleTestViaLive(record)}
-                className="text-slate-400 hover:text-cyan-300 text-[11px] p-0 h-5"
+                className="p-0 h-auto text-xs"
               >
-                Check
+                Kiểm tra
               </Button>
             </Tooltip>
           </div>
@@ -1234,32 +1395,35 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       },
     },
     {
-      title: 'Thao Tác',
+      title: '',
       key: 'actions',
       align: 'right',
-      width: 100,
-      render: (_: any, record: MotherViaAccount) => {
-        return (
+      width: 150,
+      render: (_: any, record: MotherViaAccount) => (
+        <div className="flex items-center justify-end gap-1">
+          <Button size="small" onClick={() => rowHandlersRef.current.handleOpenUpdateCookieModal(record)}>
+            Đổi Cookie
+          </Button>
           <Popconfirm
             title={`Xóa tài khoản Via [${record.pageName}]?`}
-            description="Tài khoản mẹ và các liên kết dàn Page sẽ bị xóa khỏi hệ thống."
+            description="Via và các Fanpage liên kết sẽ bị xoá khỏi hệ thống."
             onConfirm={() => rowHandlersRef.current.handleDeleteVia(record)}
             okText="Xóa luôn"
             cancelText="Hủy"
             okButtonProps={{ danger: true }}
           >
-            <Button
-              size="small"
-              type="text"
-              danger
-              icon={<DeleteOutlined />}
-              className="hover:bg-rose-950/40 rounded-lg text-slate-400 hover:text-rose-400"
-            >
-              Xóa
-            </Button>
+            <Tooltip title="Xoá Via">
+              <Button
+                size="small"
+                type="text"
+                icon={<DeleteOutlined />}
+                className="text-slate-500 hover:!text-rose-400"
+                aria-label="Xoá Via"
+              />
+            </Tooltip>
           </Popconfirm>
-        );
-      },
+        </div>
+      ),
     },
     ],
     [scanningUids, testingCookieIds, testingProxyVias, viaProxyHealthMap]
@@ -1267,187 +1431,84 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
   return (
     <div className="space-y-6 max-w-[1440px] mx-auto pb-20">
-      {/* 💡 INTUITIVE HOW-IT-WORKS BANNER FOR UNTRAINED USERS */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-cyan-950/40 border border-blue-500/30 shadow-md">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-bold text-base shrink-0 mt-0.5">
-              💡
-            </div>
-            <div>
-              <div className="text-sm font-bold text-white flex items-center gap-2">
-                <span>Cách thức hoạt động: Tài khoản Mẹ (Via) quản lý dàn Fanpage vệ tinh</span>
-                <Tag color="cyan" className="text-[10px] px-1.5 py-0 border-0 rounded-md">Tự Động Nhận Diện</Tag>
-              </div>
-              <p className="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
-                Bạn chỉ cần thêm Cookie của <b>Tài Khoản Mẹ (Via)</b>. Hệ thống sẽ tự động quét và nhận diện toàn bộ <b>500+ Fanpage con</b> trực thuộc để phục vụ việc buff like, thả tim và bình luận seeding. Không cần đăng nhập mật khẩu từng Page!
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => {
-                const el = document.getElementById('add-via-section');
-                if (el) el.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className="bg-blue-600 hover:bg-blue-500 text-on-accent font-bold text-xs h-9 px-3.5 rounded-xl border-none shadow-md cursor-pointer"
-            >
-              + Thêm Via Mẹ Mới
-            </Button>
-            <Button
-              icon={<ReloadOutlined spin={loading} />}
-              onClick={() => {
-                onRefresh();
-                loadCachedPages();
-                message.success('Đã làm mới danh sách dàn Via');
-              }}
-              className="bg-slate-900 border-slate-700 text-slate-200 hover:border-cyan-500 text-xs h-9 px-3 rounded-xl font-semibold cursor-pointer"
-            >
-              Quét Lại Toàn Bộ
-            </Button>
-          </div>
+      {/* Tiêu đề + thao tác nhanh */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-100 m-0">Tài khoản Via</h2>
+          <p className="text-xs text-slate-400 m-0 mt-1">
+            Thêm Cookie của Via, hệ thống tự quét các Fanpage mà Via đang quản lý.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            loading={loading}
+            onClick={() => {
+              onRefresh();
+              loadCachedPages();
+              message.success('Đã làm mới danh sách Via');
+            }}
+          >
+            Làm mới
+          </Button>
+          {onNavigateToBuff && <Button onClick={onNavigateToBuff}>Sang Buff Like</Button>}
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => document.getElementById('add-via-section')?.scrollIntoView({ behavior: 'smooth' })}
+          >
+            Thêm Via
+          </Button>
         </div>
       </div>
 
-      {/* 1. TOP STATS OVERVIEW CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1: Tổng số Via Mẹ */}
-        <div className="app-surface p-4 flex items-center justify-between border-l-4 border-sky-500 shadow-md">
-          <div>
-            <div className="text-xs text-slate-400 font-medium uppercase tracking-wider flex items-center gap-1.5">
-              <span>Via Facebook Chính (Mẹ)</span>
-              <CrownOutlined className="text-amber-400 text-xs" />
-            </div>
-            <div className="text-2xl font-black text-white mt-1 flex items-baseline gap-2">
-              <span>{motherVias.length}</span>
-              <span className="text-xs font-normal text-slate-400">Via mẹ</span>
-            </div>
-            <div className="text-[11px] text-emerald-400 mt-1 font-semibold flex items-center gap-1">
-              <CheckCircleFilled /> {liveViaCount} Nick Live
-            </div>
-          </div>
-          <div className="w-11 h-11 rounded-xl bg-sky-950/80 border border-sky-800/60 flex items-center justify-center text-sky-400 text-xl">
-            <UserOutlined />
+      {/* Số liệu tổng quan */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="app-surface p-4 rounded-xl">
+          <div className="text-xs text-slate-400">Via</div>
+          <div className="text-2xl font-semibold text-slate-100 mt-1 tabular-nums">{motherVias.length}</div>
+          <div className="text-xs text-slate-500 mt-1">
+            <span className="text-emerald-400">{liveViaCount}</span> đang hoạt động
           </div>
         </div>
 
-        {/* Card 2: Dàn Fanpage Trực Thuộc */}
-        <div className="app-surface p-4 flex items-center justify-between border-l-4 border-cyan-500 shadow-md">
-          <div>
-            <div className="text-xs text-slate-400 font-medium uppercase tracking-wider flex items-center gap-1.5">
-              <span>Dàn Fanpage Trực Thuộc</span>
-              <ClusterOutlined className="text-cyan-400 text-xs" />
-            </div>
-            <div className="text-2xl font-black text-cyan-300 mt-1 flex items-baseline gap-2">
-              <span>{totalPagesCount}</span>
-              <span className="text-xs font-normal text-slate-400">Page</span>
-            </div>
-            <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5">
-              <Tag color="cyan" className="m-0 text-[10px] px-1 py-0 leading-tight border-0">
-                {totalPagesCount} Quét
-              </Tag>
-              <Tag color="purple" className="m-0 text-[10px] px-1 py-0 leading-tight border-0">
-                {totalDbPagesCount} DB
-              </Tag>
-              {totalDbGroupsCount > 0 && (
-                <Tag color="blue" className="m-0 text-[10px] px-1 py-0 leading-tight border-0">
-                  {totalDbGroupsCount} Nhóm
-                </Tag>
-              )}
-            </div>
-          </div>
-          <div className="w-11 h-11 rounded-xl bg-cyan-950/80 border border-cyan-800/60 flex items-center justify-center text-cyan-400 text-xl">
-            <ThunderboltOutlined />
+        <div className="app-surface p-4 rounded-xl">
+          <div className="text-xs text-slate-400">Fanpage</div>
+          <div className="text-2xl font-semibold text-slate-100 mt-1 tabular-nums">{totalPagesCount}</div>
+          <div className="text-xs text-slate-500 mt-1 tabular-nums">
+            {totalDbPagesCount} đã lưu{totalDbGroupsCount > 0 ? ` · ${totalDbGroupsCount} nhóm` : ''}
           </div>
         </div>
 
-        {/* Card 3: Trạng thái Lưu Trữ Dữ Liệu */}
-        <div className="app-surface p-4 flex items-center justify-between border-l-4 border-emerald-500 shadow-md">
-          <div className="min-w-0">
-            <div className="text-xs text-slate-400 font-medium uppercase tracking-wider">Kho Lưu Trữ Dữ Liệu</div>
-            <div className="text-base font-bold text-slate-100 mt-1 truncate">
-              {dbStatus.connected ? 'Đã Đồng Bộ An Toàn' : dbStatus.usingCache ? 'Bộ Nhớ Đệm Tạm Thời' : 'Ngoại tuyến'}
-            </div>
-            <div className="text-[11px] mt-1 font-mono">
-              {dbStatus.connected ? (
-                <span className="text-emerald-400 font-bold">● SẴN SÀNG: Bảo Mật Đa Tầng</span>
-              ) : dbStatus.usingCache ? (
-                <span className="text-amber-400 font-semibold">● BỘ NHỚ ĐỆM ({accounts.length} Hồ sơ)</span>
-              ) : (
-                <span className="text-rose-400 font-semibold">● NGOẠI TUYẾN</span>
-              )}
-            </div>
+        <button
+          type="button"
+          onClick={onCheckDb}
+          title="Bấm để kiểm tra lại"
+          className="app-surface p-4 rounded-xl text-left cursor-pointer hover:border-slate-600 transition-colors"
+        >
+          <div className="text-xs text-slate-400">Lưu trữ</div>
+          <div className="text-base font-semibold text-slate-100 mt-1.5 flex items-center gap-2">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                dbStatus.connected ? 'bg-emerald-400' : dbStatus.usingCache ? 'bg-amber-400' : 'bg-rose-500'
+              }`}
+            />
+            {dbStatus.connected ? 'Đã đồng bộ' : dbStatus.usingCache ? 'Đang dùng bộ nhớ đệm' : 'Mất kết nối'}
           </div>
-          <div
-            onClick={onCheckDb}
-            className="w-11 h-11 rounded-xl bg-slate-900 border border-slate-700/80 hover:border-slate-500 flex items-center justify-center text-slate-300 text-lg cursor-pointer"
-            title="Nhấp để kiểm tra trạng thái lưu trữ"
-          >
-            <DatabaseOutlined />
+          <div className="text-xs text-slate-500 mt-1">
+            {dbStatus.usingCache && !dbStatus.connected ? `${accounts.length} hồ sơ tạm` : 'Bấm để kiểm tra lại'}
           </div>
-        </div>
-
-        {/* Card 4: Thao tác & Đồng bộ */}
-        <div className="app-surface p-4 flex items-center justify-between border-l-4 border-indigo-500 shadow-md">
-          <div>
-            <div className="text-xs text-slate-400 font-medium uppercase tracking-wider">Đồng Bộ & Điều Hướng</div>
-            <div className="text-xs text-slate-300 mt-1.5 flex flex-wrap gap-2">
-              <Button
-                size="small"
-                icon={<ReloadOutlined />}
-                loading={loading}
-                onClick={() => {
-                  onRefresh();
-                  loadCachedPages();
-                  message.success('Đã làm mới danh sách dàn Via');
-                }}
-                className="bg-slate-900 border-slate-700 text-slate-200 text-xs rounded-lg hover:border-slate-500"
-              >
-                Làm mới
-              </Button>
-              {onNavigateToBuff && (
-                <Button
-                  size="small"
-                  type="primary"
-                  icon={<SendOutlined />}
-                  onClick={onNavigateToBuff}
-                  className="bg-cyan-600 hover:bg-cyan-500 text-xs rounded-lg font-semibold"
-                >
-                  Sang Buff Like
-                </Button>
-              )}
-            </div>
-          </div>
-          <div className="w-11 h-11 rounded-xl bg-indigo-950/80 border border-indigo-800/60 flex items-center justify-center text-indigo-400 text-xl">
-            <SafetyCertificateOutlined />
-          </div>
-        </div>
+        </button>
       </div>
 
       {/* 2. BƯỚC 1: NHẬP & KÍCH HOẠT VIA MỚI (CHUYÊN BIỆT ADD VIA MẸ - KHÔNG LẪN LỘN FANPAGE) */}
-      <div id="add-via-section" className="app-surface p-5 border border-cyan-500/30 shadow-xl shadow-cyan-950/20 rounded-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-80 h-36 bg-gradient-to-bl from-cyan-500/10 via-blue-500/5 to-transparent blur-2xl pointer-events-none" />
+      <div id="add-via-section" className="app-surface p-5 rounded-2xl">
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-800/80">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-on-accent font-bold text-sm shadow-md shadow-cyan-500/20">
-              1
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-100 m-0 flex items-center gap-2">
-                <span>Nhập & Thêm Via Mới Vào Hệ Thống</span>
-                {recognizedUid && (
-                  <Tag color="cyan" className="font-mono text-xs font-bold rounded-full px-2 border-0">
-                    UID Nhận Diện: {recognizedUid}
-                  </Tag>
-                )}
-              </h3>
-              <p className="text-xs text-slate-400 m-0 mt-0.5">
-                Chỉ cần nhập Via trước (Link Facebook, Tên gợi nhớ, Cookie, Proxy). Hệ thống sẽ tự động phân loại đây là <b>Via Mẹ</b> và cho phép bạn Quét toàn bộ dàn Fanpage con trực thuộc sau.
-              </p>
-            </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-base font-semibold text-slate-100 m-0">Thêm Via</h3>
+            {recognizedUid && (
+              <span className="text-xs text-slate-400 tabular-nums">UID: <span className="text-slate-200">{recognizedUid}</span></span>
+            )}
           </div>
 
           {/* Chọn chế độ: Nhập 1 Via vs Nhập Hàng Loạt */}
@@ -1455,31 +1516,33 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             value={addMode}
             onChange={(val) => setAddMode(val as 'single' | 'bulk')}
             options={[
-              { label: '📝 Nhập từng Via (Từng ô rõ ràng)', value: 'single' },
-              { label: '📋 Nhập hàng loạt nhiều Via (Dán cột)', value: 'bulk' },
+              { label: 'Từng tài khoản', value: 'single' },
+              { label: 'Hàng loạt', value: 'bulk' },
             ]}
-            className="bg-slate-950 border border-slate-700/80 p-1 text-xs font-bold text-slate-200"
           />
         </div>
 
         {/* CHẾ ĐỘ 1: NHẬP TỪNG VIA THEO TỪNG CỘT RÕ RÀNG */}
         {addMode === 'single' ? (
-          <Form form={form} layout="vertical" onFinish={handleAddSingleVia}>
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={handleAddSingleVia}
+            onValuesChange={(changed) => {
+              if ('cookieString' in changed) setCookieInputVal(changed.cookieString || '');
+            }}
+          >
             <Row gutter={16}>
               {/* Cột 1: Tên gợi nhớ */}
               <Col xs={24} sm={12} lg={6}>
                 <Form.Item
-                  label={
-                    <span className="text-xs font-semibold text-slate-200">
-                      1. Tên gợi nhớ Via <span className="text-slate-500 font-normal">(Tùy chọn)</span>
-                    </span>
-                  }
+                  label={<span className="text-xs text-slate-300">Tên gợi nhớ <span className="text-slate-500">(tuỳ chọn)</span></span>}
                   name="pageName"
                   className="mb-3"
                 >
                   <Input
-                    placeholder="Ví dụ: Thành An, Nick Nuôi 01"
-                    className="bg-slate-950 border-slate-700/80 text-slate-100 text-xs rounded-xl h-10 hover:border-cyan-500 focus:border-cyan-500"
+                    placeholder="VD: Via 01"
+                    className="h-10"
                   />
                 </Form.Item>
               </Col>
@@ -1487,20 +1550,15 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
               {/* Cột 2: Link Facebook hoặc UID */}
               <Col xs={24} sm={12} lg={6}>
                 <Form.Item
-                  label={
-                    <span className="text-xs font-semibold text-slate-200">
-                      2. Link Facebook / UID Via <span className="text-slate-500 font-normal">(Tùy chọn)</span>
-                    </span>
-                  }
+                  label={<span className="text-xs text-slate-300">Link hoặc UID <span className="text-slate-500">(tuỳ chọn)</span></span>}
                   name="profileUrl"
                   className="mb-3"
                 >
                   <Input
                     value={linkOrUidInput}
                     onChange={(e) => setLinkOrUidInput(e.target.value)}
-                    placeholder="https://facebook.com/1000... hoặc 1000898..."
-                    prefix={<FacebookFilled className="text-blue-400" />}
-                    className="bg-slate-950 border-slate-700/80 text-slate-100 font-mono text-xs rounded-xl h-10 hover:border-cyan-500 focus:border-cyan-500"
+                    placeholder="facebook.com/... hoặc UID"
+                    className="h-10"
                   />
                 </Form.Item>
               </Col>
@@ -1510,17 +1568,15 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                 <Form.Item
                   label={
                     <div className="flex items-center justify-between w-full">
-                      <span className="text-xs font-semibold text-slate-200">
-                        3. Proxy riêng cho Via <span className="text-slate-500 font-normal">(Tùy chọn, để trống dùng IP máy)</span>
-                      </span>
+                      <span className="text-xs text-slate-300">Proxy <span className="text-slate-500">(tuỳ chọn)</span></span>
                       <Button
                         type="link"
                         size="small"
                         loading={isTestingModalProxy}
                         onClick={handleTestModalProxy}
-                        className="text-cyan-400 hover:text-cyan-300 p-0 text-xs font-semibold h-auto"
+                        className="p-0 text-xs h-auto"
                       >
-                        ⚡ Kiểm tra Proxy
+                        Kiểm tra
                       </Button>
                     </div>
                   }
@@ -1528,9 +1584,8 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   className="mb-1"
                 >
                   <Input
-                    placeholder="ip:port:user:pass hoặc http(s)/socks5://user:pass@ip:port"
-                    prefix={<GlobalOutlined className="text-slate-400" />}
-                    className="bg-slate-950 border-slate-700/80 text-slate-100 font-mono text-xs rounded-xl h-10 hover:border-cyan-500 focus:border-cyan-500"
+                    placeholder="Để trống để dùng IP máy · ip:port:user:pass hoặc socks5://..."
+                    className="h-10"
                   />
                 </Form.Item>
                 {modalProxyTestResult && (
@@ -1540,46 +1595,61 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                       : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
                   }`}>
                     {modalProxyTestResult.success ? (
-                      <span>✅ <b>LIVE</b> — IP: <span className="font-mono">{modalProxyTestResult.ip}</span> ({modalProxyTestResult.country || 'Global'}) | Ping: <b>{modalProxyTestResult.latencyMs}ms</b></span>
+                      <span>Hoạt động · IP: <span className="font-mono">{modalProxyTestResult.ip}</span> ({modalProxyTestResult.country || 'Global'}) · {modalProxyTestResult.latencyMs}ms</span>
                     ) : (
-                      <span>❌ <b>LỖI</b> — {modalProxyTestResult.error}</span>
+                      <span>Lỗi · {modalProxyTestResult.error}</span>
                     )}
                   </div>
                 )}
               </Col>
 
-              {/* Cột 4: Chuỗi Cookie Facebook (Bắt buộc) */}
+              {/* Cookie Facebook (bắt buộc): dán cả chuỗi hoặc nhập từng ô */}
               <Col xs={24}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-slate-300">
+                    <span className="text-rose-400">* </span>Cookie
+                  </span>
+                  <Segmented
+                    size="small"
+                    value={cookieMode}
+                    onChange={(v) => setCookieMode(v as 'paste' | 'fields')}
+                    options={[
+                      { label: 'Dán cả chuỗi', value: 'paste' },
+                      { label: 'Nhập từng ô', value: 'fields' },
+                    ]}
+                  />
+                </div>
                 <Form.Item
-                  label={
-                    <div className="flex items-center justify-between w-full">
-                      <span className="text-xs font-semibold text-slate-200">
-                        4. Chuỗi Cookie Facebook của Nick Mẹ <span className="text-rose-400">*</span>
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        Hỗ trợ cả chuỗi Cookie riêng lẻ (<code className="text-cyan-300">c_user=...; xs=...</code>) hoặc chuỗi full (<code className="text-cyan-300">UID|PASS|2FA|COOKIE...</code>)
-                      </span>
-                    </div>
-                  }
                   name="cookieString"
-                  rules={[{ required: true, message: 'Vui lòng dán chuỗi Cookie Facebook!' }]}
+                  rules={[
+                    { required: true, message: 'Vui lòng nhập Cookie Facebook!' },
+                    {
+                      validator: (_, v) =>
+                        cookieMode === 'fields' && v && !(/c_user=/.test(v) && /xs=/.test(v))
+                          ? Promise.reject(new Error('Cần nhập đủ c_user và xs'))
+                          : Promise.resolve(),
+                    },
+                  ]}
+                  extra={
+                    cookieMode === 'paste' ? (
+                      <span className="text-[11px] text-slate-500">
+                        Dạng <code>c_user=...; xs=...</code> hoặc <code>UID|PASS|2FA|COOKIE</code>
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-slate-500">
+                        Lấy các giá trị này trong trình duyệt (F12 → Application → Cookies → facebook.com).
+                      </span>
+                    )
+                  }
                   className="mb-3"
                 >
-                  <Input.TextArea
-                    rows={3}
-                    value={cookieInputVal}
-                    onChange={(e) => setCookieInputVal(e.target.value)}
-                    placeholder="Dán Cookie vào đây: c_user=1000...; xs=...; sb=... hoặc chuỗi UID|Pass|2FA|c_user=...; xs=..."
-                    className="bg-slate-950 border-slate-700/80 text-slate-100 font-mono text-xs rounded-xl hover:border-cyan-500 focus:border-cyan-500"
-                  />
+                  <CookieInput mode={cookieMode} />
                 </Form.Item>
               </Col>
             </Row>
 
             <div className="flex items-center justify-between pt-2">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                <span className="text-cyan-400 font-bold">Quy trình chuẩn:</span> 1. Thêm Via Mẹ ➔ 2. Bấm <b>"Quét Page"</b> để lấy tự động hàng trăm Fanpage con thuộc nick đó!
-              </div>
+              <div className="text-xs text-slate-500">Sau khi thêm, bấm “Quét Page” ở danh sách bên dưới để lấy Fanpage.</div>
 
               <div className="flex items-center gap-3">
                 <Button
@@ -1588,18 +1658,17 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                     setLinkOrUidInput('');
                     setCookieInputVal('');
                   }}
-                  className="rounded-xl border-slate-700 text-slate-400 hover:text-slate-200 text-xs px-4 h-10"
+                  type="text"
                 >
-                  Làm trống ô
+                  Xoá nội dung
                 </Button>
                 <Button
                   type="primary"
                   htmlType="submit"
                   loading={submitting}
-                  icon={<PlusCircleFilled />}
-                  className="bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-on-accent font-bold text-xs rounded-xl px-6 h-10 shadow-lg shadow-cyan-500/20 border-0 flex items-center gap-2"
+                  className="px-5"
                 >
-                  Lưu & Thêm Via Ngay
+                  Thêm Via
                 </Button>
               </div>
             </div>
@@ -1654,27 +1723,15 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       {/* 3. BƯỚC 2: BẢNG QUẢN LÝ VIA MẸ & DÀN FANPAGE TRỰC THUỘC */}
       <div className="app-surface p-5 space-y-4 rounded-2xl shadow-xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 font-bold text-sm">
-              2
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-100 m-0 flex items-center gap-2">
-                <span>Danh Sách Via Mẹ Facebook Đã Kích Hoạt</span>
-                <Tag color="cyan" className="font-mono text-xs font-bold rounded-full px-2 border-0">
-                  {filteredMotherVias.length} Nick Mẹ
-                </Tag>
-              </h3>
-              <p className="text-xs text-slate-400 m-0 mt-0.5">
-                Mỗi dòng là <b>1 Via Mẹ duy nhất</b> kèm toàn bộ Dàn Fanpage & Nhóm trực thuộc. Bấm <b>"Xem Dàn Page"</b> để quản lý chi tiết hoặc bấm <b>"Quét Page"</b> để tự động đồng bộ.
-              </p>
-            </div>
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold text-slate-100 m-0">Danh sách Via</h3>
+            <span className="text-xs text-slate-500 tabular-nums">{filteredMotherVias.length}</span>
           </div>
 
           {/* Search box & Refresh */}
           <div className="flex items-center gap-2.5">
             <Input
-              placeholder="Tìm theo tên Via Mẹ, UID hoặc Fanpage con..."
+              placeholder="Tìm theo tên Via, UID hoặc Fanpage..."
               prefix={<SearchOutlined className="text-slate-400" />}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
@@ -1763,7 +1820,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   <div className="font-bold text-white text-sm truncate flex items-center gap-2">
                     <span>{activeDrawerVia.pageName}</span>
                     <Tag color="gold" className="text-[10px] px-1 py-0 border-0 leading-tight">
-                      Via Mẹ
+                      Via
                     </Tag>
                   </div>
                   <div className="text-xs text-slate-400 font-mono flex items-center gap-2 mt-0.5">
@@ -1821,38 +1878,134 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                 <Button
                   size="small"
                   icon={<PlusOutlined />}
-                  onClick={() => setIsAddingManualToDrawer(!isAddingManualToDrawer)}
-                  className="bg-slate-800 border-slate-700 text-slate-200 text-xs rounded-lg"
+                  onClick={() => {
+                    setIsAddingManualToDrawer(!isAddingManualToDrawer);
+                    if (!isAddingManualToDrawer && manualRows.length === 0) {
+                      setManualRows([{ id: '', name: '' }]);
+                    }
+                  }}
+                  className="bg-slate-800 border-slate-700 text-slate-200 text-xs rounded-lg hover:border-cyan-500 hover:text-cyan-400"
                 >
-                  {isAddingManualToDrawer ? 'Đóng ô dán' : '+ Dán thêm Page'}
+                  {isAddingManualToDrawer ? 'Đóng ô thêm' : '+ Thêm Fanpage'}
                 </Button>
               </div>
             </div>
 
-            {/* Form dán thêm Page thủ công */}
+            {/* Form thêm Page thủ công: Chia theo ô rõ ràng hoặc Dán hàng loạt */}
             {isAddingManualToDrawer && (
-              <div className="p-3.5 rounded-xl bg-slate-900/90 border border-cyan-500/30 space-y-2.5">
-                <div className="text-xs font-semibold text-cyan-300">
-                  Dán thêm danh sách Fanpage con cho riêng Via này:
+              <div className="p-4 rounded-xl bg-slate-900/95 border border-cyan-500/40 space-y-3 shadow-xl">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+                  <div className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                    <PlusCircleFilled className="text-cyan-400" />
+                    <span>Thêm Fanpage con cho riêng Via này:</span>
+                  </div>
+                  <Segmented
+                    size="small"
+                    value={manualAddMode}
+                    onChange={(val) => setManualAddMode(val as 'fields' | 'bulk')}
+                    options={[
+                      { label: 'Từng ô rõ ràng', value: 'fields' },
+                      { label: 'Dán hàng loạt', value: 'bulk' },
+                    ]}
+                    className="bg-slate-950 border border-slate-800 text-xs"
+                  />
                 </div>
-                <div className="text-[11px] text-slate-400">
-                  Định dạng: <code className="text-cyan-300">ID_PAGE | Tên Page</code> hoặc dán URL Facebook (mỗi dòng 1 page):
-                </div>
-                <Input.TextArea
-                  rows={4}
-                  value={manualAddText}
-                  onChange={(e) => setManualAddText(e.target.value)}
-                  placeholder={`61586984840264 | Làm con mèo\n10008765432198 | Fanpage Bán Hàng\nhttps://www.facebook.com/10009876543210`}
-                  className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl"
-                />
-                <div className="flex justify-end gap-2">
+
+                {manualAddMode === 'fields' ? (
+                  <div className="space-y-2.5">
+                    <div className="grid grid-cols-12 gap-2 text-[11px] font-semibold text-slate-300 px-1">
+                      <div className="col-span-6 flex items-center gap-1">
+                        <span>1. ID Fanpage / Link Page</span>
+                        <span className="text-rose-400">*</span>
+                      </div>
+                      <div className="col-span-5">2. Tên Fanpage gợi nhớ <span className="text-slate-500">(tùy chọn)</span></div>
+                      <div className="col-span-1 text-center">Xóa</div>
+                    </div>
+
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                      {manualRows.map((row, idx) => (
+                        <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                          <div className="col-span-6">
+                            <Input
+                              placeholder="VD: 61586984840264 hoặc Link Facebook"
+                              value={row.id}
+                              onChange={(e) => {
+                                const next = [...manualRows];
+                                next[idx].id = e.target.value;
+                                setManualRows(next);
+                              }}
+                              className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl h-9 hover:border-cyan-500 focus:border-cyan-500"
+                            />
+                          </div>
+                          <div className="col-span-5">
+                            <Input
+                              placeholder="VD: Làm Sen, Shop Quần Áo..."
+                              value={row.name}
+                              onChange={(e) => {
+                                const next = [...manualRows];
+                                next[idx].name = e.target.value;
+                                setManualRows(next);
+                              }}
+                              className="bg-slate-950 border-slate-700 text-slate-100 text-xs rounded-xl h-9 hover:border-cyan-500 focus:border-cyan-500"
+                            />
+                          </div>
+                          <div className="col-span-1 text-center">
+                            {manualRows.length > 1 && (
+                              <Button
+                                type="text"
+                                danger
+                                size="small"
+                                icon={<DeleteOutlined />}
+                                onClick={() => {
+                                  setManualRows(manualRows.filter((_, i) => i !== idx));
+                                }}
+                                className="text-rose-400 hover:text-rose-300 hover:bg-rose-950/40"
+                              />
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <Button
+                        type="dashed"
+                        size="small"
+                        icon={<PlusOutlined />}
+                        onClick={() => setManualRows([...manualRows, { id: '', name: '' }])}
+                        className="text-cyan-400 border-cyan-800/80 bg-slate-950/70 hover:bg-slate-900 rounded-lg text-xs"
+                      >
+                        + Thêm ô dòng tiếp theo
+                      </Button>
+                      <span className="text-[11px] text-slate-400">
+                        Đang nhập: <b className="text-cyan-300">{manualRows.filter((r) => r.id.trim()).length}</b> page hợp lệ
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-[11px] text-slate-400">
+                      Định dạng: <code className="text-cyan-300 font-mono">ID_PAGE | Tên Page</code> hoặc dán URL Facebook (mỗi dòng 1 page):
+                    </div>
+                    <Input.TextArea
+                      rows={4}
+                      value={manualAddText}
+                      onChange={(e) => setManualAddText(e.target.value)}
+                      placeholder={`61586984840264 | Làm con mèo\n10008765432198 | Fanpage Bán Hàng\nhttps://www.facebook.com/10009876543210`}
+                      className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl"
+                    />
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-1 border-t border-slate-800/80">
                   <Button
                     size="small"
                     onClick={() => {
                       setManualAddText('');
+                      setManualRows([{ id: '', name: '' }]);
                       setIsAddingManualToDrawer(false);
                     }}
-                    className="rounded-lg text-xs"
+                    className="rounded-lg text-xs bg-slate-800 border-slate-700 text-slate-300"
                   >
                     Hủy
                   </Button>
@@ -1860,9 +2013,9 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                     size="small"
                     type="primary"
                     onClick={handleSaveManualToDrawer}
-                    className="bg-cyan-600 hover:bg-cyan-500 rounded-lg text-xs font-semibold"
+                    className="bg-cyan-600 hover:bg-cyan-500 rounded-lg text-xs font-semibold shadow-md shadow-cyan-900/30"
                   >
-                    Lưu danh sách Page
+                    Lưu Fanpage vào Via
                   </Button>
                 </div>
               </div>
@@ -2005,7 +2158,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   children: (
                     <div className="space-y-3 mt-2">
                       <div className="text-[11px] text-slate-400 bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
-                        💡 Danh sách Page &amp; Nhóm trực thuộc Via này đã được đồng bộ và lưu trữ an toàn. Bạn có thể quản lý hoặc gỡ bỏ từng mục con mà không làm ảnh hưởng tới Via Mẹ.
+                        💡 Danh sách Page &amp; Nhóm trực thuộc Via này đã được đồng bộ và lưu trữ an toàn. Bạn có thể quản lý hoặc gỡ bỏ từng mục con mà không ảnh hưởng tới Via.
                       </div>
 
                       {/* Danh sách Pages trong DB */}
@@ -2152,6 +2305,155 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
           </div>
         )}
       </Drawer>
+
+      {/* 5. MODAL: CẬP NHẬT / THAY ĐỔI COOKIE CHO VIA MẸ */}
+      <Modal
+        title={
+          <div className="flex items-center gap-2.5 text-white">
+            <div className="w-8 h-8 rounded-lg bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400">
+              <KeyOutlined />
+            </div>
+            <div>
+              <div className="font-bold text-sm">Cập Nhật Cookie Facebook Cho Via</div>
+              <div className="text-xs text-slate-400 font-normal">
+                Nick: <span className="text-cyan-300 font-semibold">{updateCookieModalVia?.pageName}</span> (UID:{' '}
+                <span className="font-mono text-slate-300">{updateCookieModalVia?.uid}</span>)
+              </div>
+            </div>
+          </div>
+        }
+        open={Boolean(updateCookieModalVia)}
+        onCancel={() => {
+          if (!isUpdatingCookie) {
+            setUpdateCookieModalVia(null);
+            setCookieCUser('');
+            setCookieXs('');
+            setRawCookieInput('');
+            setNewProxyInput('');
+          }
+        }}
+        footer={[
+          <Button
+            key="cancel"
+            onClick={() => {
+              setUpdateCookieModalVia(null);
+              setCookieCUser('');
+              setCookieXs('');
+              setRawCookieInput('');
+              setNewProxyInput('');
+            }}
+            disabled={isUpdatingCookie}
+            className="bg-slate-900 border-slate-700 text-slate-300 rounded-xl"
+          >
+            Hủy
+          </Button>,
+          <Button
+            key="submit"
+            type="primary"
+            icon={<SyncOutlined spin={isUpdatingCookie} />}
+            loading={isUpdatingCookie}
+            onClick={handleSaveNewCookie}
+            className="bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl"
+          >
+            Lưu & Kích Hoạt Lại
+          </Button>,
+        ]}
+        className="dark-modal"
+      >
+        <div className="space-y-4 pt-2">
+          <div className="p-3 rounded-xl bg-sky-950/40 border border-sky-500/30 text-xs text-slate-300 flex items-start gap-2">
+            <span className="text-sky-400 text-sm">💡</span>
+            <span>
+              Nhập tách biệt <b>c_user</b> và <b>xs</b> vào 2 dòng bên dưới. Nếu bạn dán cả chuỗi cookie vào bất kỳ ô nào, hệ thống sẽ <b>tự động phân tích và điền đúng vị trí</b>.
+            </span>
+          </div>
+
+          {/* DÒNG 1: c_user */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold text-slate-200">
+                1. Dòng 1: <code className="text-cyan-300 font-bold">c_user</code> (UID Facebook) <span className="text-rose-400">*</span>
+              </label>
+              <span className="text-[11px] text-slate-400 font-mono">Dãy số UID nick</span>
+            </div>
+            <Input
+              placeholder="Ví dụ: 100023403136194"
+              value={cookieCUser}
+              onChange={(e) => handleCUserChange(e.target.value)}
+              prefix={<UserOutlined className="text-slate-500" />}
+              className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl h-10 hover:border-cyan-500 focus:border-cyan-500"
+            />
+          </div>
+
+          {/* DÒNG 2: xs */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold text-slate-200">
+                2. Dòng 2: <code className="text-cyan-300 font-bold">xs</code> (Mã phiên đăng nhập / Token Session) <span className="text-rose-400">*</span>
+              </label>
+              <span className="text-[11px] text-slate-400 font-mono">Chuỗi mã phiên xs</span>
+            </div>
+            <Input.TextArea
+              rows={3}
+              placeholder="Ví dụ: 2%3A0UeZEJylLU5ccA%3A2%3A1793101411%3A-1%3A-1%3A%3AAczItMCQpI6mtZlsgvsnMlR-YWCKXDyuyWVZu4d9fA"
+              value={cookieXs}
+              onChange={(e) => handleXsChange(e.target.value)}
+              className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl hover:border-cyan-500 focus:border-cyan-500"
+            />
+          </div>
+
+          {/* TÙY CHỌN DÁN CẢ CHUỖI TOÀN BỘ (NẾU MUỐN) */}
+          <div className="pt-0.5">
+            <button
+              type="button"
+              onClick={() => setShowRawCookieInput(!showRawCookieInput)}
+              className="text-xs text-sky-400 hover:text-sky-300 underline bg-transparent border-0 p-0 cursor-pointer flex items-center gap-1"
+            >
+              <span>{showRawCookieInput ? '▲ Thu gọn ô dán chuỗi gộp' : '▼ Hoặc bấm vào đây để dán nguyên chuỗi Cookie gộp'}</span>
+            </button>
+
+            {showRawCookieInput && (
+              <div className="mt-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5">
+                <span className="text-[11px] text-slate-400">Dán chuỗi gộp (tự động phân tích vào 2 ô trên):</span>
+                <Input.TextArea
+                  rows={2}
+                  placeholder="c_user=...; xs=... hoặc UID|PASS|2FA|COOKIE..."
+                  value={rawCookieInput}
+                  onChange={(e) => handleRawCookieChange(e.target.value)}
+                  className="bg-slate-900 border-slate-700 text-slate-100 font-mono text-xs rounded-lg"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* PROXY */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-200 mb-1.5">
+              Proxy riêng cho Via <span className="text-slate-500 font-normal">(Tùy chọn, để trống dùng IP máy)</span>
+            </label>
+            <Input
+              placeholder="ip:port:user:pass hoặc http://user:pass@ip:port"
+              value={newProxyInput}
+              onChange={(e) => setNewProxyInput(e.target.value)}
+              prefix={<GlobalOutlined className="text-slate-500" />}
+              className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl h-10 focus:border-cyan-500"
+            />
+          </div>
+
+          {/* QUÉT LẠI PAGE */}
+          <div className="pt-1">
+            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
+              <input
+                type="checkbox"
+                checked={autoRescanAfterUpdate}
+                onChange={(e) => setAutoRescanAfterUpdate(e.target.checked)}
+                className="rounded border-slate-700 text-cyan-600 focus:ring-cyan-500"
+              />
+              <span>Tự động quét lại toàn bộ Fanpage con ngay sau khi lưu</span>
+            </label>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

@@ -1,13 +1,13 @@
 /**
  * db.js - Quản lý kết nối MySQL Workbench cho VIPLIKE RADIANT
- * Kết nối trực tiếp vào Database 'autopost_saas' trên MySQL Workbench (port 3306)
+ * Kết nối trực tiếp vào Database 'viplike_radiant' trên MySQL Workbench (port 3306)
  * Hỗ trợ bộ nhớ đệm tự động (Local Cache Fallback) chống gián đoạn khi MySQL bảo trì/chưa bật.
  */
 
 const mysql = require('mysql2/promise');
 const fs = require('fs');
 const path = require('path');
-require('dotenv').config();
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
@@ -26,6 +26,7 @@ function loadAccountsCache() {
 }
 
 function saveAccountsCache(accounts) {
+  if (pool) return; // Đã có MySQL Workbench làm nguồn chính
   try {
     const tmp = `${ACCOUNTS_CACHE_FILE}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(accounts, null, 2), 'utf8');
@@ -40,7 +41,7 @@ const dbConfig = {
   port: parseInt(process.env.DB_PORT || '3306', 10),
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '26082003',
-  database: process.env.DB_NAME || 'autopost_saas',
+  database: process.env.DB_NAME || 'viplike_radiant',
   waitForConnections: true,
   connectionLimit: 15,
   maxIdle: 10,
@@ -150,12 +151,15 @@ async function getLiveVias() {
         page_name as viaName, 
         access_token as cookieString, 
         proxy_url as proxyUrl, 
-        token_status as tokenStatus
+        token_status as tokenStatus,
+        account_type as accountType
       FROM social_accounts 
       WHERE platform IN ('FACEBOOK', 'FACEBOOK_PAGE', 'FACEBOOK_PROFILE') 
         AND access_token LIKE '%c_user%' 
         AND (token_status IS NULL OR (token_status != 'EXPIRED' AND token_status != 'CHECKPOINT')) 
-      ORDER BY id DESC
+      ORDER BY 
+        CASE WHEN account_type = 'PERSONAL_PROFILE_COOKIE' THEN 0 ELSE 1 END,
+        id ASC
     `);
 
     const seenCUsers = new Set();
@@ -169,6 +173,7 @@ async function getLiveVias() {
         id: row.id,
         uid,
         viaName: row.viaName || `Via ${uid}`,
+        accountType: row.accountType,
         cookieString: row.cookieString,
         proxyUrl: row.proxyUrl || '',
         tokenStatus: row.tokenStatus || 'OK',
@@ -178,9 +183,14 @@ async function getLiveVias() {
   } catch (err) {
     console.warn('[MySQL Workbench] ⚠️ Không kết nối được MySQL, trích xuất Live Vias từ cache:', err.message);
     const cached = loadAccountsCache();
+    const sortedCache = [...(cached || [])].sort((a, b) => {
+      const aProf = a.accountType === 'PERSONAL_PROFILE_COOKIE' ? 0 : 1;
+      const bProf = b.accountType === 'PERSONAL_PROFILE_COOKIE' ? 0 : 1;
+      return aProf - bProf || (a.id || 0) - (b.id || 0);
+    });
     const seenCUsers = new Set();
     const vias = [];
-    for (const row of cached || []) {
+    for (const row of sortedCache) {
       const cookieStr = row.cookieString || row.accessToken || '';
       if (!cookieStr.includes('c_user=')) continue;
       if (row.tokenStatus === 'EXPIRED' || row.tokenStatus === 'CHECKPOINT') continue;
@@ -192,6 +202,7 @@ async function getLiveVias() {
         id: row.id,
         uid,
         viaName: row.pageName || `Via ${uid}`,
+        accountType: row.accountType,
         cookieString: cookieStr,
         proxyUrl: row.proxyUrl || '',
         tokenStatus: row.tokenStatus || 'OK',
@@ -218,6 +229,7 @@ async function addSocialAccount({
   const name = pageName || (cUserMatch ? `Via ${cUserMatch[1]}` : 'Facebook Account');
 
   let newId = Date.now();
+  let dbSaved = true;
   try {
     const p = getPool();
     const [res] = await p.execute(
@@ -227,6 +239,7 @@ async function addSocialAccount({
     );
     newId = res.insertId;
   } catch (err) {
+    dbSaved = false;
     console.warn('[MySQL Workbench] ⚠️ Lỗi lưu MySQL, lưu tạm vào cache:', err.message);
   }
 
@@ -249,13 +262,15 @@ async function addSocialAccount({
   cached.unshift(newAccount);
   saveAccountsCache(cached);
 
-  return newAccount;
+  // dbSaved=false: mới chỉ lưu tạm vào cache cục bộ, chưa vào MySQL
+  return { ...newAccount, dbSaved };
 }
 
 /**
  * Cập nhật thông tin tài khoản trong MySQL Workbench & Cache
  */
 async function updateSocialAccount(id, { pageName, cookieString, proxyUrl, tokenStatus }) {
+  let dbSaved = true;
   try {
     const p = getPool();
     const updates = [];
@@ -284,6 +299,7 @@ async function updateSocialAccount(id, { pageName, cookieString, proxyUrl, token
 
     await p.execute(`UPDATE social_accounts SET ${updates.join(', ')} WHERE id = ?`, params);
   } catch (err) {
+    dbSaved = false;
     console.warn(`[MySQL Workbench] ⚠️ Lỗi cập nhật ID ${id} trên MySQL, cập nhật cache:`, err.message);
   }
 
@@ -302,7 +318,7 @@ async function updateSocialAccount(id, { pageName, cookieString, proxyUrl, token
     saveAccountsCache(cached);
   }
 
-  return { success: true };
+  return { success: true, dbSaved };
 }
 
 /**
@@ -327,13 +343,66 @@ async function updateTokenStatus(id, status) {
 }
 
 /**
+ * Cập nhật chuỗi Cookie mới cho Via theo UID (cập nhật đồng bộ cả nick mẹ & các page con)
+ */
+async function updateViaCookieByUid(uid, cookieString, proxyUrl) {
+  const cleanCookie = String(cookieString || '').trim();
+  const cUserMatch = cleanCookie.match(/(?:^|;\s*)c_user=([^;]+)/);
+  const targetUid = uid || (cUserMatch ? cUserMatch[1] : '');
+
+  let dbSaved = true;
+  try {
+    const p = getPool();
+    const updates = ['access_token = ?', "token_status = 'OK'", 'token_checked_at = NOW()', 'updated_at = NOW()'];
+    const params = [cleanCookie];
+    if (proxyUrl !== undefined && proxyUrl !== null && String(proxyUrl).trim()) {
+      updates.push('proxy_url = ?');
+      params.push(String(proxyUrl).trim());
+    }
+    await p.execute(
+      `UPDATE social_accounts SET ${updates.join(', ')} WHERE platform_account_id = ? OR access_token LIKE ?`,
+      [...params, targetUid, `%c_user=${targetUid}%`]
+    );
+  } catch (err) {
+    dbSaved = false;
+    console.warn(`[MySQL Workbench] ⚠️ Lỗi cập nhật cookie theo UID ${targetUid}:`, err.message);
+  }
+
+  // Luôn cập nhật cache
+  const cached = loadAccountsCache();
+  let updatedCount = 0;
+  for (const acc of cached) {
+    const accUid =
+      (acc.cookieString || acc.accessToken || '').match(/(?:^|;\s*)c_user=([^;]+)/)?.[1] ||
+      acc.platformAccountId;
+    if (accUid === targetUid || acc.platformAccountId === targetUid) {
+      acc.cookieString = cleanCookie;
+      acc.accessToken = cleanCookie;
+      acc.tokenStatus = 'OK';
+      acc.tokenCheckedAt = new Date().toISOString();
+      if (proxyUrl !== undefined && proxyUrl !== null && String(proxyUrl).trim()) {
+        acc.proxyUrl = String(proxyUrl).trim();
+      }
+      acc.updatedAt = new Date().toISOString();
+      updatedCount++;
+    }
+  }
+  if (updatedCount > 0) {
+    saveAccountsCache(cached);
+  }
+  return { success: true, updatedCount, dbSaved };
+}
+
+/**
  * Xóa tài khoản khỏi MySQL Workbench & Cache
  */
 async function deleteSocialAccount(id) {
+  let dbSaved = true;
   try {
     const p = getPool();
     await p.execute('DELETE FROM social_accounts WHERE id = ?', [id]);
   } catch (err) {
+    dbSaved = false;
     console.warn(`[MySQL Workbench] ⚠️ Lỗi xóa ID ${id} trên MySQL:`, err.message);
   }
 
@@ -341,7 +410,7 @@ async function deleteSocialAccount(id) {
   const filtered = cached.filter((a) => a.id !== Number(id) && a.id !== id);
   saveAccountsCache(filtered);
 
-  return { success: true };
+  return { success: true, dbSaved };
 }
 
 // =============================================================================
@@ -378,6 +447,7 @@ function loadLicensesCache() {
 }
 
 function saveLicensesCache(licenses) {
+  if (pool) return; // Đã có MySQL Workbench làm nguồn chính
   try {
     const tmp = `${LICENSES_CACHE_FILE}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(licenses, null, 2), 'utf8');
@@ -668,6 +738,7 @@ function loadBuffLogsCache() {
 }
 
 function saveBuffLogsCache(logs) {
+  if (pool) return; // Đã có MySQL Workbench làm nguồn chính
   try {
     const sorted = [...logs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     const tmp = `${BUFF_LOGS_CACHE_FILE}.tmp`;
@@ -842,6 +913,274 @@ async function clearBuffLogs() {
   return { success: true };
 }
 
+// ---------------------------------------------------------------------------
+// TELEGRAM NOTIFICATIONS & SETTINGS IN MYSQL
+// ---------------------------------------------------------------------------
+let telegramTableReady = false;
+const TELEGRAM_NOTIFS_CACHE_FILE = path.join(dataDir, 'telegram_notifications_cache.json');
+
+function loadTelegramNotifsCache() {
+  try {
+    if (fs.existsSync(TELEGRAM_NOTIFS_CACHE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(TELEGRAM_NOTIFS_CACHE_FILE, 'utf8'));
+      if (Array.isArray(data)) return data;
+    }
+  } catch (e) {
+    console.warn('[Telegram Cache] ⚠️ Không đọc được telegram_notifications_cache.json:', e.message);
+  }
+  return [];
+}
+
+function saveTelegramNotifsCache(list) {
+  if (pool) return; // Đã có MySQL Workbench làm nguồn chính
+  try {
+    const sorted = [...list]
+      .sort((a, b) => new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt))
+      .slice(0, 200);
+    const tmp = `${TELEGRAM_NOTIFS_CACHE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(sorted, null, 2), 'utf8');
+    fs.renameSync(tmp, TELEGRAM_NOTIFS_CACHE_FILE);
+  } catch (e) {
+    console.warn('[Telegram Cache] ⚠️ Không lưu được cache:', e.message);
+  }
+}
+
+async function ensureTelegramTable(p) {
+  if (telegramTableReady) return;
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS telegram_notifications (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      chat_id VARCHAR(64) NOT NULL,
+      event_type VARCHAR(64) NOT NULL,
+      title VARCHAR(255) NOT NULL,
+      message TEXT NOT NULL,
+      status VARCHAR(32) DEFAULT 'SENT',
+      telegram_message_id INT NULL,
+      error_message TEXT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_tg_created (created_at DESC),
+      INDEX idx_tg_event (event_type)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  telegramTableReady = true;
+}
+
+async function saveTelegramNotification({
+  chatId,
+  eventType,
+  title,
+  message,
+  status = 'SENT',
+  telegramMessageId = null,
+  errorMessage = null,
+}) {
+  const item = {
+    chat_id: String(chatId || ''),
+    event_type: String(eventType || 'GENERAL'),
+    title: String(title || 'Thông báo hệ thống'),
+    message: String(message || ''),
+    status: String(status || 'SENT'),
+    telegram_message_id: telegramMessageId ? Number(telegramMessageId) : null,
+    error_message: errorMessage ? String(errorMessage) : null,
+    created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+  };
+
+  try {
+    const p = getPool();
+    await ensureTelegramTable(p);
+    const [res] = await p.execute(
+      `INSERT INTO telegram_notifications (chat_id, event_type, title, message, status, telegram_message_id, error_message, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        item.chat_id,
+        item.event_type,
+        item.title,
+        item.message,
+        item.status,
+        item.telegram_message_id,
+        item.error_message,
+        item.created_at,
+      ]
+    );
+    item.id = res.insertId;
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Không ghi được vào telegram_notifications (dùng cache):', err.message);
+    item.id = Date.now();
+  }
+
+  const cached = loadTelegramNotifsCache();
+  saveTelegramNotifsCache([item, ...cached]);
+  return item;
+}
+
+async function getTelegramNotifications(limit = 50) {
+  try {
+    const p = getPool();
+    await ensureTelegramTable(p);
+    const [rows] = await p.query(
+      `SELECT * FROM telegram_notifications ORDER BY created_at DESC LIMIT ?`,
+      [Number(limit) || 50]
+    );
+    if (rows && rows.length > 0) return rows;
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Không đọc được telegram_notifications từ DB:', err.message);
+  }
+  return loadTelegramNotifsCache().slice(0, limit);
+}
+
+// =============================================================================
+// KHO TRẠNG THÁI (app_state): người dùng, cài đặt, hàng đợi, lịch sử, monitors
+// =============================================================================
+let appStateTableReady = false;
+
+async function ensureAppStateTable() {
+  if (appStateTableReady) return;
+  const p = getPool();
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      state_key VARCHAR(64) NOT NULL PRIMARY KEY,
+      state_value LONGTEXT NOT NULL,
+      updated_ms BIGINT NOT NULL DEFAULT 0
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  appStateTableReady = true;
+}
+
+/** @returns {Promise<{value: string, updatedMs: number} | null>} */
+async function getAppState(key) {
+  await ensureAppStateTable();
+  const [rows] = await getPool().execute(
+    'SELECT state_value AS value, updated_ms AS updatedMs FROM app_state WHERE state_key = ?',
+    [key]
+  );
+  return rows && rows[0] ? { value: rows[0].value, updatedMs: Number(rows[0].updatedMs) } : null;
+}
+
+async function saveAppState(key, jsonString) {
+  await ensureAppStateTable();
+  await getPool().execute(
+    `INSERT INTO app_state (state_key, state_value, updated_ms) VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE state_value = VALUES(state_value), updated_ms = VALUES(updated_ms)`,
+    [key, jsonString, Date.now()]
+  );
+}
+
+async function syncTelegramSettingsToDb(settings) {
+  try {
+    const p = getPool();
+    const pairs = [
+      ['telegram.bot_token', settings.telegramBotToken || ''],
+      ['telegram.chat_id', settings.telegramChatId || ''],
+      ['telegram.bot_username', settings.botInfo?.username || ''],
+      ['telegram.bot_name', settings.botInfo?.firstName || ''],
+      ['telegram.enabled', Boolean(settings.telegramBotToken && settings.telegramChatId) ? 'true' : 'false'],
+      ['telegram.updated_at', new Date().toISOString()],
+    ];
+    for (const [k, v] of pairs) {
+      await p.execute(
+        `INSERT INTO app_settings (setting_key, setting_value) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+        [k, v]
+      );
+    }
+    return { success: true };
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Không đồng bộ được telegram settings vào app_settings:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Lấy danh sách Fanpage từ bảng facebook_page_accesses trên MySQL
+ */
+async function getFacebookPageAccesses(userId = 1, personalProfileId = null) {
+  try {
+    const p = getPool();
+    let query = `SELECT id, page_id, page_name, personal_profile_id, profile_name, active, verification_status 
+                 FROM facebook_page_accesses 
+                 WHERE active = 1`;
+    const params = [];
+    if (personalProfileId) {
+      query += ' AND personal_profile_id = ?';
+      params.push(String(personalProfileId));
+    }
+    query += ' ORDER BY page_name ASC';
+    const [rows] = await p.execute(query, params);
+    return rows.map((r) => ({
+      id: String(r.page_id),
+      name: r.page_name,
+      url: `https://www.facebook.com/${r.page_id}`,
+      personalProfileId: r.personal_profile_id,
+      profileName: r.profile_name,
+      verificationStatus: r.verification_status,
+    }));
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Không lấy được facebook_page_accesses:', err.message);
+    return [];
+  }
+}
+
+/**
+ * Lưu danh sách Fanpage vào bảng facebook_page_accesses trên MySQL
+ */
+async function saveFacebookPageAccesses(pages = [], personalProfileId = '', profileName = '', userId = 1) {
+  if (!Array.isArray(pages) || pages.length === 0) return { success: true, count: 0 };
+  try {
+    const p = getPool();
+    let saved = 0;
+    for (const pg of pages) {
+      const pageId = String(pg.id || pg.pageId || '');
+      const pageName = String(pg.name || pg.pageName || `Fanpage ${pageId}`).trim();
+      if (!pageId) continue;
+      await p.execute(
+        `INSERT INTO facebook_page_accesses (
+          user_id, personal_profile_id, page_id, page_name, profile_name,
+          verification_status, active, last_seen_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'VERIFIED', 1, NOW(), NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+          page_name = VALUES(page_name),
+          profile_name = COALESCE(VALUES(profile_name), profile_name),
+          active = 1,
+          last_seen_at = NOW(),
+          updated_at = NOW()`,
+        [userId, String(personalProfileId || ''), pageId, pageName, String(profileName || '')]
+      );
+      saved++;
+    }
+    return { success: true, count: saved };
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Lỗi lưu facebook_page_accesses:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Đồng bộ danh sách tài khoản người dùng vào bảng users trên MySQL
+ */
+async function syncUsersToDb(users = []) {
+  if (!Array.isArray(users) || users.length === 0) return { success: true };
+  try {
+    const p = getPool();
+    for (const u of users) {
+      if (!u.username) continue;
+      await p.execute(
+        `INSERT INTO users (id, username, password, role, email, disabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE
+           password = VALUES(password),
+           role = VALUES(role),
+           email = VALUES(email),
+           updated_at = NOW()`,
+        [u.id || null, u.username, u.password || '', u.role || 'ADMIN', u.email || `${u.username}@viplike.local`]
+      );
+    }
+    return { success: true };
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Lỗi đồng bộ users vào MySQL:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
 module.exports = {
   dbConfig,
   getPool,
@@ -851,6 +1190,7 @@ module.exports = {
   addSocialAccount,
   updateSocialAccount,
   updateTokenStatus,
+  updateViaCookieByUid,
   deleteSocialAccount,
   loadAccountsCache,
   saveAccountsCache,
@@ -864,5 +1204,15 @@ module.exports = {
   getBuffLogs,
   saveBuffLogs,
   clearBuffLogs,
+  ensureTelegramTable,
+  saveTelegramNotification,
+  getTelegramNotifications,
+  syncTelegramSettingsToDb,
+  getFacebookPageAccesses,
+  saveFacebookPageAccesses,
+  syncUsersToDb,
+  ensureAppStateTable,
+  getAppState,
+  saveAppState,
 };
 

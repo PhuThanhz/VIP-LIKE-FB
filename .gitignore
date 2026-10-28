@@ -43,5 +43,16 @@ backend/data/page_usage.json
 backend/data/*.json
 backend/data/.jwt_secret
 backend/data/temp_avatars/
+backend/data/custom_avatars/
+backend/data/_obsolete/
 backend/data/debug_screens/
 backend/data/*.bak*
+
+# IDE settings
+.claude/
+
+# Scratch & test scripts
+backend/test-*.js
+backend/check-login.js
+backend/run-batch-finish-remaining.js
+backend/run-batch-full-thanhan.js
