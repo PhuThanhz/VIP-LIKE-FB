@@ -1562,6 +1562,30 @@ telemetry.setContext({
   activeLiveBuffSessions,
   activeBuffTaskIds,
   db,
+  getQueueStats: () => {
+    try {
+      const qd = loadBuffQueue();
+      const items = qd?.items || [];
+      return {
+        total: items.length,
+        queued: items.filter((it) => it.status === 'QUEUED').length,
+        running: items.filter((it) => it.status === 'RUNNING').length,
+        completed: items.filter((it) => it.status === 'COMPLETED').length,
+        partial: items.filter((it) => it.status === 'PARTIAL').length,
+        deadLetter: items.filter((it) => it.status === 'DEAD_LETTER').length,
+      };
+    } catch (e) {
+      return { total: 0, queued: 0, running: 0, completed: 0, partial: 0, deadLetter: 0 };
+    }
+  },
+  getWorkerHealth: () => {
+    return {
+      status: 'ACTIVE',
+      consecutiveFailures: typeof consecutiveQueueFailures !== 'undefined' ? consecutiveQueueFailures : 0,
+      maxParallelVias: typeof getBuffParallelVias === 'function' ? getBuffParallelVias() : 2,
+      maxParallelTasks: typeof getMaxParallelBuff === 'function' ? getMaxParallelBuff() : 2,
+    };
+  },
 });
 
 // =============================================================================

@@ -5,6 +5,7 @@
  */
 
 const { performance, monitorEventLoopDelay } = require('perf_hooks');
+const os = require('os');
 
 class TelemetryEngine {
   constructor(options = {}) {
@@ -19,6 +20,12 @@ class TelemetryEngine {
     this.eventLoopMonitor = monitorEventLoopDelay({ resolution: 20 });
     this.eventLoopMonitor.enable();
 
+    // CPU Usage Tracking
+    this.lastCpuUsage = process.cpuUsage();
+    this.lastCpuSampleTime = performance.now();
+    this.currentCpuPercent = 0;
+    this.cpuCores = os.cpus().length;
+
     // Context references injected by server.js
     this.serverContext = {
       busyBuffLanes: null,
@@ -26,7 +33,24 @@ class TelemetryEngine {
       activeLiveBuffSessions: null,
       activeBuffTaskIds: null,
       db: null,
+      getQueueStats: null,
+      getWorkerHealth: null,
     };
+  }
+
+  sampleCpu() {
+    const elapsedMs = performance.now() - this.lastCpuSampleTime;
+    if (elapsedMs < 100) return this.currentCpuPercent;
+    const diff = process.cpuUsage(this.lastCpuUsage);
+    this.lastCpuUsage = process.cpuUsage();
+    this.lastCpuSampleTime = performance.now();
+    const totalCpuTimeMicroSec = diff.user + diff.system;
+    const elapsedMicroSec = elapsedMs * 1000;
+    const rawPercent = (totalCpuTimeMicroSec / elapsedMicroSec) * 100;
+    // Normalize by core count to give total system relative CPU
+    const normalizedPercent = Math.min(100, Math.max(0, rawPercent / (this.cpuCores || 1)));
+    this.currentCpuPercent = Number(normalizedPercent.toFixed(1));
+    return this.currentCpuPercent;
   }
 
   setContext(context) {
@@ -166,6 +190,12 @@ class TelemetryEngine {
         heapUsedMB: Number((mem.heapUsed / 1024 / 1024).toFixed(2)),
         externalMB: Number((mem.external / 1024 / 1024).toFixed(2)),
       },
+      cpu: {
+        usagePercent: this.sampleCpu(),
+        cores: this.cpuCores,
+      },
+      queueDepth: this.serverContext.getQueueStats ? this.serverContext.getQueueStats() : { total: 0, queued: 0, running: 0, completed: 0, partial: 0, deadLetter: 0 },
+      workerHealth: this.serverContext.getWorkerHealth ? this.serverContext.getWorkerHealth() : { status: 'UNKNOWN' },
       database: {
         status: dbStatus,
         pingMs: dbPingMs,

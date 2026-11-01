@@ -62,6 +62,24 @@ interface TelemetryMetrics {
     heapUsedMB: number;
     externalMB: number;
   };
+  cpu?: {
+    usagePercent: number;
+    cores: number;
+  };
+  queueDepth?: {
+    total: number;
+    queued: number;
+    running: number;
+    completed: number;
+    partial: number;
+    deadLetter: number;
+  };
+  workerHealth?: {
+    status: string;
+    consecutiveFailures: number;
+    maxParallelVias: number;
+    maxParallelTasks: number;
+  };
   database: {
     status: string;
     pingMs: number | null;
@@ -240,18 +258,19 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
                 </div>
               </div>
 
-              {/* Memory Footprint */}
+              {/* Memory & CPU Footprint */}
               <div className="p-3 rounded-xl bg-slate-950/70 border border-purple-500/30">
                 <div className="text-[11px] text-purple-400 font-semibold flex items-center justify-between">
-                  <span>RAM Heap / RSS</span>
+                  <span>RAM &amp; CPU</span>
                   <CloudServerOutlined className="text-purple-400" />
                 </div>
                 <div className="text-xl font-mono font-extrabold text-white mt-1">
                   {metrics.systemMemory.heapUsedMB}MB
                   <span className="text-xs text-slate-400 font-normal ml-1">/ {metrics.systemMemory.rssMB}MB</span>
                 </div>
-                <div className="text-[10px] text-slate-400 mt-1">
-                  Heap Total: {metrics.systemMemory.heapTotalMB}MB
+                <div className="text-[10px] text-purple-300 mt-1 flex items-center justify-between font-mono">
+                  <span>CPU: {metrics.cpu?.usagePercent || 0}%</span>
+                  <span className="text-slate-400">({metrics.cpu?.cores || 1} Cores)</span>
                 </div>
               </div>
             </div>
@@ -284,10 +303,19 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
                 </div>
 
                 <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                  <div className="text-[10px] text-slate-400">Tác vụ Hàng đợi (Queue)</div>
+                  <div className="text-[10px] text-slate-400">Hàng đợi (Queue Depth)</div>
                   <div className="font-mono font-bold text-emerald-300 mt-0.5">
-                    {metrics.concurrencyEngine.activeTasksCount} đang thực thi
+                    {metrics.queueDepth ? (
+                      <span>{metrics.queueDepth.queued} chờ / {metrics.queueDepth.running} chạy</span>
+                    ) : (
+                      `${metrics.concurrencyEngine.activeTasksCount} đang thực thi`
+                    )}
                   </div>
+                  {metrics.queueDepth && metrics.queueDepth.deadLetter > 0 && (
+                    <div className="text-[9px] text-rose-400 font-semibold mt-0.5">
+                      ⚠️ {metrics.queueDepth.deadLetter} task Dead-Letter
+                    </div>
+                  )}
                 </div>
 
                 <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">

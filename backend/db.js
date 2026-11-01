@@ -762,7 +762,7 @@ async function ensureBuffLogsTable(p) {
       created_at DATETIME(3) NOT NULL,
       INDEX idx_buff_logs_created (created_at),
       INDEX idx_buff_logs_user_created (user_id, created_at),
-      INDEX idx_buff_logs_type_created (run_type, created_at)
+      INDEX idx_logs_type_time (run_type, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   buffLogsTableReady = true;
