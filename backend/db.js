@@ -892,9 +892,24 @@ async function flushPendingBuffLogs(p) {
 
 /**
  * Lấy lịch sử tương tác mới nhất (MySQL, hoặc cache khi MySQL lỗi)
+ * Hỗ trợ Keyset Cursor Pagination O(1) chống chậm khi bảng lớn
  */
-async function getBuffLogs(limit = 500, summaryOnly = false) {
-  const safeLimit = Math.min(Math.max(toInt(limit) || 500, 1), BUFF_LOGS_CACHE_MAX);
+async function getBuffLogs(optionsOrLimit = 500, summaryOnlyArg = false) {
+  let safeLimit = 500;
+  let summaryOnly = false;
+  let cursorCreatedAt = null;
+  let cursorId = null;
+
+  if (typeof optionsOrLimit === 'object' && optionsOrLimit !== null) {
+    safeLimit = Math.min(Math.max(toInt(optionsOrLimit.limit) || 50, 1), BUFF_LOGS_CACHE_MAX);
+    summaryOnly = Boolean(optionsOrLimit.summaryOnly);
+    cursorCreatedAt = optionsOrLimit.cursorCreatedAt || null;
+    cursorId = optionsOrLimit.cursorId || null;
+  } else {
+    safeLimit = Math.min(Math.max(toInt(optionsOrLimit) || 500, 1), BUFF_LOGS_CACHE_MAX);
+    summaryOnly = Boolean(summaryOnlyArg);
+  }
+
   try {
     const p = getPool();
     await ensureBuffLogsTable(p);
@@ -908,19 +923,41 @@ async function getBuffLogs(limit = 500, summaryOnly = false) {
          engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages,
          success_count as successCount, already_liked_count as alreadyLikedCount,
          failed_count as failedCount, comment_count as commentCount, details, created_at as createdAt`;
-    const [rows] = await p.query(
-      `SELECT ${selectCols} FROM buff_logs ORDER BY created_at DESC LIMIT ?`,
-      [safeLimit]
-    );
+
+    let sql = `SELECT ${selectCols} FROM buff_logs`;
+    const params = [];
+
+    if (cursorCreatedAt && cursorId) {
+      sql += ` WHERE created_at < ? OR (created_at = ? AND id < ?)`;
+      params.push(cursorCreatedAt, cursorCreatedAt, cursorId);
+    } else if (cursorCreatedAt) {
+      sql += ` WHERE created_at < ?`;
+      params.push(cursorCreatedAt);
+    }
+
+    sql += ` ORDER BY created_at DESC, id DESC LIMIT ?`;
+    params.push(safeLimit);
+
+    const [rows] = await p.query(sql, params);
     const logs = rows.map((r) => (summaryOnly ? { ...r, details: [] } : rowToBuffLog(r)));
-    if (!summaryOnly) saveBuffLogsCache(logs);
-    return { logs, source: 'mysql' };
+    if (!summaryOnly && !cursorCreatedAt) saveBuffLogsCache(logs);
+
+    let nextCursor = null;
+    if (logs.length === safeLimit) {
+      const last = logs[logs.length - 1];
+      nextCursor = {
+        createdAt: last.createdAt instanceof Date ? last.createdAt.toISOString() : last.createdAt,
+        id: last.id,
+      };
+    }
+
+    return { logs, nextCursor, source: 'mysql' };
   } catch (err) {
     console.warn('[MySQL Workbench] ⚠️ Lỗi đọc buff_logs, dùng cache:', err.message);
     const logs = loadBuffLogsCache()
       .slice(0, safeLimit)
       .map(({ _pending, ...l }) => (summaryOnly ? { ...l, details: [] } : l));
-    return { logs, source: 'cache' };
+    return { logs, nextCursor: null, source: 'cache' };
   }
 }
 
@@ -1090,7 +1127,7 @@ async function getTelegramNotifications(limit = 50) {
     const p = getPool();
     await ensureTelegramTable(p);
     const [rows] = await p.query(
-      `SELECT * FROM telegram_notifications ORDER BY created_at DESC LIMIT ?`,
+      `SELECT id, type, title, message, status, error, created_at FROM telegram_notifications ORDER BY created_at DESC LIMIT ?`,
       [Number(limit) || 50]
     );
     if (rows && rows.length > 0) return rows;

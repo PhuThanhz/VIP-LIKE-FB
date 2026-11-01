@@ -40,6 +40,7 @@ const {
 } = require('./page-post-registry');
 const { generateSeedingComments } = require('./ai-seeding');
 const avatarTool = require('./avatar-tool');
+const telemetry = require('./telemetry');
 
 const app = express();
 const PORT = process.env.PORT || 3100;
@@ -47,6 +48,7 @@ const PORT = process.env.PORT || 3100;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(telemetry.middleware());
 
 // Trong vài giây đầu, dữ liệu đang được nạp từ MySQL: chặn request để không đọc/ghi lệch dữ liệu
 app.use((req, res, next) => {
@@ -269,6 +271,9 @@ function getMaxParallelBuff() {
 }
 const busyBuffLanes = new Set();
 const buffLaneWaiters = [];
+const laneLeaseTimers = new Map();
+const LANE_LEASE_TIMEOUT_MS = 8 * 60 * 1000; // 8 phút tối đa cho 1 lượt chiếm lane
+const WAITER_TIMEOUT_MS = 60 * 1000; // 60 giây chờ tối đa trong hàng chờ
 
 function getBuffParallelVias() {
   const n = parseInt(loadBuffSettings().buffParallelVias, 10);
@@ -286,12 +291,24 @@ function pumpBuffLanes() {
     const waiter = buffLaneWaiters[i];
     if (isEmergencyStopped()) {
       buffLaneWaiters.splice(i--, 1);
+      if (waiter.waiterTimer) clearTimeout(waiter.waiterTimer);
       waiter.reject(new Error('Dừng khẩn cấp'));
       continue;
     }
     if (busyBuffLanes.has(waiter.uid)) continue;
     buffLaneWaiters.splice(i--, 1);
+    if (waiter.waiterTimer) clearTimeout(waiter.waiterTimer);
     busyBuffLanes.add(waiter.uid);
+
+    // Thiết lập Watchdog Lease Timer chống deadlock khi Chromium bị treo
+    const leaseTimer = setTimeout(() => {
+      console.warn(`[LaneLocker] ⚠️ CẢNH BÁO: Lane "${waiter.uid}" chiếm dụng quá ${LANE_LEASE_TIMEOUT_MS / 1000}s. Tự động giải phóng (Deadlock Prevention).`);
+      busyBuffLanes.delete(waiter.uid);
+      laneLeaseTimers.delete(waiter.uid);
+      pumpBuffLanes();
+    }, LANE_LEASE_TIMEOUT_MS);
+    laneLeaseTimers.set(waiter.uid, leaseTimer);
+
     waiter.resolve();
   }
 }
@@ -299,12 +316,28 @@ function pumpBuffLanes() {
 async function withBuffLane(uid, fn) {
   const key = uid || 'unknown';
   await new Promise((resolve, reject) => {
-    buffLaneWaiters.push({ uid: key, resolve, reject });
+    let waiterObj;
+    const waiterTimer = setTimeout(() => {
+      const idx = buffLaneWaiters.indexOf(waiterObj);
+      if (idx !== -1) {
+        buffLaneWaiters.splice(idx, 1);
+        reject(new Error(`Hàng chờ tài nguyên Via [${key}] đã quá hạn (${WAITER_TIMEOUT_MS / 1000}s). Tự động bỏ qua để chống nghẽn.`));
+      }
+    }, WAITER_TIMEOUT_MS);
+
+    waiterObj = { uid: key, resolve, reject, waiterTimer };
+    buffLaneWaiters.push(waiterObj);
     pumpBuffLanes();
   });
+
   try {
     return await fn();
   } finally {
+    const existingLease = laneLeaseTimers.get(key);
+    if (existingLease) {
+      clearTimeout(existingLease);
+      laneLeaseTimers.delete(key);
+    }
     busyBuffLanes.delete(key);
     pumpBuffLanes();
   }
@@ -857,6 +890,9 @@ function authenticateJwt(req, res, next) {
     '/db/test',
     '/api/health',
     '/health',
+    '/api/readiness',
+    '/readiness',
+    '/api/system/observability',
     '/api/license/activate',
     '/api/license/status',
     '/api/buff-cached-pages',
@@ -1170,8 +1206,11 @@ app.delete('/api/connections/:id', requireAdmin, async (req, res) => {
 app.get('/api/buff-logs', async (req, res) => {
   try {
     await syncCompletedQueueTasksToBuffLogs().catch(() => {});
-    const summaryOnly = req.query.summary === 'true';
-    const result = await db.getBuffLogs(req.query.limit, summaryOnly);
+    const summaryOnly = req.query.summary === 'true' || req.query.summary === '1';
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const cursorCreatedAt = req.query.cursorCreatedAt || null;
+    const cursorId = req.query.cursorId || null;
+    const result = await db.getBuffLogs({ limit, summaryOnly, cursorCreatedAt, cursorId });
     return res.json({ success: true, ...result });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -1516,6 +1555,53 @@ app.post('/api/buff-like', async (req, res) => {
 // Trạng thái phiên Buff trực tiếp đang chạy ngầm (hỗ trợ duy trì tiến trình khi người dùng F5 / reload trang)
 let activeLiveBuffSession = null;
 const activeLiveBuffSessions = new Map();
+
+telemetry.setContext({
+  busyBuffLanes,
+  buffLaneWaiters,
+  activeLiveBuffSessions,
+  activeBuffTaskIds,
+  db,
+});
+
+// =============================================================================
+// OBSERVABILITY & HEALTH METRICS (BUFF LIKE 3.0 ENTERPRISE)
+// =============================================================================
+app.get('/api/system/observability', async (req, res) => {
+  try {
+    const metrics = await telemetry.getMetrics();
+    return res.json({ success: true, metrics });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/health', (req, res) => {
+  const mem = process.memoryUsage();
+  return res.json({
+    status: 'UP',
+    version: '3.0.0-enterprise',
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    memory: {
+      rssMB: Number((mem.rss / 1024 / 1024).toFixed(2)),
+      heapUsedMB: Number((mem.heapUsed / 1024 / 1024).toFixed(2)),
+    },
+  });
+});
+
+app.get('/api/readiness', async (req, res) => {
+  try {
+    const pool = db.getPool();
+    if (!pool) {
+      return res.status(503).json({ ready: false, error: 'Database pool unavailable' });
+    }
+    await pool.execute('SELECT 1');
+    return res.json({ ready: true, status: 'READY' });
+  } catch (err) {
+    return res.status(503).json({ ready: false, error: err.message });
+  }
+});
 
 // Lấy thông tin phiên Buff trực tiếp đang chạy ngầm
 app.get('/api/buff-live/active', (req, res) => {
@@ -2548,10 +2634,22 @@ async function executeQueueTask(task) {
     const qd = loadBuffQueue();
     const t = qd.items.find((it) => it.id === task.id);
     if (t) {
-      t.status = 'FAILED';
+      const attempts = (t.attempts || 0) + 1;
+      t.attempts = attempts;
       t.finishedAt = new Date().toISOString();
-      t.error = err.message;
-      t.attempts = (t.attempts || 0) + 1;
+
+      // Exponential Backoff & Dead-letter Queue (Phase 4 SaaS 3.0)
+      if (attempts < 3) {
+        t.status = 'QUEUED';
+        const backoffSec = Math.pow(2, attempts) * 30; // Lần 1: 60s, Lần 2: 120s
+        t.runAfter = new Date(Date.now() + backoffSec * 1000).toISOString();
+        t.error = `Tự động thử lại (${attempts}/3) sau ${backoffSec}s (Exponential Backoff): ${err.message}`;
+        console.log(`[BuffQueue Worker] 🔄 Task ${task.id} được lên lịch retry lần ${attempts}/3 sau ${backoffSec}s.`);
+      } else {
+        t.status = 'DEAD_LETTER';
+        t.error = `Đã thất bại sau ${attempts} lần thử (Chuyển sang DEAD_LETTER): ${err.message}`;
+        console.warn(`[BuffQueue Worker] ☠️ Task ${task.id} chuyển sang trạng thái DEAD_LETTER.`);
+      }
       saveBuffQueue(qd);
     }
     consecutiveQueueFailures += 1;
@@ -2580,9 +2678,30 @@ async function runQueueWorker() {
   const queueData = loadBuffQueue();
   const now = new Date();
 
+  // Tự động giải cứu (Auto-Recovery) các task bị kẹt RUNNING quá 15 phút (do server restart/crash)
+  for (const it of queueData.items || []) {
+    if (it.status === 'RUNNING' && !activeBuffTaskIds.has(it.id)) {
+      const runningDuration = it.startedAt ? (now.getTime() - new Date(it.startedAt).getTime()) : 9999999;
+      if (runningDuration > 15 * 60 * 1000) {
+        console.warn(`[BuffQueue Recovery] 🚑 Phát hiện Task ${it.id} bị kẹt RUNNING quá 15 phút. Tự động phục hồi sang QUEUED.`);
+        it.status = 'QUEUED';
+        it.runAfter = new Date().toISOString();
+        it.error = 'Tự động phục hồi sau sự cố kẹt tiến trình (Crash/Timeout Auto-Recovery)';
+      }
+    }
+  }
+
+  // Sắp xếp ưu tiên: HIGH (3) > NORMAL (2) > LOW (1) kết hợp FIFO
+  const priorityWeight = { HIGH: 3, NORMAL: 2, LOW: 1 };
   const availableSlots = maxParallel - activeBuffTaskIds.size;
   const tasksToRun = (queueData.items || [])
-    .filter((it) => it.status === 'QUEUED' && new Date(it.runAfter) <= now && !activeBuffTaskIds.has(it.id))
+    .filter((it) => it.status === 'QUEUED' && new Date(it.runAfter || 0) <= now && !activeBuffTaskIds.has(it.id))
+    .sort((a, b) => {
+      const pA = priorityWeight[a.priority] || 2;
+      const pB = priorityWeight[b.priority] || 2;
+      if (pB !== pA) return pB - pA;
+      return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+    })
     .slice(0, availableSlots);
 
   for (const task of tasksToRun) {
@@ -3887,13 +4006,16 @@ store
   })
   .catch((err) => console.error('[StateStore] ❌ Lỗi khởi tạo:', err.message));
 
-// Tắt server: ghi nốt dữ liệu đang chờ
+// Tắt server: ghi nốt dữ liệu đang chờ và giải phóng locks
 let isShuttingDown = false;
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, async () => {
     if (isShuttingDown) return;
     isShuttingDown = true;
+    console.log(`[Server] 🛑 Nhận tín hiệu ${sig}. Đang giải phóng lane locks và xả dữ liệu...`);
     try {
+      busyBuffLanes.clear();
+      buffLaneWaiters.length = 0;
       await Promise.race([store.flush(), new Promise((r) => setTimeout(r, 4000))]);
     } catch (_) {}
     process.exit(0);

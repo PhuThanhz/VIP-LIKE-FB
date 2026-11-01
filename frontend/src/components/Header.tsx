@@ -13,9 +13,11 @@ import {
   DownOutlined,
   WarningFilled,
   SafetyCertificateOutlined,
+  DashboardOutlined,
 } from '@ant-design/icons';
 import AuthModal, { AuthModalTab } from './auth/AuthModal';
 import WallpaperModal from './common/WallpaperModal';
+import { SystemTelemetryModal } from './common/SystemTelemetryModal';
 import { useCookieAlert } from './common/CookieAlertManager';
 import { getRootNavItem } from '../config/navigation';
 import { CurrentUser, isAdmin } from '../auth/session';
@@ -42,6 +44,7 @@ const HeaderComponent: React.FC<HeaderProps> = ({
   const admin = isAdmin(currentUser);
   const [accountModalTab, setAccountModalTab] = useState<AuthModalTab | null>(null);
   const [wallpaperModalOpen, setWallpaperModalOpen] = useState(false);
+  const [telemetryModalOpen, setTelemetryModalOpen] = useState(false);
 
   const { totalDeadCount, openModal } = useCookieAlert();
   const displayName = currentUser.fullName || currentUser.username;
@@ -89,6 +92,16 @@ const HeaderComponent: React.FC<HeaderProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
+          <Button
+            size="small"
+            icon={<DashboardOutlined className="text-cyan-400" />}
+            onClick={() => setTelemetryModalOpen(true)}
+            className="hidden sm:inline-flex items-center text-xs text-cyan-300 border-cyan-800/80 bg-cyan-950/40 hover:border-cyan-500 hover:text-cyan-100"
+            title="Xem thông số hiệu năng, độ trễ và Event Loop (BUFF LIKE 3.0)"
+          >
+            ⚡ Telemetry
+          </Button>
+
           <Button
             size="small"
             icon={<SafetyCertificateOutlined className="text-cyan-400" />}
@@ -140,6 +153,11 @@ const HeaderComponent: React.FC<HeaderProps> = ({
           onLogout={onLogout}
         />
       )}
+
+      <SystemTelemetryModal
+        open={telemetryModalOpen}
+        onClose={() => setTelemetryModalOpen(false)}
+      />
     </header>
   );
 };

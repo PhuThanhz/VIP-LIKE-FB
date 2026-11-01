@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, useCallback, lazy, Suspense, type ReactNode } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback, lazy, Suspense, memo, type ReactNode } from 'react';
 import {
   Card,
   Input,
@@ -558,6 +558,104 @@ const getAvatarGradient = (str: string): string => {
   return gradients[Math.abs(hash) % gradients.length];
 };
 
+interface PageCardItemProps {
+  page: FanpageItem;
+  isChecked: boolean;
+  isAlreadyLiked: boolean;
+  cleanName: string;
+  avatarUrl: string;
+  actorMode: 'VIAS' | 'FANPAGES';
+  selectedAccountId: string | number;
+  onToggle: (pageId: string) => void;
+}
+
+const PageCardItem = memo<PageCardItemProps>(({
+  page,
+  isChecked,
+  isAlreadyLiked,
+  cleanName,
+  avatarUrl,
+  actorMode,
+  selectedAccountId,
+  onToggle,
+}) => {
+  return (
+    <div
+      onClick={() => onToggle(page.id)}
+      className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all active:scale-[0.99] ${
+        isChecked
+          ? 'border-blue-500/80 bg-blue-950/40 text-white shadow-sm shadow-blue-500/10'
+          : 'border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700 hover:bg-slate-900/60'
+      }`}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="relative w-7 h-7 shrink-0 rounded-lg overflow-hidden bg-slate-800 border border-slate-700/60 shadow-sm flex items-center justify-center">
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt={cleanName}
+              loading="lazy"
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = 'none';
+                const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
+                if (fallback) fallback.classList.remove('hidden');
+              }}
+            />
+          ) : null}
+          <div
+            className={`w-full h-full text-on-accent font-semibold text-[10px] items-center justify-center ${
+              actorMode === 'VIAS' ? 'bg-emerald-600' : getAvatarGradient(cleanName)
+            } ${avatarUrl ? 'hidden' : 'flex'}`}
+          >
+            {getInitials(cleanName)}
+          </div>
+        </div>
+        <div className="min-w-0">
+          <div className="font-bold text-xs truncate max-w-[125px] sm:max-w-[135px]" title={cleanName}>
+            {cleanName}
+          </div>
+          <div className="flex items-center gap-1 text-[10px] font-mono text-slate-400 truncate">
+            <span>ID: {page.id}</span>
+            {isAlreadyLiked && (
+              <Tag color="orange" className="text-[9px] m-0 border-0 px-1 py-0 leading-tight">
+                Đã like
+              </Tag>
+            )}
+            {actorMode === 'VIAS' ? (
+              <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 font-sans font-medium">
+                Via
+              </span>
+            ) : (
+              page.viaName && selectedAccountId === 'ALL_VIAS' && (
+                <span className="text-[9px] px-1 py-0.2 rounded bg-blue-950/80 text-blue-300 border border-blue-800/80 font-sans font-medium">
+                  {page.viaName}
+                </span>
+              )
+            )}
+            {page.viaStatus === 'EXPIRED' ? (
+              <span className="text-[9px] px-1 py-0.2 rounded bg-rose-950/90 text-rose-300 border border-rose-800/80 font-sans font-medium">
+                🔴 Hết cookie
+              </span>
+            ) : page.viaStatus === 'OK' && selectedAccountId === 'ALL_VIAS' ? (
+              <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 font-sans font-medium">
+                🟢 Live
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+      <Checkbox
+        checked={isChecked}
+        onChange={(e) => {
+          e.stopPropagation();
+          onToggle(page.id);
+        }}
+      />
+    </div>
+  );
+});
+
 const VIA_PAGES_STORAGE_KEY = 'toolzutter:via_fanpages_map_v3';
 
 function getViaKey(account: any, customCookie?: string): string {
@@ -634,6 +732,11 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [scannedPages, setScannedPages] = useState<FanpageItem[]>([]);
   const [actorMode, setActorMode] = useState<'VIAS' | 'FANPAGES'>('VIAS');
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
+  const handleTogglePageId = useCallback((pageId: string) => {
+    setSelectedPageIds((prev) =>
+      prev.includes(pageId) ? prev.filter((id) => id !== pageId) : [...prev, pageId]
+    );
+  }, []);
   const [pageSearchQuery, setPageSearchQuery] = useState('');
   const [viaFilter, setViaFilter] = useState<string>('ALL');
   const [speedMode, setSpeedMode] = useState<'SMART' | 'TURBO' | 'FAST' | 'NORMAL' | 'SAFE'>('FAST');
@@ -4641,7 +4744,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               </div>
                             )}
 
-                            {/* Grid các Via/Fanpage card */}
+                            {/* Grid các Via/Fanpage card (Memoized Component tránh re-render giật lag) */}
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[360px] overflow-y-auto pr-1">
                               {filteredPages.slice(0, pageDisplayLimit).map((page) => {
                                 const isChecked = selectedPageIdsSet.has(page.id);
@@ -4653,89 +4756,17 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   avatarInfo?.avatarUrl ||
                                   (page.id ? `https://graph.facebook.com/${page.id}/picture?type=square` : '');
                                 return (
-                                  <div
+                                  <PageCardItem
                                     key={page.id}
-                                    onClick={() => {
-                                      if (isChecked) {
-                                        setSelectedPageIds(selectedPageIds.filter((id) => id !== page.id));
-                                      } else {
-                                        setSelectedPageIds([...selectedPageIds, page.id]);
-                                      }
-                                    }}
-                                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all active:scale-[0.99] ${
-                                      isChecked
-                                        ? 'border-blue-500/80 bg-blue-950/40 text-white shadow-sm shadow-blue-500/10'
-                                        : 'border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700 hover:bg-slate-900/60'
-                                    }`}
-                                  >
-                                    <div className="flex items-center gap-2 min-w-0">
-                                      <div className="relative w-7 h-7 shrink-0 rounded-lg overflow-hidden bg-slate-800 border border-slate-700/60 shadow-sm flex items-center justify-center">
-                                        {avatarUrl ? (
-                                          <img
-                                            src={avatarUrl}
-                                            alt={cleanName}
-                                            className="w-full h-full object-cover"
-                                            onError={(e) => {
-                                              (e.target as HTMLElement).style.display = 'none';
-                                              const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
-                                              if (fallback) fallback.classList.remove('hidden');
-                                            }}
-                                          />
-                                        ) : null}
-                                        <div
-                                          className={`w-full h-full text-on-accent font-semibold text-[10px] items-center justify-center ${
-                                            actorMode === 'VIAS' ? 'bg-emerald-600' : getAvatarGradient(cleanName)
-                                          } ${avatarUrl ? 'hidden' : 'flex'}`}
-                                        >
-                                          {getInitials(cleanName)}
-                                        </div>
-                                      </div>
-                                      <div className="min-w-0">
-                                        <div className="font-bold text-xs truncate max-w-[125px] sm:max-w-[135px]" title={cleanName}>
-                                          {cleanName}
-                                        </div>
-                                        <div className="flex items-center gap-1 text-[10px] font-mono text-slate-400 truncate">
-                                          <span>ID: {page.id}</span>
-                                          {isAlreadyLiked && (
-                                            <Tag color="orange" className="text-[9px] m-0 border-0 px-1 py-0 leading-tight">
-                                              Đã like
-                                            </Tag>
-                                          )}
-                                          {actorMode === 'VIAS' ? (
-                                            <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 font-sans font-medium">
-                                              Via
-                                            </span>
-                                          ) : (
-                                            page.viaName && selectedAccountId === 'ALL_VIAS' && (
-                                              <span className="text-[9px] px-1 py-0.2 rounded bg-blue-950/80 text-blue-300 border border-blue-800/80 font-sans font-medium">
-                                                {page.viaName}
-                                              </span>
-                                            )
-                                          )}
-                                          {page.viaStatus === 'EXPIRED' ? (
-                                            <span className="text-[9px] px-1 py-0.2 rounded bg-rose-950/90 text-rose-300 border border-rose-800/80 font-sans font-medium">
-                                              🔴 Hết cookie
-                                            </span>
-                                          ) : page.viaStatus === 'OK' && selectedAccountId === 'ALL_VIAS' ? (
-                                            <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 font-sans font-medium">
-                                              🟢 Live
-                                            </span>
-                                          ) : null}
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <Checkbox
-                                      checked={isChecked}
-                                      onChange={(e) => {
-                                        e.stopPropagation();
-                                        if (e.target.checked) {
-                                          setSelectedPageIds([...selectedPageIds, page.id]);
-                                        } else {
-                                          setSelectedPageIds(selectedPageIds.filter((id) => id !== page.id));
-                                        }
-                                      }}
-                                    />
-                                  </div>
+                                    page={page}
+                                    isChecked={isChecked}
+                                    isAlreadyLiked={isAlreadyLiked}
+                                    cleanName={cleanName}
+                                    avatarUrl={avatarUrl}
+                                    actorMode={actorMode}
+                                    selectedAccountId={selectedAccountId}
+                                    onToggle={handleTogglePageId}
+                                  />
                                 );
                               })}
 
