@@ -618,8 +618,8 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
                   type="number"
                   min={5}
                   max={50}
-                  value={systemSettings.cooldownEveryPages ?? 15}
-                  onChange={(e) => set({ cooldownEveryPages: parseInt(e.target.value, 10) || 15 })}
+                  value={systemSettings.cooldownEveryPages ?? 25}
+                  onChange={(e) => set({ cooldownEveryPages: parseInt(e.target.value, 10) || 25 })}
                   className="w-20 font-mono text-xs"
                 />
                 <span className="text-xs text-slate-400">Page</span>
@@ -628,10 +628,10 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
                 <span className="text-xs text-slate-400">Nghỉ</span>
                 <Input
                   type="number"
-                  min={5}
-                  max={60}
-                  value={systemSettings.cooldownDurationSec ?? 15}
-                  onChange={(e) => set({ cooldownDurationSec: parseInt(e.target.value, 10) || 15 })}
+                  min={10}
+                  max={180}
+                  value={systemSettings.cooldownDurationSec ?? 20}
+                  onChange={(e) => set({ cooldownDurationSec: parseInt(e.target.value, 10) || 20 })}
                   className="w-20 font-mono text-xs"
                 />
                 <span className="text-xs text-slate-400">giây</span>
@@ -644,15 +644,32 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
               <span className="block text-xs text-slate-500 mt-0.5">Áp dụng cho Hàng đợi, Săn bài tự động và Buff trực tiếp.</span>
             </div>
             <Select
-              value={systemSettings.defaultSpeedMode || 'SMART'}
+              value={systemSettings.defaultSpeedMode || 'FAST'}
               onChange={(v) => set({ defaultSpeedMode: v })}
-              className="w-48 text-xs"
+              className="w-56 text-xs"
               options={[
-                { value: 'SMART', label: '🛡️ Smart (Khuyên dùng)' },
-                { value: 'NORMAL', label: '⚖️ Chuẩn (3.8s)' },
-                { value: 'SAFE', label: '🛡️ An Toàn (6s)' },
-                { value: 'FAST', label: '🚀 Nhanh (2.5s)' },
-                { value: 'TURBO', label: '⚡ Siêu Tốc (1.5s)' },
+                { value: 'SMART', label: '🛡️ Safe Smart (5.5s - 9s)' },
+                { value: 'NORMAL', label: '⚖️ Chuẩn (6.5s)' },
+                { value: 'SAFE', label: '🛡️ Siêu An Toàn (9s)' },
+                { value: 'FAST', label: '🚀 Nhanh (5.0s)' },
+                { value: 'TURBO', label: '⚡ Nhanh Vừa (4.0s)' },
+              ]}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-t border-slate-800/80">
+            <div>
+              <span className="block text-sm text-slate-200">Số bài viết chạy song song cùng lúc (Parallel Workers)</span>
+              <span className="block text-xs text-slate-500 mt-0.5">Tự động điều phối mỗi bài viết vào một Via độc lập (Lane riêng) để like đồng thời.</span>
+            </div>
+            <Select
+              value={Number(systemSettings.maxParallelTasks || 2)}
+              onChange={(v) => set({ maxParallelTasks: v })}
+              className="w-56 text-xs"
+              options={[
+                { value: 1, label: '1 bài (Tuần tự)' },
+                { value: 2, label: '⚡ 2 bài cùng lúc (Khuyên dùng)' },
+                { value: 3, label: '⚡⚡ 3 bài cùng lúc' },
+                { value: 4, label: '🔥 4 bài cùng lúc (Cần nhiều Via)' },
               ]}
             />
           </div>

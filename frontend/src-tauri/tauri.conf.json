@@ -5,7 +5,7 @@
   "identifier": "com.viplike.radiant",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5174",
+    "devUrl": "http://localhost:5188",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },

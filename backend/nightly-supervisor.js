@@ -59,6 +59,22 @@ function cleanupZombieBrowsers(activeJobsCount = 0) {
 }
 
 /**
+ * Tự động giải phóng bộ nhớ đệm HTTP và GPU Cache trong browser profiles
+ */
+function cleanupProfileCaches(activeJobsCount = 0) {
+  if (activeJobsCount > 0) return { cleaned: false, reason: 'Active jobs running' };
+  try {
+    const profilesDir = path.join(__dirname, 'browser_profiles');
+    if (!fs.existsSync(profilesDir)) return { cleaned: false };
+    execSync('rm -rf backend/browser_profiles/*/Default/Cache backend/browser_profiles/*/Default/"Code Cache" backend/browser_profiles/*/Default/GPUCache 2>/dev/null || true');
+    console.log('[Supervisor] 🧹 Đã dọn dẹp bộ nhớ đệm rác trong browser_profiles.');
+    return { cleaned: true };
+  } catch (e) {
+    return { cleaned: false, error: e.message };
+  }
+}
+
+/**
  * Rà soát sức khỏe 1 vòng tuần tra
  */
 async function performPatrolRound(roundIndex = 1) {
@@ -178,8 +194,9 @@ async function performPatrolRound(roundIndex = 1) {
       `   ⏳ Hàng đợi Buff: Tổng ${roundResult.queue.total} | Chờ: ${roundResult.queue.waiting} | Đang chạy: ${roundResult.queue.running} | Xong: ${roundResult.queue.completed} | Lỗi: ${roundResult.queue.failed}`
     );
 
-    // 5. Tự động dọn dẹp Chromium rác nếu không có task nào đang chạy
+    // 5. Tự động dọn dẹp Chromium rác và bộ nhớ đệm profile nếu không có task nào đang chạy
     const cleanRes = cleanupZombieBrowsers(runningCount);
+    cleanupProfileCaches(runningCount);
     roundResult.system.memoryCleaned = cleanRes.cleaned;
     if (cleanRes.cleaned) roundResult.system.zombieKilled = cleanRes.count || 1;
   } catch (err) {
@@ -352,4 +369,5 @@ module.exports = {
   generateAndSendMorningReport,
   startDaemon,
   cleanupZombieBrowsers,
+  cleanupProfileCaches,
 };

@@ -10,6 +10,7 @@ export interface SidebarStats {
   historyCount?: number;
   monitorsCount?: number;
   accountsCount?: number;
+  deadViasCount?: number;
 }
 
 interface SidebarProps {
@@ -32,6 +33,13 @@ const renderBadge = (key: NavKey, stats: SidebarStats): React.ReactNode => {
     case 'buff-hunter':
       return <Count value={stats.monitorsCount} />;
     case 'via-management':
+      if (stats.deadViasCount && stats.deadViasCount > 0) {
+        return (
+          <span className="ml-auto flex items-center gap-1 text-[11px] font-semibold text-rose-400 bg-rose-500/20 border border-rose-500/40 px-1.5 py-0.5 rounded-full animate-pulse">
+            ⚠️ {stats.deadViasCount} Via lỗi
+          </span>
+        );
+      }
       return <Count value={stats.accountsCount} />;
     default:
       return null;
@@ -45,10 +53,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
   onBreakpoint,
   stats = {},
 }) => {
-  const { monitorsCount, queueCount, historyCount, accountsCount } = stats;
+  const { monitorsCount, queueCount, historyCount, accountsCount, deadViasCount } = stats;
 
   const menuItems = useMemo<MenuProps['items']>(() => {
-    const badgeStats = { monitorsCount, queueCount, historyCount, accountsCount };
+    const badgeStats = { monitorsCount, queueCount, historyCount, accountsCount, deadViasCount };
 
     if (collapsed) {
       return NAV_ITEMS.filter((item) => !item.parent).map((item) => {

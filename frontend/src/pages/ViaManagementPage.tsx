@@ -609,6 +609,36 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     }
   };
 
+  const [isCheckingAllVias, setIsCheckingAllVias] = useState(false);
+
+  // Kiểm tra hạn Cookie của toàn bộ dàn Via trên Facebook
+  const handleCheckAllViasLive = async () => {
+    setIsCheckingAllVias(true);
+    message.loading({
+      content: 'Đang kiểm tra tính hợp lệ và hạn của Cookie trên Facebook cho toàn bộ dàn Via...',
+      key: 'checkAllViaHealth',
+      duration: 30,
+    });
+    try {
+      const res = await api.post('/buff-vias/health-check');
+      if (res.data?.success) {
+        message.success({
+          content: `Kiểm tra hoàn tất: ${res.data.liveCount}/${res.data.total} Via CÒN HẠN (LIVE)!`,
+          key: 'checkAllViaHealth',
+          duration: 4,
+        });
+        onRefresh();
+        loadCachedPages();
+      } else {
+        message.error({ content: res.data?.error || 'Lỗi kiểm tra Via', key: 'checkAllViaHealth' });
+      }
+    } catch (e: any) {
+      message.error({ content: 'Lỗi kiểm tra sức khỏe Cookie: ' + e.message, key: 'checkAllViaHealth' });
+    } finally {
+      setIsCheckingAllVias(false);
+    }
+  };
+
   // Test proxy trong modal thêm / sửa Via
   const handleTestModalProxy = async () => {
     const rawProxy = form.getFieldValue('proxyUrl');
@@ -1004,9 +1034,12 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     const existingCookie = record.cookieString || '';
     const matchCUser = existingCookie.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1] || record.uid || '';
     const matchXs = existingCookie.match(/(?:^|;\s*)xs=([^;]+)/)?.[1] || '';
+
+    // NẾU VIA ĐÃ HẾT HẠN HOẶC CHECKPOINT: TỰ ĐỘNG XÓA TRỐNG Ô XS ĐỂ NGƯỜI DÙNG DÁN COOKIE MỚI VÀO NGAY LẬP TỨC
+    const isDead = record.tokenStatus === 'EXPIRED' || record.tokenStatus === 'CHECKPOINT' || record.tokenStatus === 'INVALID';
     setCookieCUser(matchCUser);
-    setCookieXs(matchXs);
-    setRawCookieInput(existingCookie);
+    setCookieXs(isDead ? '' : matchXs);
+    setRawCookieInput(isDead ? '' : existingCookie);
     setShowRawCookieInput(false);
     setNewProxyInput(record.proxyUrl || '');
     setAutoRescanAfterUpdate(true);
@@ -1056,17 +1089,19 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     if (!updateCookieModalVia) return;
 
     let finalCookie = '';
-    const cleanCUser = cookieCUser.trim();
+    const cleanCUser = cookieCUser.trim() || updateCookieModalVia.uid || '';
     const cleanXs = cookieXs.trim();
 
     if (cleanCUser && cleanXs) {
       finalCookie = `c_user=${cleanCUser}; xs=${cleanXs};`;
     } else if (rawCookieInput.trim()) {
       finalCookie = rawCookieInput.trim();
+    } else if (cleanXs) {
+      finalCookie = `c_user=${updateCookieModalVia.uid}; xs=${cleanXs};`;
     }
 
-    if (!finalCookie || (!finalCookie.includes('c_user=') && !cleanCUser) || (!finalCookie.includes('xs=') && !cleanXs)) {
-      message.error('Vui lòng điền đủ cả 2 dòng: c_user và xs!');
+    if (!finalCookie || !cleanXs) {
+      message.error('Vui lòng điền mã phiên xs!');
       return;
     }
 
@@ -1379,15 +1414,16 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
               <span className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-emerald-400' : 'bg-rose-400'}`} />
               {statusText}
             </span>
-            <Tooltip title="Kiểm tra Cookie còn sống hay không">
+            <Tooltip title="Kiểm tra Cookie của Via này còn sống hay không">
               <Button
                 size="small"
-                type="link"
+                type="dashed"
+                icon={<SafetyCertificateOutlined className="text-cyan-400" />}
                 loading={isTesting}
                 onClick={() => rowHandlersRef.current.handleTestViaLive(record)}
-                className="p-0 h-auto text-xs"
+                className="!text-[11px] !h-6 !px-2 text-cyan-300 border-cyan-800/80 bg-cyan-950/20 hover:border-cyan-500 hover:text-cyan-200"
               >
-                Kiểm tra
+                Kiểm tra hạn
               </Button>
             </Tooltip>
           </div>
@@ -1439,7 +1475,17 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             Thêm Cookie của Via, hệ thống tự quét các Fanpage mà Via đang quản lý.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <Button
+            type="primary"
+            icon={<SafetyCertificateOutlined className="text-cyan-200" />}
+            loading={isCheckingAllVias}
+            onClick={handleCheckAllViasLive}
+            className="!bg-cyan-600 hover:!bg-cyan-500 font-semibold shadow-md"
+            title="Kiểm tra xem toàn bộ Cookie của các tài khoản Via còn hạn hay không"
+          >
+            🩺 Kiểm tra hạn Cookie (Tất cả Via)
+          </Button>
           <Button
             loading={loading}
             onClick={() => {
@@ -2387,36 +2433,70 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
           {/* DÒNG 2: xs */}
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
               <label className="text-xs font-semibold text-slate-200">
                 2. Dòng 2: <code className="text-cyan-300 font-bold">xs</code> (Mã phiên đăng nhập / Token Session) <span className="text-rose-400">*</span>
               </label>
-              <span className="text-[11px] text-slate-400 font-mono">Chuỗi mã phiên xs</span>
+              <div className="flex items-center gap-2">
+                {cookieXs && (
+                  <button
+                    type="button"
+                    onClick={() => setCookieXs('')}
+                    className="text-[11px] text-rose-400 hover:text-rose-300 bg-rose-950/40 border border-rose-800/50 px-2 py-0.5 rounded cursor-pointer transition-colors"
+                  >
+                    🗑️ Xóa Cookie cũ
+                  </button>
+                )}
+                <span className="text-[11px] text-cyan-400 font-mono">⚡ Chỉ cần nhập mã xs này là đủ</span>
+              </div>
             </div>
             <Input.TextArea
               rows={3}
-              placeholder="Ví dụ: 2%3A0UeZEJylLU5ccA%3A2%3A1793101411%3A-1%3A-1%3A%3AAczItMCQpI6mtZlsgvsnMlR-YWCKXDyuyWVZu4d9fA"
+              allowClear
+              placeholder="Dán mã xs mới vào đây (Ví dụ: 2%3A0UeZEJylLU5ccA%3A2...)"
               value={cookieXs}
               onChange={(e) => handleXsChange(e.target.value)}
               className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl hover:border-cyan-500 focus:border-cyan-500"
             />
+            {updateCookieModalVia?.tokenStatus === 'EXPIRED' || updateCookieModalVia?.tokenStatus === 'CHECKPOINT' ? (
+              <div className="mt-1.5 text-[11px] text-amber-300 flex items-center gap-1.5 bg-amber-950/40 border border-amber-800/40 px-2.5 py-1.5 rounded-lg">
+                <span>✨</span>
+                <span>Hệ thống đã tự động dọn sạch Cookie cũ đã hết hạn. Bạn chỉ cần copy giá trị <b className="text-white">xs</b> mới rồi dán (Ctrl+V) vào đây!</span>
+              </div>
+            ) : (
+              <div className="mt-1 text-[11px] text-slate-400">
+                💡 Dòng 1 (<span className="text-cyan-400 font-mono">c_user</span>) đã được tự động điền sẵn theo UID của Via. Bạn chỉ cần copy mỗi giá trị cookie <b className="text-white">xs</b> dán vào đây rồi bấm Lưu!
+              </div>
+            )}
           </div>
 
           {/* TÙY CHỌN DÁN CẢ CHUỖI TOÀN BỘ (NẾU MUỐN) */}
           <div className="pt-0.5">
-            <button
-              type="button"
-              onClick={() => setShowRawCookieInput(!showRawCookieInput)}
-              className="text-xs text-sky-400 hover:text-sky-300 underline bg-transparent border-0 p-0 cursor-pointer flex items-center gap-1"
-            >
-              <span>{showRawCookieInput ? '▲ Thu gọn ô dán chuỗi gộp' : '▼ Hoặc bấm vào đây để dán nguyên chuỗi Cookie gộp'}</span>
-            </button>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setShowRawCookieInput(!showRawCookieInput)}
+                className="text-xs text-sky-400 hover:text-sky-300 underline bg-transparent border-0 p-0 cursor-pointer flex items-center gap-1"
+              >
+                <span>{showRawCookieInput ? '▲ Thu gọn ô dán chuỗi gộp' : '▼ Hoặc bấm vào đây để dán nguyên chuỗi Cookie gộp'}</span>
+              </button>
+              {showRawCookieInput && rawCookieInput && (
+                <button
+                  type="button"
+                  onClick={() => setRawCookieInput('')}
+                  className="text-[11px] text-rose-400 hover:text-rose-300 bg-transparent border-0 cursor-pointer"
+                >
+                  🗑️ Xóa chuỗi gộp
+                </button>
+              )}
+            </div>
 
             {showRawCookieInput && (
               <div className="mt-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5">
                 <span className="text-[11px] text-slate-400">Dán chuỗi gộp (tự động phân tích vào 2 ô trên):</span>
                 <Input.TextArea
                   rows={2}
+                  allowClear
                   placeholder="c_user=...; xs=... hoặc UID|PASS|2FA|COOKIE..."
                   value={rawCookieInput}
                   onChange={(e) => handleRawCookieChange(e.target.value)}

@@ -1,0 +1,36 @@
+#!/bin/bash
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+DIR="/Users/huynhthanhphu/Documents/VIPLIKE-RADIANT"
+BACKEND_PORT=3100
+FRONTEND_PORT=5188
+
+# 1. Khởi động MySQL nếu chưa chạy
+if ! lsof -iTCP:3306 -sTCP:LISTEN -P -n >/dev/null 2>&1; then
+    brew services start mysql >/dev/null 2>&1 || true
+    sleep 1
+fi
+
+# 2. Khởi động Backend (Port 3100) nếu chưa chạy
+if ! lsof -iTCP:${BACKEND_PORT} -sTCP:LISTEN -P -n >/dev/null 2>&1; then
+    cd "$DIR/backend" && (nohup node server.js > /tmp/viplike-backend.log 2>&1 & disown)
+fi
+
+# 3. Khởi động Frontend (Port 5188) nếu chưa chạy
+if ! lsof -iTCP:${FRONTEND_PORT} -sTCP:LISTEN -P -n >/dev/null 2>&1; then
+    cd "$DIR/frontend" && (nohup node ./node_modules/vite/bin/vite.js --port ${FRONTEND_PORT} > /tmp/viplike-frontend.log 2>&1 & disown)
+fi
+
+# 4. Chờ Frontend sẵn sàng (tối đa 6 giây)
+for i in {1..12}; do
+    if lsof -iTCP:${FRONTEND_PORT} -sTCP:LISTEN -P -n >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.5
+done
+
+# 5. Mở trình duyệt vào giao diện VIPLIKE RADIANT
+open "http://localhost:${FRONTEND_PORT}"
+
+# 6. Hiển thị thông báo macOS
+osascript -e "display notification \"Hệ thống VIPLIKE RADIANT đã sẵn sàng tại cổng ${FRONTEND_PORT}!\" with title \"VIPLIKE RADIANT\" sound name \"Glass\"" >/dev/null 2>&1 || true

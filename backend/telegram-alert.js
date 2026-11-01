@@ -31,10 +31,10 @@ const DEFAULT_SETTINGS = {
   notifyOnQueueIssue: true,
   notifyOnActionBlocked: true,
   // Smart Adaptive Pacing & Chống hạn chế FB:
-  defaultSpeedMode: 'SMART',
+  defaultSpeedMode: 'FAST',
   smartAdaptivePacing: true,
-  cooldownEveryPages: 15,
-  cooldownDurationSec: 15,
+  cooldownEveryPages: 25,
+  cooldownDurationSec: 20,
   autoStopOnActionBlocked: true,
   // Giờ yên tĩnh: trong khung này chỉ gửi tin nghiêm trọng, tin còn lại được gom lại gửi sau
   quietHoursEnabled: false,
@@ -54,8 +54,9 @@ const DEFAULT_SETTINGS = {
   autoBuffDelayMinutes: 3,
   autoBuffReaction: 'RANDOM_POSITIVE',
   // Quy mô lớn (1000+ page): số page tối đa cho 1 bài khi chọn "xoay vòng", số via chạy song song
-  maxPagesPerPost: 150,
+  maxPagesPerPost: 250,
   buffParallelVias: 4,
+  maxParallelTasks: 2, // Số bài viết chạy song song cùng lúc trong hàng đợi
   isEmergencyStopped: false,
   emergencyReason: '',
   emergencyStoppedAt: null,
@@ -370,7 +371,9 @@ async function notifyBuffCompleted({
   targetUrl,
   success,
   total,
+  originalTarget = 0,
   failed,
+  autoRefilled = 0,
   durationSec,
   reactionType,
   screenshotPath = null,
@@ -381,14 +384,21 @@ async function notifyBuffCompleted({
   const now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
   const successRate = total > 0 ? Math.round((success / total) * 100) : 0;
   const statusEmoji = successRate >= 80 ? '🎉' : '⚠️';
+  const refillText = autoRefilled > 0 ? ` <i>(Đã tự động bù ${autoRefilled} Page lỗi để đủ KPI)</i>` : '';
+
+  const requestedKpi = parseInt(originalTarget, 10) || total;
+  const isCapped = requestedKpi > total;
 
   const msg = [
     `${statusEmoji} <b>[BUFF HOÀN TẤT CHIẾN DỊCH]</b>`,
     `━━━━━━━━━━━━━━━━━━`,
     `🔗 <b>Bài viết:</b> <a href="${targetUrl}">${targetUrl}</a>`,
     `❤️ <b>Loại Reaction:</b> ${reactionType || 'RANDOM'}`,
-    `✅ <b>Thành công:</b> <b>${success}</b> / ${total} Page (${successRate}%)`,
-    `❌ <b>Thất bại:</b> ${failed || 0}`,
+    isCapped
+      ? `🎯 <b>Mục tiêu ban đầu:</b> <b>${requestedKpi}</b> like\n⚠️ <b>Số Page khả dụng chưa like:</b> <b>${total}</b> Page <i>(Đã chạy hết 100% Page khả dụng hiện có của các Via đang LIVE)</i>`
+      : `🎯 <b>KPI Mục tiêu:</b> <b>${total}</b> like`,
+    `✅ <b>Thành công:</b> <b>${success}</b> / ${total} like khả dụng (${successRate}%)${refillText}`,
+    failed > 0 ? `❌ <b>Bị lỗi đã bù:</b> ${failed} Page` : ``,
     `⏱️ <b>Thời gian xử lý:</b> ${formatDurationVi(durationSec)}`,
     `⏰ <b>Hoàn tất lúc:</b> ${now}`,
     `━━━━━━━━━━━━━━━━━━`,

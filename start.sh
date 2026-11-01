@@ -21,15 +21,22 @@ if ! command -v node >/dev/null 2>&1; then
     exit 1
 fi
 
+# 1. Khởi động MySQL nếu chưa chạy
+if ! lsof -iTCP:3306 -sTCP:LISTEN -P -n >/dev/null 2>&1; then
+    echo "🗄️ Đang khởi động MySQL..."
+    brew services start mysql >/dev/null 2>&1 || true
+    sleep 1
+fi
+
 echo "📦 Đang kiểm tra thư viện dependencies..."
 if [ ! -d "node_modules" ] || [ ! -d "backend/node_modules" ] || [ ! -d "frontend/node_modules" ]; then
     echo "⏳ Đang cài đặt thư viện cần thiết lần đầu..."
     npm run setup
 fi
 
-echo "🚀 Đang khởi chạy VIPLIKE RADIANT (Backend :3100 & Frontend :5174)..."
+echo "🚀 Đang khởi chạy VIPLIKE RADIANT (Backend :3100 & Frontend :5188)..."
 
 # Mở trình duyệt sau 3 giây
-(sleep 3 && open "http://localhost:5174" 2>/dev/null || xdg-open "http://localhost:5174" 2>/dev/null || true) &
+(sleep 3 && open "http://localhost:5188" 2>/dev/null || xdg-open "http://localhost:5188" 2>/dev/null || true) &
 
 npm run dev

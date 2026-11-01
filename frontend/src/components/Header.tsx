@@ -11,9 +11,12 @@ import {
   PictureOutlined,
   UserAddOutlined,
   DownOutlined,
+  WarningFilled,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import AuthModal, { AuthModalTab } from './auth/AuthModal';
 import WallpaperModal from './common/WallpaperModal';
+import { useCookieAlert } from './common/CookieAlertManager';
 import { getRootNavItem } from '../config/navigation';
 import { CurrentUser, isAdmin } from '../auth/session';
 
@@ -40,6 +43,7 @@ const HeaderComponent: React.FC<HeaderProps> = ({
   const [accountModalTab, setAccountModalTab] = useState<AuthModalTab | null>(null);
   const [wallpaperModalOpen, setWallpaperModalOpen] = useState(false);
 
+  const { totalDeadCount, openModal } = useCookieAlert();
   const displayName = currentUser.fullName || currentUser.username;
   const initial = (displayName || '?').trim().charAt(0).toUpperCase();
 
@@ -84,21 +88,45 @@ const HeaderComponent: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        <Dropdown menu={{ items: userMenuItems }} trigger={['click']} placement="bottomRight">
-          <button
-            type="button"
-            className="flex items-center gap-2.5 h-10 pl-1 pr-2.5 rounded-full border border-slate-800 bg-slate-900/60 hover:border-slate-600 transition-colors cursor-pointer shrink-0"
+        <div className="flex items-center gap-3">
+          <Button
+            size="small"
+            icon={<SafetyCertificateOutlined className="text-cyan-400" />}
+            onClick={() => openModal()}
+            className="hidden sm:inline-flex items-center text-xs text-cyan-300 border-cyan-800/80 bg-cyan-950/40 hover:border-cyan-500 hover:text-cyan-100"
+            title="Kiểm tra Cookie còn hạn hay không"
           >
-            <span className="w-8 h-8 rounded-full bg-blue-600 text-white text-sm font-semibold flex items-center justify-center">
-              {initial}
-            </span>
-            <span className="hidden md:flex flex-col items-start leading-tight">
-              <span className="text-sm text-slate-100 max-w-[160px] truncate">{displayName}</span>
-              <span className="text-[11px] text-slate-500">{admin ? 'Quản trị viên' : 'Thành viên'}</span>
-            </span>
-            <DownOutlined className="text-[10px] text-slate-500" />
-          </button>
-        </Dropdown>
+            Kiểm tra Cookie
+          </Button>
+
+          {totalDeadCount > 0 && (
+            <button
+              type="button"
+              onClick={() => openModal()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-500/20 border border-rose-500/50 text-rose-300 hover:text-white hover:bg-rose-500/30 transition-all text-xs font-semibold cursor-pointer shadow-sm shadow-rose-950 animate-pulse"
+              title="Phát hiện Via bị hết hạn Cookie hoặc Checkpoint! Bấm để cập nhật"
+            >
+              <WarningFilled className="text-rose-400 text-sm" />
+              <span>{totalDeadCount} Via lỗi Cookie</span>
+            </button>
+          )}
+
+          <Dropdown menu={{ items: userMenuItems }} trigger={['click']} placement="bottomRight">
+            <button
+              type="button"
+              className="flex items-center gap-2.5 h-10 pl-1 pr-2.5 rounded-full border border-slate-800 bg-slate-900/60 hover:border-slate-600 transition-colors cursor-pointer shrink-0"
+            >
+              <span className="w-8 h-8 rounded-full bg-blue-600 text-white text-sm font-semibold flex items-center justify-center">
+                {initial}
+              </span>
+              <span className="hidden md:flex flex-col items-start leading-tight">
+                <span className="text-sm text-slate-100 max-w-[160px] truncate">{displayName}</span>
+                <span className="text-[11px] text-slate-500">{admin ? 'Quản trị viên' : 'Thành viên'}</span>
+              </span>
+              <DownOutlined className="text-[10px] text-slate-500" />
+            </button>
+          </Dropdown>
+        </div>
       </div>
 
       <WallpaperModal open={wallpaperModalOpen} onClose={() => setWallpaperModalOpen(false)} />

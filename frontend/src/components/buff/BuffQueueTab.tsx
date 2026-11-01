@@ -11,6 +11,7 @@ import {
   Tooltip,
   Modal,
   Input,
+  InputNumber,
   Select,
   Segmented,
   Badge,
@@ -42,6 +43,7 @@ import {
   UserOutlined,
   SmileOutlined,
   UnorderedListOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
 
 const { TextArea } = Input;
@@ -131,6 +133,8 @@ export interface BuffQueueTabProps {
   onResume?: () => Promise<void> | void;
   isEmergencyStopped?: boolean;
   totalAvailablePages?: number;
+  maxParallelTasks?: number;
+  onViewHistory?: (targetUrl?: string) => void;
 }
 
 type FilterStatus = 'ALL' | 'RUNNING' | 'QUEUED' | 'COMPLETED' | 'FAILED';
@@ -175,6 +179,8 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
   onResume,
   isEmergencyStopped = false,
   totalAvailablePages = 50,
+  maxParallelTasks = 2,
+  onViewHistory,
 }) => {
   const { message } = App.useApp();
 
@@ -182,10 +188,118 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('ALL');
   const [searchKeyword, setSearchKeyword] = useState<string>('');
 
-  // Modal nạp bài
+  // Modal nạp nhanh bài viết vào hàng đợi
+  const [isQuickAddModalOpen, setIsQuickAddModalOpen] = useState(false);
+  const [quickAddMode, setQuickAddMode] = useState<'SINGLE' | 'BATCH'>('SINGLE');
+  const [quickTargetUrl, setQuickTargetUrl] = useState('');
+  const [quickBatchUrls, setQuickBatchUrls] = useState('');
+  const [quickTargetLikes, setQuickTargetLikes] = useState<number | 'ALL'>(30);
+  const [quickReaction, setQuickReaction] = useState('RANDOM_POSITIVE');
+  const [quickDelayMinutes, setQuickDelayMinutes] = useState(0);
+  const [quickSpeedMode, setQuickSpeedMode] = useState<'FAST' | 'SMART' | 'SAFE'>('SMART');
+  const [isSubmittingQuickAdd, setIsSubmittingQuickAdd] = useState(false);
 
   // Modal xem chi tiết bài viết
   const [detailModalTask, setDetailModalTask] = useState<QueueTask | null>(null);
+
+  // Xử lý dán link nhanh từ clipboard
+  const handlePasteQuickUrl = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && (text.includes('facebook.com') || text.includes('fb.watch') || text.includes('fb.com'))) {
+        if (quickAddMode === 'SINGLE') {
+          setQuickTargetUrl(text.trim());
+        } else {
+          setQuickBatchUrls((prev) => (prev ? `${prev}\n${text.trim()}` : text.trim()));
+        }
+        message.success('Đã dán link Facebook từ bộ nhớ tạm!');
+      } else if (text) {
+        if (quickAddMode === 'SINGLE') setQuickTargetUrl(text.trim());
+        else setQuickBatchUrls((prev) => (prev ? `${prev}\n${text.trim()}` : text.trim()));
+      }
+    } catch {
+      message.info('Vui lòng nhấn Ctrl+V (hoặc Cmd+V) để dán link');
+    }
+  };
+
+  // Submit nạp bài nhanh vào hàng đợi
+  const handleQuickAddSubmit = async () => {
+    if (quickAddMode === 'SINGLE') {
+      const trimmedUrl = quickTargetUrl.trim();
+      if (!trimmedUrl) {
+        message.warning('Vui lòng nhập link bài viết Facebook!');
+        return;
+      }
+      setIsSubmittingQuickAdd(true);
+      try {
+        const res = await axios.post(`${workerBaseUrl}/api/buff-queue/add`, {
+          targetUrl: trimmedUrl,
+          targetLikes: quickTargetLikes,
+          reactionType: quickReaction,
+          delayMinutes: quickDelayMinutes,
+          speedMode: quickSpeedMode,
+          allowRebuff: true,
+          source: 'MANUAL_QUICK_ADD',
+        });
+        if (res.data?.success) {
+          message.success(
+            res.data.alreadyQueued
+              ? 'Bài viết này đang nằm sẵn trong hàng đợi'
+              : 'Đã thêm bài viết vào hàng đợi xử lý!'
+          );
+          setIsQuickAddModalOpen(false);
+          setQuickTargetUrl('');
+          onRefresh();
+        } else {
+          message.error(res.data?.error || 'Không thể thêm vào hàng đợi');
+        }
+      } catch (err: any) {
+        message.error(err.response?.data?.error || err.message || 'Lỗi kết nối máy chủ');
+      } finally {
+        setIsSubmittingQuickAdd(false);
+      }
+    } else {
+      const lines = quickBatchUrls
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.startsWith('http://') || l.startsWith('https://'));
+
+      if (lines.length === 0) {
+        message.warning('Vui lòng nhập ít nhất 1 link Facebook hợp lệ (bắt đầu bằng http/https)!');
+        return;
+      }
+
+      setIsSubmittingQuickAdd(true);
+      try {
+        const res = await axios.post(`${workerBaseUrl}/api/buff-queue/batch-add`, {
+          urls: lines,
+          targetLikes: quickTargetLikes,
+          reactionType: quickReaction,
+          delayMinutes: quickDelayMinutes,
+          speedMode: quickSpeedMode,
+          staggerMinutes: 2,
+          allowRebuff: true,
+        });
+        if (res.data?.success) {
+          const addedCount = res.data.added?.length || lines.length;
+          const skippedCount = res.data.skipped?.length || 0;
+          message.success(
+            `Đã nạp ${addedCount} bài viết vào hàng đợi!` +
+              (skippedCount > 0 ? ` (Bỏ qua ${skippedCount} bài trùng)` : '')
+          );
+          setIsQuickAddModalOpen(false);
+          setQuickBatchUrls('');
+          onRefresh();
+        } else {
+          message.error(res.data?.error || 'Lỗi khi nạp danh sách bài');
+        }
+      } catch (err: any) {
+        message.error(err.response?.data?.error || err.message || 'Lỗi kết nối máy chủ');
+      } finally {
+        setIsSubmittingQuickAdd(false);
+      }
+    }
+  };
 
   // Auto-refresh interval (polling 3s khi có bài RUNNING)
   const hasRunning = useMemo(() => queueItems.some((it) => it.status === 'RUNNING'), [queueItems]);
@@ -479,12 +593,19 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
 
         if (task.status === 'COMPLETED' && task.result) {
           const duration = task.result.durationSec ? formatDuration(task.result.durationSec) : '';
+          const targetKpi = (task.result as any).targetKpi || (task.targetLikes === 'ALL' ? task.result.total : task.targetLikes);
+          const autoRefilled = (task.result as any).autoRefilledCount || 0;
           return (
             <div className="space-y-1">
               <div className="text-xs text-slate-200">
                 <span className="font-semibold text-emerald-400">{task.result.success}</span>
-                <span className="text-slate-500"> / {task.result.total} thành công</span>
+                <span className="text-slate-500"> / {targetKpi || task.result.total} like</span>
               </div>
+              {autoRefilled > 0 && (
+                <div className="text-[10px] text-amber-400/90 font-medium">
+                  ⚡ Đã tự bù {autoRefilled} Page lỗi
+                </div>
+              )}
               {duration && (
                 <div className="text-[11px] text-slate-500">Thời gian: {duration}</div>
               )}
@@ -517,9 +638,28 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             Chi tiết
           </Button>
 
+          {task.status === 'COMPLETED' && onViewHistory && (
+            <Tooltip title="Xem chi tiết trong tab Lịch sử">
+              <Button
+                size="small"
+                icon={<HistoryOutlined />}
+                onClick={() => onViewHistory(task.targetUrl)}
+                className="text-xs px-2 text-cyan-300 border-cyan-800/60 bg-cyan-950/40 hover:bg-cyan-900/50"
+              >
+                Lịch sử
+              </Button>
+            </Tooltip>
+          )}
+
           {task.status === 'QUEUED' && (
-            <Tooltip title="Chạy ngay lập tức">
-              <Button size="small" onClick={() => onRunNow(task.id)} className="text-xs px-2.5">
+            <Tooltip title="Đưa lên đầu và kích hoạt chạy ngay lập tức">
+              <Button
+                size="small"
+                type="primary"
+                icon={<ThunderboltOutlined />}
+                onClick={() => onRunNow(task.id)}
+                className="text-xs px-2.5 bg-amber-600 hover:bg-amber-500 border-none font-semibold text-white shadow-sm flex items-center gap-1"
+              >
                 Chạy ngay
               </Button>
             </Tooltip>
@@ -564,9 +704,12 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                 <span className={`w-1.5 h-1.5 rounded-full ${isEmergencyStopped ? 'bg-rose-400' : 'bg-emerald-400'}`} />
                 {isEmergencyStopped ? 'Đang tạm dừng' : 'Đang hoạt động'}
               </span>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/25">
+                ⚡ Đa tiến trình: {maxParallelTasks} bài song song
+              </span>
             </div>
             <p className="text-xs text-slate-400 mt-1 mb-0 max-w-2xl">
-              Bài viết được xử lý lần lượt theo lịch, chia đều cho {scannedPages.length || totalAvailablePages} Page.
+              Hệ thống điều phối tối đa {maxParallelTasks} bài viết chạy đồng thời trên các Via độc lập, chia đều cho {scannedPages.length || totalAvailablePages} Page.
             </p>
           </div>
 
@@ -576,15 +719,29 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                 Dọn bài đã xong ({completedItems.length})
               </Button>
             )}
-            <Button onClick={onRefresh}>
+            <Button onClick={onRefresh} icon={<ReloadOutlined />}>
               Làm mới
             </Button>
             {isEmergencyStopped && onResume && (
-              <Button onClick={onResume}>Tiếp tục</Button>
+              <Button onClick={onResume} className="border-emerald-500 text-emerald-400">Tiếp tục</Button>
             )}
-            <Button type="primary" icon={<PlusOutlined />} onClick={onCreateNew} className="font-medium">
-              Thêm bài viết
+            <Button
+              type="primary"
+              icon={<ThunderboltOutlined />}
+              onClick={() => setIsQuickAddModalOpen(true)}
+              className="font-semibold bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 border-none shadow-sm flex items-center gap-1.5"
+            >
+              ⚡ Nạp nhanh hàng đợi
             </Button>
+            {onCreateNew && (
+              <Button
+                icon={<PlusOutlined />}
+                onClick={onCreateNew}
+                className="text-slate-300 border-slate-700 hover:border-slate-500 text-xs"
+              >
+                Cấu hình đầy đủ
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -823,12 +980,22 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           className="ant-table-dark-custom"
           locale={{
             emptyText: (
-              <div className="py-16 text-center text-slate-400 text-xs space-y-2">
-                <FieldTimeOutlined className="text-3xl text-slate-600 block mb-2" />
-                <div className="font-semibold text-slate-300">Hàng đợi đang trống</div>
+              <div className="py-16 text-center text-slate-400 text-xs space-y-3">
+                <FieldTimeOutlined className="text-3xl text-slate-600 block mb-1" />
+                <div className="font-semibold text-slate-300 text-sm">Hàng đợi đang trống</div>
                 <p className="max-w-md mx-auto text-slate-500">
-                  Bấm <strong>"Thêm bài viết"</strong>, chọn "Đưa vào hàng đợi" ở tab Tạo mới.
+                  Chưa có bài viết nào trong hàng đợi. Bạn có thể nạp nhanh bài viết ngay tại đây!
                 </p>
+                <div>
+                  <Button
+                    type="primary"
+                    icon={<ThunderboltOutlined />}
+                    onClick={() => setIsQuickAddModalOpen(true)}
+                    className="font-semibold bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 border-none shadow-sm text-xs"
+                  >
+                    ⚡ Nạp nhanh bài viết vào hàng đợi
+                  </Button>
+                </div>
               </div>
             ),
           }}
@@ -849,6 +1016,21 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           <Button key="close" onClick={() => setDetailModalTask(null)} className="text-xs">
             Đóng
           </Button>,
+          detailModalTask?.status === 'COMPLETED' && onViewHistory && (
+            <Button
+              key="viewHistory"
+              type="primary"
+              icon={<HistoryOutlined />}
+              onClick={() => {
+                const url = detailModalTask.targetUrl;
+                setDetailModalTask(null);
+                onViewHistory(url);
+              }}
+              className="bg-cyan-600 hover:bg-cyan-500 text-xs font-semibold"
+            >
+              Xem trong Lịch sử
+            </Button>
+          ),
           detailModalTask?.status === 'QUEUED' && (
             <Button
               key="runNow"
@@ -1025,6 +1207,231 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* 7. MODAL NẠP NHANH BÀI VIẾT VÀO HÀNG ĐỢI */}
+      <Modal
+        title={
+          <div className="flex items-center gap-2.5 text-slate-100">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+              <ThunderboltOutlined className="text-base" />
+            </div>
+            <div>
+              <div className="text-sm sm:text-base font-bold">Nạp Nhanh Bài Viết Vào Hàng Đợi</div>
+              <div className="text-[11px] font-normal text-slate-400">
+                Tự động xếp lịch & phân bổ dàn Fanpage buff khi đến lượt
+              </div>
+            </div>
+          </div>
+        }
+        open={isQuickAddModalOpen}
+        onCancel={() => !isSubmittingQuickAdd && setIsQuickAddModalOpen(false)}
+        footer={[
+          <Button
+            key="cancel"
+            onClick={() => setIsQuickAddModalOpen(false)}
+            disabled={isSubmittingQuickAdd}
+            className="text-xs"
+          >
+            Đóng
+          </Button>,
+          <Button
+            key="submit"
+            type="primary"
+            icon={<ThunderboltOutlined />}
+            loading={isSubmittingQuickAdd}
+            onClick={handleQuickAddSubmit}
+            className="font-semibold bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 border-none text-xs"
+          >
+            {isSubmittingQuickAdd ? 'Đang nạp...' : '⚡ Đưa vào Hàng Đợi Ngay'}
+          </Button>,
+        ]}
+        width={680}
+        className="dark-modal"
+      >
+        <div className="space-y-4 py-2 text-xs">
+          {/* Tab chọn 1 bài hoặc nhiều bài */}
+          <Segmented
+            block
+            value={quickAddMode}
+            onChange={(val) => setQuickAddMode(val as 'SINGLE' | 'BATCH')}
+            options={[
+              { label: '⚡ Một link bài viết', value: 'SINGLE' },
+              { label: '📋 Nạp nhiều link cùng lúc (Batch)', value: 'BATCH' },
+            ]}
+            className="bg-slate-950 border border-slate-800 text-xs p-1"
+          />
+
+          {/* Ô nhập Link */}
+          {quickAddMode === 'SINGLE' ? (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-200">
+                  Link bài viết Facebook:
+                </label>
+                <Button
+                  size="small"
+                  type="text"
+                  onClick={handlePasteQuickUrl}
+                  className="text-cyan-400 hover:text-cyan-300 text-xs p-0 h-auto"
+                >
+                  📋 Dán từ clipboard
+                </Button>
+              </div>
+              <Input
+                value={quickTargetUrl}
+                onChange={(e) => setQuickTargetUrl(e.target.value)}
+                placeholder="https://www.facebook.com/permalink.php?story_fbid=... hoặc /reel/..."
+                className="bg-slate-950 border-slate-700 text-slate-100 text-xs rounded-lg font-mono py-2"
+                allowClear
+                onPressEnter={handleQuickAddSubmit}
+              />
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-200">
+                  Danh sách link Facebook (1 link/dòng):
+                </label>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="small"
+                    type="text"
+                    onClick={handlePasteQuickUrl}
+                    className="text-cyan-400 hover:text-cyan-300 text-xs p-0 h-auto"
+                  >
+                    📋 Dán từ clipboard
+                  </Button>
+                  <span className="text-[11px] text-cyan-400 font-mono">
+                    {quickBatchUrls.split('\n').filter((l) => l.trim().startsWith('http')).length} link hợp lệ
+                  </span>
+                </div>
+              </div>
+              <TextArea
+                rows={4}
+                value={quickBatchUrls}
+                onChange={(e) => setQuickBatchUrls(e.target.value)}
+                placeholder="https://www.facebook.com/post1&#10;https://www.facebook.com/post2&#10;https://www.facebook.com/post3"
+                className="bg-slate-950 border-slate-700 text-slate-100 text-xs rounded-lg font-mono"
+              />
+            </div>
+          )}
+
+          {/* Mục tiêu Like mỗi bài */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-200">
+                Mục tiêu Like mỗi bài:
+              </label>
+              <span className="text-xs font-bold text-amber-400 font-mono">
+                {quickTargetLikes === 'ALL'
+                  ? `Toàn bộ dàn (${scannedPages.length || totalAvailablePages} Page)`
+                  : `${quickTargetLikes} Like`}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {[
+                { value: 30, label: '30 Like', hint: 'Khởi động' },
+                { value: 50, label: '50 Like', hint: 'Phổ biến' },
+                { value: 100, label: '100 Like', hint: 'Chuẩn' },
+                { value: 200, label: '200 Like', hint: 'KPI Cao' },
+                { value: 'ALL', label: '👑 Tất cả Page', hint: 'Toàn bộ dàn' },
+              ].map((opt) => {
+                const isSelected = quickTargetLikes === opt.value;
+                return (
+                  <button
+                    key={String(opt.value)}
+                    type="button"
+                    onClick={() => setQuickTargetLikes(opt.value as any)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500 shadow-sm'
+                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    <span className="text-[10px] opacity-60 ml-1.5">({opt.hint})</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Cảm xúc tương tác */}
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-slate-200">Cảm xúc tương tác:</label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                { val: 'RANDOM_POSITIVE', label: '✨ Tự nhiên', desc: 'Like + Tim + Care' },
+                { val: 'LIKE', label: '👍 Thích', desc: '100% Like xanh' },
+                { val: 'LOVE', label: '❤️ Thả Tim', desc: '100% Tim đỏ' },
+                { val: 'CARE', label: '🥰 Thương thương', desc: '100% Care' },
+              ].map((item) => (
+                <button
+                  key={item.val}
+                  type="button"
+                  onClick={() => setQuickReaction(item.val)}
+                  className={`p-2.5 rounded-lg text-left border transition-all cursor-pointer ${
+                    quickReaction === item.val
+                      ? 'bg-blue-500/20 text-blue-300 border-blue-500 shadow-sm'
+                      : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'
+                  }`}
+                >
+                  <div className="text-xs font-bold">{item.label}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5 truncate">{item.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Lịch hẹn & Tốc độ */}
+          <Row gutter={[12, 12]}>
+            <Col xs={24} sm={12}>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-200">
+                  Lịch bắt đầu:
+                </label>
+                <Select
+                  value={quickDelayMinutes}
+                  onChange={setQuickDelayMinutes}
+                  className="w-full"
+                  options={[
+                    { label: '⚡ Chạy ngay khi có lượt (0 phút)', value: 0 },
+                    { label: '⏱️ Đợi 5 phút sau mới bắt đầu', value: 5 },
+                    { label: '⏱️ Đợi 10 phút sau mới bắt đầu', value: 10 },
+                    { label: '⏱️ Đợi 15 phút sau mới bắt đầu', value: 15 },
+                    { label: '⏱️ Đợi 30 phút sau mới bắt đầu', value: 30 },
+                  ]}
+                />
+              </div>
+            </Col>
+
+            <Col xs={24} sm={12}>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-200">
+                  Tốc độ xử lý:
+                </label>
+                <Select
+                  value={quickSpeedMode}
+                  onChange={setQuickSpeedMode}
+                  className="w-full"
+                  options={[
+                    { label: '🚀 FAST — Tốc độ cao (Tối ưu thời gian)', value: 'FAST' },
+                    { label: '🛡️ SMART — Tự nhiên (Khuyến nghị)', value: 'SMART' },
+                    { label: '🐢 SAFE — Giãn cách bảo toàn', value: 'SAFE' },
+                  ]}
+                />
+              </div>
+            </Col>
+          </Row>
+
+          <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800 text-[11px] text-slate-400 flex items-center gap-2">
+            <span className="text-amber-400 text-sm">💡</span>
+            <span>
+              Bài viết sẽ được xếp vào hàng đợi và chạy tự động. Hệ thống tự động bù Page nếu có Page bị checkpoint hoặc bị ẩn.
+            </span>
+          </div>
+        </div>
       </Modal>
     </div>
   );

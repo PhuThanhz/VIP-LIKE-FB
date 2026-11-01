@@ -131,6 +131,76 @@ async function syncBuffQueueToMysql(queueData) {
   } catch (_) {}
 }
 
+function recoverStaleRunningQueueTasks() {
+  try {
+    const qd = loadBuffQueue();
+    let recoveredCount = 0;
+    for (const it of qd.items || []) {
+      if (it.status === 'RUNNING') {
+        it.status = 'QUEUED';
+        it.error = 'Máy chủ đã khởi động lại khi đang chạy. Tác vụ đã được tự động phục hồi về hàng đợi để tiếp tục.';
+        recoveredCount++;
+      }
+    }
+    if (recoveredCount > 0) {
+      saveBuffQueue(qd);
+      console.log(`[Queue Recovery] 🔄 Đã tự động phục hồi ${recoveredCount} tác vụ bị gián đoạn do khởi động lại máy chủ sang QUEUED.`);
+    }
+  } catch (e) {
+    console.warn('[Queue Recovery] ⚠️ Lỗi kiểm tra phục hồi task:', e.message);
+  }
+}
+
+async function syncCompletedQueueTasksToBuffLogs() {
+  try {
+    const qd = loadBuffQueue();
+    if (!qd || !Array.isArray(qd.items)) return;
+    const completedTasks = qd.items.filter((it) => it.status === 'COMPLETED' && it.targetUrl);
+    if (completedTasks.length === 0) return;
+
+    const existingResult = await db.getBuffLogs(2000).catch(() => ({ logs: [] }));
+    const existingLogIds = new Set((existingResult.logs || []).map((l) => l.id));
+
+    const newLogs = [];
+    for (const t of completedTasks) {
+      const logId = 'log_' + t.id;
+      if (!existingLogIds.has(logId)) {
+        const res = t.result || {};
+        const successCount = typeof res.success === 'number' ? res.success : (Number(t.progressLikes) || 0);
+        const failedCount = typeof res.failed === 'number' ? res.failed : 0;
+        const totalPages = typeof res.targetKpi === 'number' ? res.targetKpi : (t.targetLikes === 'ALL' ? (successCount + failedCount) : (Number(t.targetLikes) || 30));
+        const alreadyLikedCount = Array.isArray(t.pageDetails)
+          ? t.pageDetails.filter((d) => d.status === 'ALREADY_LIKED').length
+          : 0;
+
+        newLogs.push({
+          id: logId,
+          createdAt: t.finishedAt || t.addedAt || new Date().toISOString(),
+          type: 'QUEUE',
+          targetUrl: t.targetUrl,
+          reactionType: t.reactionType || 'LIKE',
+          engagementMode: t.enableComment ? 'BOTH' : 'LIKE_ONLY',
+          accountName: t.accountName || 'Hàng Đợi VIP LIKE',
+          totalPages,
+          successCount,
+          alreadyLikedCount,
+          failedCount,
+          commentCount: 0,
+          details: Array.isArray(t.pageDetails) ? t.pageDetails : [],
+        });
+      }
+    }
+
+    if (newLogs.length > 0) {
+      console.log(`[BuffLogs] 🔄 Đang đồng bộ ${newLogs.length} chiến dịch Hàng đợi đã hoàn thành vào Lịch sử tương tác...`);
+      await db.saveBuffLogs(newLogs);
+      console.log(`[BuffLogs] ✅ Đã đồng bộ thành công ${newLogs.length} chiến dịch vào Lịch sử!`);
+    }
+  } catch (err) {
+    console.warn('[BuffLogs] ⚠️ Lỗi đồng bộ completed queue sang buff_logs:', err.message);
+  }
+}
+
 function loadBuffHistory() {
   const data = store.read('buff_history');
   if (data && typeof data === 'object' && !Array.isArray(data)) return data;
@@ -187,7 +257,10 @@ function parseDelayMinutes(value) {
 
 const activeBuffTaskIds = new Set();
 const activeBuffVias = new Set();
-const MAX_PARALLEL_BUFF = 2;
+function getMaxParallelBuff() {
+  const n = parseInt(loadBuffSettings().maxParallelTasks, 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 4) : 2;
+}
 const busyBuffLanes = new Set();
 const buffLaneWaiters = [];
 
@@ -292,6 +365,101 @@ async function resolveViaProxy(cookieString, explicitProxy = '') {
     }
   } catch (e) {}
   return '';
+}
+
+/** Tự động đối soát và gắn đúng Via Cookie sở hữu cho từng Fanpage từ MySQL Workbench */
+async function resolvePagesWithOwningVias(selectedPages = [], fallbackCookie = '') {
+  if (!Array.isArray(selectedPages) || selectedPages.length === 0) return [];
+  let liveVias = [];
+  try {
+    liveVias = await db.getLiveVias();
+  } catch (_) {}
+
+  const viaByUid = new Map(liveVias.map((v) => [String(v.uid), v]));
+  const pageViaMap = new Map();
+  try {
+    const [rows] = await db.getPool().execute(
+      'SELECT page_id, personal_profile_id FROM facebook_page_accesses WHERE active = 1'
+    );
+    for (const r of rows) {
+      pageViaMap.set(String(r.page_id), String(r.personal_profile_id));
+    }
+  } catch (_) {}
+
+  return selectedPages.map((p) => {
+    const pid = String(p.id || '');
+    let viaCookie = p.viaCookie;
+    let viaName = p.viaName;
+    let proxyUrl = p.proxyUrl || '';
+
+    if (!viaCookie) {
+      const owningUid = pageViaMap.get(pid);
+      if (owningUid && viaByUid.has(owningUid)) {
+        const matchedVia = viaByUid.get(owningUid);
+        viaCookie = matchedVia.cookieString;
+        viaName = matchedVia.viaName;
+        proxyUrl = matchedVia.proxyUrl || '';
+      }
+    }
+
+    return {
+      ...p,
+      viaCookie: viaCookie || fallbackCookie,
+      viaName: viaName || 'Via',
+      proxyUrl,
+    };
+  });
+}
+
+/**
+ * Tự động tìm và bù các Fanpage hợp lệ từ các Via LIVE trong MySQL Workbench
+ * Đảm bảo các Page này chưa từng tương tác với targetUrl để đạt đủ KPI mà không bị trùng lặp.
+ */
+async function getAutoReplenishPages(targetUrl, excludePageIds = new Set(), count = 50) {
+  if (count <= 0) return [];
+  try {
+    const normUrl = fbBuffTool.normalizePostUrl ? fbBuffTool.normalizePostUrl(targetUrl) : targetUrl;
+    const interactedSet = typeof fbBuffTool.getPostInteractedPageIds === 'function'
+      ? fbBuffTool.getPostInteractedPageIds(normUrl)
+      : new Set();
+
+    const liveVias = await db.getLiveVias();
+    if (!liveVias || liveVias.length === 0) return [];
+
+    const viaByUid = new Map(liveVias.map((v) => [String(v.uid), v]));
+    const liveUids = Array.from(viaByUid.keys());
+    if (liveUids.length === 0) return [];
+
+    const placeholders = liveUids.map(() => '?').join(',');
+    const [rows] = await db.getPool().execute(
+      `SELECT page_id, page_name, personal_profile_id 
+       FROM facebook_page_accesses 
+       WHERE active = 1 AND personal_profile_id IN (${placeholders})`,
+      liveUids
+    );
+
+    const replenishPages = [];
+    for (const r of rows) {
+      const pid = String(r.page_id);
+      if (excludePageIds.has(pid) || interactedSet.has(pid)) continue;
+      const owningVia = viaByUid.get(String(r.personal_profile_id));
+      if (!owningVia) continue;
+
+      replenishPages.push({
+        id: pid,
+        name: r.page_name,
+        viaCookie: owningVia.cookieString,
+        viaName: owningVia.viaName,
+        proxyUrl: owningVia.proxyUrl || '',
+      });
+      excludePageIds.add(pid);
+      if (replenishPages.length >= count) break;
+    }
+    return replenishPages;
+  } catch (err) {
+    console.warn('[AutoReplenish] ⚠️ Lỗi tìm trang bù tự động:', err.message);
+    return [];
+  }
 }
 
 // =============================================================================
@@ -995,6 +1163,7 @@ app.delete('/api/connections/:id', requireAdmin, async (req, res) => {
 // Lịch sử tương tác (mỗi lượt chạy một bản ghi) lưu trên MySQL Workbench
 app.get('/api/buff-logs', async (req, res) => {
   try {
+    await syncCompletedQueueTasksToBuffLogs().catch(() => {});
     const result = await db.getBuffLogs(req.query.limit);
     return res.json({ success: true, ...result });
   } catch (err) {
@@ -1187,15 +1356,15 @@ app.post('/api/buff-like', async (req, res) => {
     targetUrl,
     reactionType = 'LIKE',
     selectedPages = [],
-    delayMs = 3500,
-    speedMode = 'SMART',
+    delayMs = 2200,
+    speedMode = 'FAST',
     enableLike = true,
     enableComment = false,
     enableShare = false,
     enableHumanBehavior = true,
     fastSwitch = true,
-    cooldownEvery = 15,
-    cooldownDurationMs = 15000,
+    cooldownEvery = 30,
+    cooldownDurationMs = 12000,
     comments = [],
     proxyUrl: explicitProxy = '',
     concurrency = 1,
@@ -1223,27 +1392,53 @@ app.post('/api/buff-like', async (req, res) => {
       accountName: 'Via ' + (laneUid || 'FB'),
     }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo bắt đầu buff:', err.message));
 
-    const result = await withBuffLane(laneUid, () =>
-      fbBuffTool.buffLikesWithPages(cookieString, targetUrl, {
-        reactionType,
-        selectedPages,
-        delayMs,
-        speedMode,
-        enableLike,
-        enableComment,
-        enableShare,
-        enableHumanBehavior,
-        fastSwitch,
-        cooldownEvery,
-        cooldownDurationMs,
-        comments,
-        proxyUrl,
-        proxyPool,
-        concurrency: Math.max(1, Math.min(5, parseInt(concurrency, 10) || 1)),
-        dripFeedMode: Boolean(dripFeedMode),
-        dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
-      })
-    );
+    const resolvedPages = await resolvePagesWithOwningVias(selectedPages, cookieString);
+    const viaGroupsMap = new Map();
+    for (const p of resolvedPages) {
+      const vKey = (p.viaCookie || cookieString).trim();
+      if (!viaGroupsMap.has(vKey)) {
+        const laneId = fbBuffTool.getUserIdFromCookie(vKey) || 'default';
+        viaGroupsMap.set(vKey, {
+          cookieString: vKey,
+          laneUid: laneId,
+          viaName: p.viaName || ('Via ' + laneId),
+          proxyUrl: p.proxyUrl || proxyUrl,
+          pages: [],
+        });
+      }
+      viaGroupsMap.get(vKey).pages.push(p);
+    }
+
+    const allDetails = [];
+    const viaGroups = Array.from(viaGroupsMap.values());
+    const parallelVias = Math.min(viaGroups.length, Math.max(1, parseInt(concurrency, 10) || 2));
+
+    await runWithConcurrency(viaGroups, parallelVias, async (group) => {
+      const grpProxy = await resolveViaProxy(group.cookieString, group.proxyUrl || explicitProxy);
+      const subResult = await withBuffLane(group.laneUid, () =>
+        fbBuffTool.buffLikesWithPages(group.cookieString, targetUrl, {
+          reactionType,
+          selectedPages: group.pages,
+          delayMs,
+          speedMode,
+          enableLike,
+          enableComment,
+          enableShare,
+          enableHumanBehavior,
+          fastSwitch,
+          cooldownEvery,
+          cooldownDurationMs,
+          comments,
+          proxyUrl: grpProxy,
+          proxyPool,
+          concurrency: Math.max(1, Math.min(3, Math.ceil((parseInt(concurrency, 10) || 2) / parallelVias) || 1)),
+          dripFeedMode: Boolean(dripFeedMode),
+          dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
+        })
+      );
+      if (subResult?.details) allDetails.push(...subResult.details);
+    });
+    const result = { details: allDetails, total: selectedPages.length };
 
     const durationSec = Math.max(1, Math.round((Date.now() - startMs) / 1000));
     const totalCount = selectedPages?.length || result?.total || 0;
@@ -1253,7 +1448,7 @@ app.post('/api/buff-like', async (req, res) => {
     let screenshotPath = null;
     try {
       const shot = await fbBuffTool.capturePostScreenshot(targetUrl, {
-        cookieStr,
+        cookieStr: cookieString,
         proxyUrl,
         timeoutMs: 25000,
       });
@@ -1356,22 +1551,24 @@ app.post('/api/buff-like-stream', async (req, res) => {
   const {
     sessionId = null,
     totalSelectedCount = 0,
+    kpiTarget = 0,
+    autoReplenish = true,
     cookieString,
     targetUrl,
     reactionType = 'LIKE',
     selectedPages = [],
-    delayMs = 3500,
-    speedMode = 'SMART',
+    delayMs = 2200,
+    speedMode = 'FAST',
     enableLike = true,
     enableComment = false,
     enableShare = false,
     enableHumanBehavior = true,
     fastSwitch = true,
-    cooldownEvery = 15,
-    cooldownDurationMs = 15000,
+    cooldownEvery = 30,
+    cooldownDurationMs = 12000,
     comments = [],
     proxyUrl: explicitProxy = '',
-    concurrency = 1,
+    concurrency = 2,
     dripFeedMode = false,
     dripDurationMinutes = 30,
   } = req.body;
@@ -1417,7 +1614,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
   };
 
   const sessionKey = sessionId || ('live_' + Date.now());
-  const incomingTotal = parseInt(totalSelectedCount, 10) || selectedPages.length;
+  const targetKpi = parseInt(kpiTarget || totalSelectedCount, 10) || selectedPages.length;
 
   if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey && activeLiveBuffSession.status === 'RUNNING') {
     activeLiveBuffSession.updatedAt = new Date().toISOString();
@@ -1431,7 +1628,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
       status: 'RUNNING',
       startedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      total: Math.max(incomingTotal, selectedPages.length),
+      total: Math.max(targetKpi, selectedPages.length),
       done: 0,
       success: 0,
       alreadyLiked: 0,
@@ -1451,95 +1648,158 @@ app.post('/api/buff-like-stream', async (req, res) => {
 
     notifyBuffStarted({
       targetUrl,
-      total: Math.max(incomingTotal, selectedPages.length),
+      total: Math.max(targetKpi, selectedPages.length),
       reactionType,
       speedMode,
-      concurrency: Math.max(1, Math.min(5, parseInt(concurrency, 10) || 1)),
+      concurrency: Math.max(1, Math.min(5, parseInt(concurrency, 10) || 2)),
       accountName: 'Via ' + (laneUid || 'FB'),
     }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo stream bắt đầu:', err.message));
 
-    const result = await withBuffLane(laneUid, () =>
-      fbBuffTool.buffLikesWithPages(cookieString, targetUrl, {
-        reactionType,
-        selectedPages,
-        delayMs,
-        speedMode,
-        enableLike,
-        enableComment,
-        enableShare,
-        enableHumanBehavior,
-        fastSwitch,
-        cooldownEvery,
-        cooldownDurationMs,
-        comments,
-        proxyUrl,
-        proxyPool,
-        concurrency: Math.max(1, Math.min(5, parseInt(concurrency, 10) || 1)),
-        dripFeedMode: Boolean(dripFeedMode),
-        dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
-        // CHỈ DỪNG KHI NGƯỜI DÙNG BẤM NÚT DỪNG HOẶC DỪNG KHẨN CẤP.
-        // NẾU NGƯỜI DÙNG F5/LOAD LẠI TRANG, BACKGROUND VẪN TIẾP TỤC CHẠY KHÔNG BỊ HỦY!
-        shouldStop: () => Boolean(activeLiveBuffSession?.stopRequested) || isEmergencyStopped(),
-        onProgress: (evt) => {
-          if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
-            activeLiveBuffSession.updatedAt = new Date().toISOString();
-            if (evt.type === 'COOLDOWN_START') {
-              activeLiveBuffSession.currentRunningPageName = evt.message || `🛡️ Đang hạ nhiệt Via (${evt.durationSec}s)...`;
-              activeLiveBuffSession.isCoolingDown = true;
-              activeLiveBuffSession.cooldownSec = evt.durationSec;
-            } else if (evt.type === 'COOLDOWN_END') {
-              activeLiveBuffSession.isCoolingDown = false;
-              activeLiveBuffSession.cooldownSec = 0;
-            } else if (evt.type === 'PAGE_START') {
-              activeLiveBuffSession.currentRunningPageName = evt.pageName || '';
-            } else if (evt.type === 'PAGE_FINISH') {
-              activeLiveBuffSession.isCoolingDown = false;
-              activeLiveBuffSession.done = (activeLiveBuffSession.done || 0) + 1;
-              if (evt.status === 'SUCCESS') activeLiveBuffSession.success++;
-              else if (evt.status === 'ALREADY_LIKED') activeLiveBuffSession.alreadyLiked++;
-              else if (evt.status === 'FAILED' || evt.status === 'ERROR') activeLiveBuffSession.failed++;
-              activeLiveBuffSession.percent = Math.min(
-                100,
-                Math.round((activeLiveBuffSession.done / Math.max(1, activeLiveBuffSession.total)) * 100)
-              );
+    const resolvedPages = await resolvePagesWithOwningVias(selectedPages, cookieString);
+    let allPages = [...resolvedPages];
+    const excludeIds = new Set(allPages.map((p) => String(p.id)));
 
-              const detailItem = {
-                pageId: evt.pageId,
-                pageName: evt.pageName,
-                viaName: evt.viaName,
-                status: evt.status,
-                likeStatus: evt.likeStatus,
-                commentStatus: evt.commentStatus,
-                shareStatus: evt.shareStatus,
-                commentText: evt.commentText,
-                message: evt.message,
-                error: evt.error,
-              };
-              const exIdx = activeLiveBuffSession.details.findIndex((d) => d.pageId === evt.pageId);
-              if (exIdx >= 0) {
-                activeLiveBuffSession.details[exIdx] = { ...activeLiveBuffSession.details[exIdx], ...detailItem };
-              } else {
-                activeLiveBuffSession.details.push(detailItem);
-              }
+    // Smart Auto-Replenish: Nếu số Page hiện tại ít hơn mục tiêu KPI, tự động bù thêm từ kho Via LIVE
+    if (autoReplenish !== false && targetKpi > allPages.length) {
+      const needed = targetKpi - allPages.length;
+      console.log(`[BuffStream] ⚡ Smart Auto-Replenish: Đang tìm bù ${needed} Page từ kho Via LIVE...`);
+      const replenished = await getAutoReplenishPages(targetUrl, excludeIds, needed);
+      if (replenished.length > 0) {
+        console.log(`[BuffStream] ✅ Đã bổ sung thành công ${replenished.length} Page từ kho dự phòng!`);
+        allPages.push(...replenished);
+      }
+    }
 
-              if (evt.actionBlocked) {
-                activeLiveBuffSession.stopRequested = true;
-                activeLiveBuffSession.status = 'STOPPED';
-                activeLiveBuffSession.error = 'Facebook phát hiện thao tác nhanh và tạm thời hạn chế hành động (Action Blocked). Hệ thống đã tự động dừng khẩn cấp để bảo vệ an toàn cho Via!';
-                console.warn('[BuffStream] 🛑 Đã tự động ngắt tiến trình buff trực tiếp do Via bị Facebook Rate Limit / Action Blocked!');
-                notifyActionBlocked({
-                  viaName: evt.viaName || activeLiveBuffSession?.viaName || 'Via',
-                  viaUid: activeLiveBuffSession?.platform_account_id,
-                  postUrl: targetUrl,
-                  reason: 'Facebook tạm thời chặn do thao tác nhanh (Action Blocked)',
-                }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi cảnh báo Action Blocked:', err.message));
+    if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
+      activeLiveBuffSession.total = Math.max(targetKpi, allPages.length);
+    }
+
+    const viaGroupsMap = new Map();
+    for (const p of allPages) {
+      const vKey = (p.viaCookie || cookieString).trim();
+      if (!viaGroupsMap.has(vKey)) {
+        const laneId = fbBuffTool.getUserIdFromCookie(vKey) || 'default';
+        viaGroupsMap.set(vKey, {
+          cookieString: vKey,
+          laneUid: laneId,
+          viaName: p.viaName || ('Via ' + laneId),
+          proxyUrl: p.proxyUrl || proxyUrl,
+          pages: [],
+        });
+      }
+      viaGroupsMap.get(vKey).pages.push(p);
+    }
+
+    const viaGroups = Array.from(viaGroupsMap.values());
+    const parallelVias = Math.min(viaGroups.length, Math.max(1, parseInt(concurrency, 10) || 2));
+    console.log(`[BuffStream] 🚀 Kích hoạt Multi-Via Parallel Engine: Chạy đồng thời ${parallelVias} Via song song trên tổng ${viaGroups.length} nhóm Via (${allPages.length} Pages)`);
+
+    const allStreamDetails = [];
+    await runWithConcurrency(viaGroups, parallelVias, async (group) => {
+      if (Boolean(activeLiveBuffSession?.stopRequested) || isEmergencyStopped()) return;
+      if (targetKpi > 0 && (activeLiveBuffSession?.success || 0) >= targetKpi) return;
+
+      const grpProxy = await resolveViaProxy(group.cookieString, group.proxyUrl || explicitProxy);
+      const subResult = await withBuffLane(group.laneUid, () =>
+        fbBuffTool.buffLikesWithPages(group.cookieString, targetUrl, {
+          reactionType,
+          selectedPages: group.pages,
+          kpiTarget: targetKpi,
+          delayMs,
+          speedMode,
+          enableLike,
+          enableComment,
+          enableShare,
+          enableHumanBehavior,
+          fastSwitch,
+          cooldownEvery,
+          cooldownDurationMs,
+          comments,
+          proxyUrl: grpProxy,
+          proxyPool,
+          concurrency: Math.max(1, Math.min(3, Math.ceil((parseInt(concurrency, 10) || 2) / parallelVias) || 1)),
+          dripFeedMode: Boolean(dripFeedMode),
+          dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
+          // CHỈ DỪNG KHI NGƯỜI DÙNG BẤM NÚT DỪNG HOẶC DỪNG KHẨN CẤP HOẶC ĐẠT ĐỦ KPI
+          shouldStop: () =>
+            Boolean(activeLiveBuffSession?.stopRequested) ||
+            isEmergencyStopped() ||
+            (targetKpi > 0 && (activeLiveBuffSession?.success || 0) >= targetKpi),
+          onProgress: (evt) => {
+            if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
+              activeLiveBuffSession.updatedAt = new Date().toISOString();
+              if (evt.type === 'COOLDOWN_START') {
+                activeLiveBuffSession.currentRunningPageName = evt.message || `🛡️ Đang hạ nhiệt Via (${evt.durationSec}s)...`;
+                activeLiveBuffSession.isCoolingDown = true;
+                activeLiveBuffSession.cooldownSec = evt.durationSec;
+              } else if (evt.type === 'COOLDOWN_END') {
+                activeLiveBuffSession.isCoolingDown = false;
+                activeLiveBuffSession.cooldownSec = 0;
+              } else if (evt.type === 'PAGE_START') {
+                activeLiveBuffSession.currentRunningPageName = evt.pageName || '';
+              } else if (evt.type === 'PAGE_FINISH') {
+                activeLiveBuffSession.isCoolingDown = false;
+                activeLiveBuffSession.done = (activeLiveBuffSession.done || 0) + 1;
+                if (evt.status === 'SUCCESS') activeLiveBuffSession.success++;
+                else if (evt.status === 'ALREADY_LIKED') activeLiveBuffSession.alreadyLiked++;
+                else if (evt.status === 'FAILED' || evt.status === 'ERROR') activeLiveBuffSession.failed++;
+                activeLiveBuffSession.percent = Math.min(
+                  100,
+                  Math.round((activeLiveBuffSession.done / Math.max(1, activeLiveBuffSession.total)) * 100)
+                );
+
+                const detailItem = {
+                  pageId: evt.pageId,
+                  pageName: evt.pageName,
+                  viaName: evt.viaName || group.viaName,
+                  status: evt.status,
+                  likeStatus: evt.likeStatus,
+                  commentStatus: evt.commentStatus,
+                  shareStatus: evt.shareStatus,
+                  commentText: evt.commentText,
+                  message: evt.message,
+                  error: evt.error,
+                };
+                const exIdx = activeLiveBuffSession.details.findIndex((d) => d.pageId === evt.pageId);
+                if (exIdx >= 0) {
+                  activeLiveBuffSession.details[exIdx] = { ...activeLiveBuffSession.details[exIdx], ...detailItem };
+                } else {
+                  activeLiveBuffSession.details.push(detailItem);
+                }
+
+                if (targetKpi > 0 && activeLiveBuffSession.success >= targetKpi) {
+                  activeLiveBuffSession.stopRequested = true;
+                  sendEvent('progress', {
+                    type: 'KPI_REACHED',
+                    kpiTarget: targetKpi,
+                    success: activeLiveBuffSession.success,
+                    failed: activeLiveBuffSession.failed,
+                    percent: 100,
+                    message: `🎯 Đã đạt đủ KPI ${activeLiveBuffSession.success}/${targetKpi} Like thành công!`,
+                  });
+                }
+
+                if (evt.actionBlocked) {
+                  activeLiveBuffSession.stopRequested = true;
+                  activeLiveBuffSession.status = 'STOPPED';
+                  activeLiveBuffSession.error = 'Facebook phát hiện thao tác nhanh và tạm thời hạn chế hành động (Action Blocked). Hệ thống đã tự động dừng khẩn cấp để bảo vệ an toàn cho Via!';
+                  console.warn('[BuffStream] 🛑 Đã tự động ngắt tiến trình buff trực tiếp do Via bị Facebook Rate Limit / Action Blocked!');
+                  notifyActionBlocked({
+                    viaName: evt.viaName || activeLiveBuffSession?.viaName || group.viaName,
+                    viaUid: group.laneUid,
+                    postUrl: targetUrl,
+                    reason: 'Facebook tạm thời chặn do thao tác nhanh (Action Blocked)',
+                  }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi cảnh báo Action Blocked:', err.message));
+                }
               }
             }
-          }
-          sendEvent('progress', evt);
-        },
-      })
-    );
+            sendEvent('progress', evt);
+          },
+        })
+      );
+      if (subResult?.details) allStreamDetails.push(...subResult.details);
+    });
+    const result = { details: allStreamDetails, total: selectedPages.length };
 
     if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
       if (activeLiveBuffSession.done >= activeLiveBuffSession.total || activeLiveBuffSession.stopRequested) {
@@ -1558,7 +1818,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
     let screenshotPath = null;
     try {
       const shot = await fbBuffTool.capturePostScreenshot(targetUrl, {
-        cookieStr,
+        cookieStr: cookieString,
         proxyUrl,
         timeoutMs: 25000,
       });
@@ -1643,12 +1903,23 @@ function addBuffQueueTask(taskPayload) {
   const history = loadBuffHistory();
   const normUrl = normalizeFbPostUrl(taskPayload.targetUrl);
 
-  const isRebuff = Boolean(taskPayload.allowRebuff || taskPayload.force || taskPayload.source?.includes('REBUFF'));
-  if (history[normUrl] && !isRebuff) {
+  const isRebuff = Boolean(
+    taskPayload.allowRebuff ||
+    taskPayload.force ||
+    taskPayload.source?.includes('REBUFF') ||
+    taskPayload.source === 'MANUAL' ||
+    taskPayload.source === 'RESUME_REMAINING'
+  );
+  // Chỉ tự động bỏ qua nếu là BOT săn bài tự động (AUTO_MONITOR) quét bài trùng,
+  // còn người dùng chủ động tạo đơn hoặc chạy tiếp thì luôn cho phép chạy (có bộ lọc Anti-Overlap tự loại Page cũ)
+  if (history[normUrl] && !isRebuff && taskPayload.source === 'AUTO_MONITOR') {
     return { skipped: true, history: history[normUrl] };
   }
 
-  const existing = queueData.items.find((it) => it.normalizedUrl === normUrl && it.status !== 'FAILED');
+  // Chỉ chặn nếu bài viết THỰC SỰ ĐANG CHẠY hoặc ĐANG CHỜ trong hàng đợi
+  const existing = queueData.items.find(
+    (it) => it.normalizedUrl === normUrl && (it.status === 'QUEUED' || it.status === 'RUNNING')
+  );
   if (existing) {
     return { alreadyQueued: true, task: existing };
   }
@@ -1949,6 +2220,13 @@ async function executeQueueTask(task) {
       throw new Error('Không tìm thấy tài khoản Via khả dụng nào trong hệ thống');
     }
 
+    // Tối ưu hóa phân phối đa luồng: Ưu tiên các Via đang rảnh (chưa bận lane) để 2 Worker chạy song song 2 bài không bị nghẽn
+    targetVias.sort((a, b) => {
+      const aBusy = busyBuffLanes.has(a.uid) ? 1 : 0;
+      const bBusy = busyBuffLanes.has(b.uid) ? 1 : 0;
+      return aBusy - bBusy;
+    });
+
     let allAvailablePages = [];
     for (const via of targetVias) {
       if (isEmergencyStopped()) break;
@@ -2001,7 +2279,31 @@ async function executeQueueTask(task) {
         ? Math.min(allAvailablePages.length, maxPages)
         : Math.min(task.targetLikes || 30, allAvailablePages.length);
 
-    const pagesToBuff = allAvailablePages.slice(0, desiredLikes);
+    // Phân bổ Page cân bằng giữa các Via theo cơ chế Round-Robin (tránh dồn việc lên 1 Via duy nhất)
+    const pagesByVia = new Map();
+    for (const p of allAvailablePages) {
+      const vKey = p.viaCookie || 'default';
+      if (!pagesByVia.has(vKey)) pagesByVia.set(vKey, []);
+      pagesByVia.get(vKey).push(p);
+    }
+
+    const balancedPages = [];
+    let hasMore = true;
+    let round = 0;
+    while (hasMore) {
+      hasMore = false;
+      for (const list of pagesByVia.values()) {
+        if (round < list.length) {
+          balancedPages.push(list[round]);
+          hasMore = true;
+        }
+      }
+      round++;
+    }
+
+    // Chuẩn bị danh sách Page: Nếu có mục tiêu KPI cụ thể, lấy thêm 30% Page dự phòng để tự động bù nếu có Page lỗi
+    const reserveCount = task.targetLikes === 'ALL' ? desiredLikes : Math.min(balancedPages.length, Math.ceil(desiredLikes * 1.3));
+    const pagesToBuff = balancedPages.slice(0, reserveCount);
 
     const viaGroupsMap = new Map();
     for (const p of pagesToBuff) {
@@ -2022,9 +2324,9 @@ async function executeQueueTask(task) {
       });
     }
 
-    let totalSuccess = 0;
-    let totalFailed = 0;
-    let totalDone = 0;
+    let totalSuccess = Number(currentTask?.progress?.success ?? currentTask?.progress_likes ?? currentTask?.progressLikes ?? task?.progress_likes ?? 0);
+    let totalDone = Number(currentTask?.progress?.done ?? totalSuccess);
+    let totalFailed = Number(currentTask?.progress?.failed ?? 0);
 
     notifyBuffStarted({
       targetUrl: task.targetUrl,
@@ -2035,28 +2337,35 @@ async function executeQueueTask(task) {
       accountName: 'Queue Worker Auto',
     }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi thông báo queue worker bắt đầu:', err.message));
 
-    for (const group of viaGroupsMap.values()) {
-      if (isEmergencyStopped()) break;
-      const sysSettings = loadBuffSettings();
-      const proxyPool = Array.isArray(sysSettings.proxyPool) ? sysSettings.proxyPool : [];
+    const viaGroups = Array.from(viaGroupsMap.values());
+    const sysSettings = loadBuffSettings();
+    const proxyPool = Array.isArray(sysSettings.proxyPool) ? sysSettings.proxyPool : [];
+    const maxViaParallel = Math.min(viaGroups.length, getMaxParallelBuff());
+
+    // Chạy song song các Via độc lập (Multi-Via Concurrency) để tăng tốc độ x2 - x3 lần
+    await runWithConcurrency(viaGroups, maxViaParallel, async (group) => {
+      if (isEmergencyStopped()) return;
+      if (task.targetLikes !== 'ALL' && totalSuccess >= desiredLikes) return;
+
       const laneUid = fbBuffTool.getUserIdFromCookie(group.cookieString);
-      const res = await withBuffLane(laneUid, () =>
+      await withBuffLane(laneUid, () =>
         fbBuffTool.buffLikesWithPages(group.cookieString, task.targetUrl, {
           reactionType: task.reactionType || 'RANDOM_POSITIVE',
-          speedMode: task.speedMode || 'SMART',
+          speedMode: task.speedMode || 'FAST',
           selectedPages: group.pages,
-          delayMs: 3500,
+          kpiTarget: desiredLikes,
+          delayMs: task.speedMode === 'TURBO' ? 1200 : task.speedMode === 'SAFE' ? 5000 : 1800,
           enableLike: task.enableLike !== false,
           enableComment: Boolean(task.enableComment),
           enableShare: Boolean(task.enableShare),
           enableHumanBehavior: true,
           fastSwitch: true,
-          cooldownEvery: sysSettings.cooldownEveryPages || 15,
-          cooldownDurationMs: (sysSettings.cooldownDurationSec || 15) * 1000,
+          cooldownEvery: sysSettings.cooldownEveryPages || 25,
+          cooldownDurationMs: (sysSettings.cooldownDurationSec || 12) * 1000,
           comments: task.comments || [],
           proxyUrl: group.proxyUrl,
           proxyPool,
-          shouldStop: () => isEmergencyStopped(),
+          shouldStop: () => isEmergencyStopped() || (task.targetLikes !== 'ALL' && totalSuccess >= desiredLikes),
           onProgress: (ev) => {
             if (ev.actionBlocked) {
               console.warn(`[QueueWorker] 🛑 Phát hiện Via bị Facebook hạn chế tốc độ (Action Blocked) trên task ${task.id}. Tự động ngắt task bảo vệ Via!`);
@@ -2069,13 +2378,13 @@ async function executeQueueTask(task) {
             }
             if (ev.type === 'PAGE_FINISH') {
               totalDone++;
-              if (ev.status === 'SUCCESS') totalSuccess++;
+              if (ev.status === 'SUCCESS' || ev.status === 'ALREADY_LIKED') totalSuccess++;
               else if (ev.status === 'ERROR' || ev.status === 'FAILED') totalFailed++;
 
               const qd = loadBuffQueue();
               const t = qd.items.find((it) => it.id === task.id);
               if (t) {
-                t.progress = { done: totalDone, total: pagesToBuff.length, success: totalSuccess };
+                t.progress = { done: totalDone, total: desiredLikes, success: totalSuccess };
                 t.pageDetails = t.pageDetails || [];
                 t.pageDetails.push({
                   pageId: ev.pageId,
@@ -2095,27 +2404,47 @@ async function executeQueueTask(task) {
           },
         })
       );
-
-      if (res) {
-        totalSuccess += res.success || 0;
-        totalFailed += res.failed || 0;
-      }
-    }
+    });
 
     const durationSec = Math.round((Date.now() - startTime) / 1000);
 
     const qd = loadBuffQueue();
     const t = qd.items.find((it) => it.id === task.id);
     if (t) {
+      const finalSuccess = (t.pageDetails || []).filter((d) => d.status === 'SUCCESS' || d.status === 'ALREADY_LIKED').length;
+      const finalFailed = (t.pageDetails || []).filter((d) => d.status === 'ERROR' || d.status === 'FAILED').length;
+      const autoRefilledCount = Math.max(0, (finalSuccess + finalFailed) - desiredLikes);
+
       t.status = isEmergencyStopped() ? 'STOPPED' : 'COMPLETED';
       t.finishedAt = new Date().toISOString();
       t.result = {
-        total: pagesToBuff.length,
-        success: totalSuccess,
-        failed: totalFailed,
+        total: desiredLikes,
+        targetKpi: desiredLikes,
+        autoRefilledCount,
+        success: finalSuccess,
+        failed: finalFailed,
         durationSec,
       };
       saveBuffQueue(qd);
+
+      // Tự động ghi nhớ vào Lịch Sử tương tác chung (buff_logs) để hiển thị đầy đủ tại tab "Lịch sử"
+      const alreadyLikedCount = (t.pageDetails || []).filter((d) => d.status === 'ALREADY_LIKED').length;
+      const displayAccountName = Array.from(viaGroupsMap.values()).map((g) => g.viaName).filter(Boolean).join(', ') || 'Hàng Đợi VIP LIKE';
+      db.saveBuffLogs({
+        id: 'log_' + task.id,
+        createdAt: t.finishedAt,
+        type: 'QUEUE',
+        targetUrl: task.targetUrl,
+        reactionType: task.reactionType || 'LIKE',
+        engagementMode: task.enableComment ? 'BOTH' : 'LIKE_ONLY',
+        accountName: displayAccountName,
+        totalPages: pagesToBuff.length,
+        successCount: finalSuccess,
+        alreadyLikedCount,
+        failedCount: finalFailed,
+        commentCount: 0,
+        details: t.pageDetails || [],
+      }).catch((e) => console.warn('[BuffQueue Worker] ⚠️ Lỗi lưu buff_logs từ queue:', e.message));
     }
 
     const history = loadBuffHistory();
@@ -2194,25 +2523,28 @@ let queueCompletedSinceIdle = 0;
 async function runQueueWorker() {
   if (!store.isReady()) return;
   if (isEmergencyStopped()) return;
-  if (activeBuffTaskIds.size >= MAX_PARALLEL_BUFF) return;
+  const maxParallel = getMaxParallelBuff();
+  if (activeBuffTaskIds.size >= maxParallel) return;
 
   const queueData = loadBuffQueue();
   const now = new Date();
 
-  const taskToRun = (queueData.items || []).find(
-    (it) => it.status === 'QUEUED' && new Date(it.runAfter) <= now && !activeBuffTaskIds.has(it.id)
-  );
+  const availableSlots = maxParallel - activeBuffTaskIds.size;
+  const tasksToRun = (queueData.items || [])
+    .filter((it) => it.status === 'QUEUED' && new Date(it.runAfter) <= now && !activeBuffTaskIds.has(it.id))
+    .slice(0, availableSlots);
 
-  if (taskToRun) {
-    executeQueueTask(taskToRun);
+  for (const task of tasksToRun) {
+    executeQueueTask(task);
   }
 }
 
 // Chạy vòng lặp kiểm tra hàng đợi mỗi 6 giây
 setInterval(runQueueWorker, 6000);
 
-app.post('/api/buff-queue/clear-completed', (req, res) => {
+app.post('/api/buff-queue/clear-completed', async (req, res) => {
   try {
+    await syncCompletedQueueTasksToBuffLogs().catch(() => {});
     const queueData = loadBuffQueue();
     const prevLen = queueData.items.length;
     queueData.items = queueData.items.filter((it) => it.status === 'QUEUED' || it.status === 'RUNNING');
@@ -3499,6 +3831,8 @@ store
         ? `[StateStore] ✅ Đã nạp dữ liệu từ MySQL${r.pendingSync.length ? ` (chờ đồng bộ: ${r.pendingSync.join(', ')})` : ''}.`
         : '[StateStore] ⚠️ MySQL không dùng được, đang chạy bằng file JSON dự phòng; sẽ tự đồng bộ lại khi MySQL sống.'
     );
+    // Tự động kiểm tra và phục hồi các task bị treo ở trạng thái RUNNING sau khi dữ liệu MySQL đã nạp hoàn tất vào bộ nhớ!
+    recoverStaleRunningQueueTasks();
   })
   .catch((err) => console.error('[StateStore] ❌ Lỗi khởi tạo:', err.message));
 
@@ -3524,8 +3858,13 @@ app.listen(PORT, async () => {
   const dbStatus = await db.testConnection();
   if (dbStatus.connected) {
     console.log(`✅ Kết nối MySQL Workbench (Database: ${db.dbConfig.database}) THÀNH CÔNG!`);
+    // Tự động đồng bộ các chiến dịch Hàng đợi đã hoàn thành vào Lịch sử tương tác
+    syncCompletedQueueTasksToBuffLogs().catch(() => {});
   } else {
     console.warn(`⚠️ MySQL Workbench chưa kết nối: ${dbStatus.error}`);
     console.warn(`👉 Kiểm tra MySQL Server (Port 3306) hoặc cấu hình trong file .env`);
   }
+
+  // Tự động kiểm tra và phục hồi các task bị treo ở trạng thái RUNNING do khởi động lại server
+  recoverStaleRunningQueueTasks();
 });

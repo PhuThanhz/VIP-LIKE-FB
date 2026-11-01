@@ -10,6 +10,7 @@ import { DEFAULT_NAV_KEY } from './config/navigation';
 import { DARK_THEME } from './theme/antdTheme';
 import { WallpaperProvider } from './theme/WallpaperContext';
 import type { DbStatus } from './types/dbStatus';
+import CookieAlertProvider, { CookieAlertBanner, useCookieAlert } from './components/common/CookieAlertManager';
 import {
   AUTH_EXPIRED_EVENT,
   CurrentUser,
@@ -101,9 +102,15 @@ interface MainDashboardProps {
   onLogout: () => void;
 }
 
-const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) => {
+const DashboardInner: React.FC<MainDashboardProps & { openViaManager: () => void; openSettings: () => void; activeTabKey: string; handleSelectTab: (k: string) => void }> = ({
+  currentUser,
+  onLogout,
+  openViaManager,
+  openSettings,
+  activeTabKey,
+  handleSelectTab,
+}) => {
   const [collapsed, setCollapsed] = useState(getSavedCollapsed);
-  const [activeTabKey, setActiveTabKey] = useState<string>(DEFAULT_NAV_KEY);
   const [stats, setStats] = useState<SidebarStats>({
     queueCount: 0,
     historyCount: 0,
@@ -111,8 +118,8 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
     accountsCount: 0,
   });
   const { dbStatus, checkDb } = useDbStatus();
+  const { totalDeadCount } = useCookieAlert();
 
-  const handleSelectTab = useCallback((key: string) => setActiveTabKey(key), []);
   // Bấm tay: nhớ lựa chọn cho lần mở sau
   const handleToggleCollapse = useCallback(() => {
     setCollapsed((prev) => {
@@ -124,8 +131,6 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
   const handleBreakpoint = useCallback((broken: boolean) => {
     setCollapsed(broken || getSavedCollapsed());
   }, []);
-  const openViaManager = useCallback(() => setActiveTabKey('via-management'), []);
-  const openSettings = useCallback(() => setActiveTabKey('system-settings'), []);
   const handleStatsUpdate = useCallback((newStats: SidebarStats) => {
     setStats((prev) => ({ ...prev, ...newStats }));
   }, []);
@@ -137,10 +142,11 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
         onSelectTab={handleSelectTab}
         collapsed={collapsed}
         onBreakpoint={handleBreakpoint}
-        stats={stats}
+        stats={{ ...stats, deadViasCount: totalDeadCount }}
       />
 
       <Layout className="!bg-transparent flex flex-col min-h-screen">
+        <CookieAlertBanner />
         <Header
           activeTabKey={activeTabKey}
           onOpenViaManager={openViaManager}
@@ -165,6 +171,26 @@ const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) 
         </Content>
       </Layout>
     </Layout>
+  );
+};
+
+const MainDashboard: React.FC<MainDashboardProps> = ({ currentUser, onLogout }) => {
+  const [activeTabKey, setActiveTabKey] = useState<string>(DEFAULT_NAV_KEY);
+  const handleSelectTab = useCallback((key: string) => setActiveTabKey(key), []);
+  const openViaManager = useCallback(() => setActiveTabKey('via-management'), []);
+  const openSettings = useCallback(() => setActiveTabKey('system-settings'), []);
+
+  return (
+    <CookieAlertProvider onNavigateToViaManager={openViaManager}>
+      <DashboardInner
+        currentUser={currentUser}
+        onLogout={onLogout}
+        openViaManager={openViaManager}
+        openSettings={openSettings}
+        activeTabKey={activeTabKey}
+        handleSelectTab={handleSelectTab}
+      />
+    </CookieAlertProvider>
   );
 };
 

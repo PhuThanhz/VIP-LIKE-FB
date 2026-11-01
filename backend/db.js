@@ -761,7 +761,7 @@ function normalizeBuffLog(log) {
   return {
     id,
     createdAt: Number.isNaN(created.getTime()) ? new Date().toISOString() : created.toISOString(),
-    type: log.type === 'BATCH' ? 'BATCH' : 'SINGLE',
+    type: log.type === 'QUEUE' ? 'QUEUE' : (log.type === 'BATCH' ? 'BATCH' : 'SINGLE'),
     targetUrl,
     reactionType: String(log.reactionType || 'LIKE').slice(0, 32),
     engagementMode: log.engagementMode ? String(log.engagementMode).slice(0, 32) : undefined,
