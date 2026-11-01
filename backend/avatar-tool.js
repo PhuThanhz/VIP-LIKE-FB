@@ -40,18 +40,30 @@ const BROWSER_ARGS = [
 const AVATAR_STATUS_CACHE_FILE = path.join(DATA_DIR, 'avatar_status_cache.json');
 const COVER_STATUS_CACHE_FILE = path.join(DATA_DIR, 'cover_status_cache.json');
 
+let memoryAvatarCache = null;
+let lastAvatarCacheReadTime = 0;
+const AVATAR_CACHE_TTL_MS = 15000;
+
 function loadAvatarCache() {
+  const now = Date.now();
+  if (memoryAvatarCache && now - lastAvatarCacheReadTime < AVATAR_CACHE_TTL_MS) {
+    return memoryAvatarCache;
+  }
   try {
     if (fs.existsSync(AVATAR_STATUS_CACHE_FILE)) {
-      return JSON.parse(fs.readFileSync(AVATAR_STATUS_CACHE_FILE, 'utf8'));
+      memoryAvatarCache = JSON.parse(fs.readFileSync(AVATAR_STATUS_CACHE_FILE, 'utf8'));
+      lastAvatarCacheReadTime = now;
+      return memoryAvatarCache;
     }
   } catch (e) {
     console.warn('[AvatarTool] ⚠️ Lỗi đọc avatar_status_cache.json:', e.message);
   }
-  return {};
+  return memoryAvatarCache || {};
 }
 
 function saveAvatarCache(cacheObj) {
+  memoryAvatarCache = cacheObj;
+  lastAvatarCacheReadTime = Date.now();
   try {
     const tmp = `${AVATAR_STATUS_CACHE_FILE}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(cacheObj, null, 2), 'utf8');

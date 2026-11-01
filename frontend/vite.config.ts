@@ -29,7 +29,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'antd-vendor': ['antd', '@ant-design/icons'],
+          'antd-core': ['antd'],
+          'antd-icons': ['@ant-design/icons'],
           'react-vendor': ['react', 'react-dom', 'react-router-dom', '@tanstack/react-query'],
         },
       },

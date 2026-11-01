@@ -151,15 +151,21 @@ function recoverStaleRunningQueueTasks() {
   }
 }
 
+let lastQueueSyncTime = 0;
 async function syncCompletedQueueTasksToBuffLogs() {
+  const now = Date.now();
+  if (now - lastQueueSyncTime < 30000) return; // Chỉ kiểm tra tối đa 1 lần mỗi 30 giây để tránh nghẽn I/O
+  lastQueueSyncTime = now;
   try {
     const qd = loadBuffQueue();
     if (!qd || !Array.isArray(qd.items)) return;
     const completedTasks = qd.items.filter((it) => it.status === 'COMPLETED' && it.targetUrl);
     if (completedTasks.length === 0) return;
 
-    const existingResult = await db.getBuffLogs(2000).catch(() => ({ logs: [] }));
-    const existingLogIds = new Set((existingResult.logs || []).map((l) => l.id));
+    // Tối ưu hóa siêu tốc: Chỉ truy vấn danh sách ID thay vì load toàn bộ JSON details nặng nề
+    const p = db.getPool();
+    const [existingRows] = await p.execute("SELECT id FROM buff_logs WHERE id LIKE 'log_task_%'").catch(() => [[]]);
+    const existingLogIds = new Set(existingRows.map((r) => r.id));
 
     const newLogs = [];
     for (const t of completedTasks) {
@@ -1164,8 +1170,20 @@ app.delete('/api/connections/:id', requireAdmin, async (req, res) => {
 app.get('/api/buff-logs', async (req, res) => {
   try {
     await syncCompletedQueueTasksToBuffLogs().catch(() => {});
-    const result = await db.getBuffLogs(req.query.limit);
+    const summaryOnly = req.query.summary === 'true';
+    const result = await db.getBuffLogs(req.query.limit, summaryOnly);
     return res.json({ success: true, ...result });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Chi tiết đầy đủ của một lượt chạy (kèm mảng details Fanpage)
+app.get('/api/buff-logs/:id', async (req, res) => {
+  try {
+    const result = await db.getBuffLogById(req.params.id);
+    if (!result) return res.status(404).json({ success: false, error: 'Không tìm thấy nhật ký tương tác này' });
+    return res.json({ success: true, log: result });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -1497,10 +1515,15 @@ app.post('/api/buff-like', async (req, res) => {
 
 // Trạng thái phiên Buff trực tiếp đang chạy ngầm (hỗ trợ duy trì tiến trình khi người dùng F5 / reload trang)
 let activeLiveBuffSession = null;
+const activeLiveBuffSessions = new Map();
 
 // Lấy thông tin phiên Buff trực tiếp đang chạy ngầm
 app.get('/api/buff-live/active', (req, res) => {
   try {
+    const reqSessionId = req.query.sessionId;
+    if (reqSessionId && activeLiveBuffSessions.has(reqSessionId)) {
+      return res.json({ success: true, activeSession: activeLiveBuffSessions.get(reqSessionId) });
+    }
     if (!activeLiveBuffSession) {
       return res.json({ success: true, activeSession: null });
     }
@@ -1521,6 +1544,14 @@ app.get('/api/buff-live/active', (req, res) => {
 // Lệnh dừng tác vụ Buff trực tiếp
 app.post('/api/buff-live/stop', (req, res) => {
   try {
+    const reqSessionId = req.body?.sessionId;
+    if (reqSessionId && activeLiveBuffSessions.has(reqSessionId)) {
+      const sess = activeLiveBuffSessions.get(reqSessionId);
+      sess.stopRequested = true;
+      sess.status = 'STOPPED';
+      sess.updatedAt = new Date().toISOString();
+      return res.json({ success: true, message: 'Đã gửi lệnh dừng tiến trình session ' + reqSessionId, activeSession: sess });
+    }
     if (activeLiveBuffSession && activeLiveBuffSession.status === 'RUNNING') {
       activeLiveBuffSession.stopRequested = true;
       activeLiveBuffSession.status = 'STOPPED';
@@ -1537,7 +1568,13 @@ app.post('/api/buff-live/stop', (req, res) => {
 // Xóa cache phiên Buff trực tiếp
 app.post('/api/buff-live/clear', (req, res) => {
   try {
-    activeLiveBuffSession = null;
+    const reqSessionId = req.body?.sessionId;
+    if (reqSessionId) {
+      activeLiveBuffSessions.delete(reqSessionId);
+    } else {
+      activeLiveBuffSession = null;
+      activeLiveBuffSessions.clear();
+    }
     return res.json({ success: true, message: 'Đã xóa thông tin phiên buff trực tiếp' });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -1639,6 +1676,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
       stopRequested: false,
     };
   }
+  activeLiveBuffSessions.set(sessionKey, activeLiveBuffSession);
 
   try {
     const sysSettings = loadBuffSettings();
@@ -1721,31 +1759,36 @@ app.post('/api/buff-like-stream', async (req, res) => {
           dripFeedMode: Boolean(dripFeedMode),
           dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
           // CHỈ DỪNG KHI NGƯỜI DÙNG BẤM NÚT DỪNG HOẶC DỪNG KHẨN CẤP HOẶC ĐẠT ĐỦ KPI
-          shouldStop: () =>
-            Boolean(activeLiveBuffSession?.stopRequested) ||
-            isEmergencyStopped() ||
-            (targetKpi > 0 && (activeLiveBuffSession?.success || 0) >= targetKpi),
+          shouldStop: () => {
+            const curSession = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
+            return (
+              Boolean(curSession?.stopRequested) ||
+              isEmergencyStopped() ||
+              (targetKpi > 0 && (curSession?.success || 0) >= targetKpi)
+            );
+          },
           onProgress: (evt) => {
-            if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
-              activeLiveBuffSession.updatedAt = new Date().toISOString();
+            const curSession = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
+            if (curSession) {
+              curSession.updatedAt = new Date().toISOString();
               if (evt.type === 'COOLDOWN_START') {
-                activeLiveBuffSession.currentRunningPageName = evt.message || `🛡️ Đang hạ nhiệt Via (${evt.durationSec}s)...`;
-                activeLiveBuffSession.isCoolingDown = true;
-                activeLiveBuffSession.cooldownSec = evt.durationSec;
+                curSession.currentRunningPageName = evt.message || `🛡️ Đang hạ nhiệt Via (${evt.durationSec}s)...`;
+                curSession.isCoolingDown = true;
+                curSession.cooldownSec = evt.durationSec;
               } else if (evt.type === 'COOLDOWN_END') {
-                activeLiveBuffSession.isCoolingDown = false;
-                activeLiveBuffSession.cooldownSec = 0;
+                curSession.isCoolingDown = false;
+                curSession.cooldownSec = 0;
               } else if (evt.type === 'PAGE_START') {
-                activeLiveBuffSession.currentRunningPageName = evt.pageName || '';
+                curSession.currentRunningPageName = evt.pageName || '';
               } else if (evt.type === 'PAGE_FINISH') {
-                activeLiveBuffSession.isCoolingDown = false;
-                activeLiveBuffSession.done = (activeLiveBuffSession.done || 0) + 1;
-                if (evt.status === 'SUCCESS') activeLiveBuffSession.success++;
-                else if (evt.status === 'ALREADY_LIKED') activeLiveBuffSession.alreadyLiked++;
-                else if (evt.status === 'FAILED' || evt.status === 'ERROR') activeLiveBuffSession.failed++;
-                activeLiveBuffSession.percent = Math.min(
+                curSession.isCoolingDown = false;
+                curSession.done = (curSession.done || 0) + 1;
+                if (evt.status === 'SUCCESS') curSession.success++;
+                else if (evt.status === 'ALREADY_LIKED') curSession.alreadyLiked++;
+                else if (evt.status === 'FAILED' || evt.status === 'ERROR') curSession.failed++;
+                curSession.percent = Math.min(
                   100,
-                  Math.round((activeLiveBuffSession.done / Math.max(1, activeLiveBuffSession.total)) * 100)
+                  Math.round((curSession.done / Math.max(1, curSession.total)) * 100)
                 );
 
                 const detailItem = {
@@ -1760,36 +1803,43 @@ app.post('/api/buff-like-stream', async (req, res) => {
                   message: evt.message,
                   error: evt.error,
                 };
-                const exIdx = activeLiveBuffSession.details.findIndex((d) => d.pageId === evt.pageId);
+                const exIdx = curSession.details.findIndex((d) => d.pageId === evt.pageId);
                 if (exIdx >= 0) {
-                  activeLiveBuffSession.details[exIdx] = { ...activeLiveBuffSession.details[exIdx], ...detailItem };
+                  curSession.details[exIdx] = { ...curSession.details[exIdx], ...detailItem };
                 } else {
-                  activeLiveBuffSession.details.push(detailItem);
+                  curSession.details.push(detailItem);
                 }
 
-                if (targetKpi > 0 && activeLiveBuffSession.success >= targetKpi) {
-                  activeLiveBuffSession.stopRequested = true;
+                if (targetKpi > 0 && curSession.success >= targetKpi) {
+                  curSession.stopRequested = true;
                   sendEvent('progress', {
                     type: 'KPI_REACHED',
                     kpiTarget: targetKpi,
-                    success: activeLiveBuffSession.success,
-                    failed: activeLiveBuffSession.failed,
+                    success: curSession.success,
+                    failed: curSession.failed,
                     percent: 100,
-                    message: `🎯 Đã đạt đủ KPI ${activeLiveBuffSession.success}/${targetKpi} Like thành công!`,
+                    message: `🎯 Đã đạt đủ KPI ${curSession.success}/${targetKpi} Like thành công!`,
                   });
                 }
 
                 if (evt.actionBlocked) {
-                  activeLiveBuffSession.stopRequested = true;
-                  activeLiveBuffSession.status = 'STOPPED';
-                  activeLiveBuffSession.error = 'Facebook phát hiện thao tác nhanh và tạm thời hạn chế hành động (Action Blocked). Hệ thống đã tự động dừng khẩn cấp để bảo vệ an toàn cho Via!';
-                  console.warn('[BuffStream] 🛑 Đã tự động ngắt tiến trình buff trực tiếp do Via bị Facebook Rate Limit / Action Blocked!');
+                  group.isBlocked = true;
+                  console.warn(`[BuffStream] ⚠️ Via "${group.viaName}" bị Facebook Rate Limit / Action Blocked. Tự động chuyển giao cho nhóm Via tiếp theo...`);
                   notifyActionBlocked({
-                    viaName: evt.viaName || activeLiveBuffSession?.viaName || group.viaName,
+                    viaName: evt.viaName || group.viaName,
                     viaUid: group.laneUid,
                     postUrl: targetUrl,
                     reason: 'Facebook tạm thời chặn do thao tác nhanh (Action Blocked)',
                   }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi cảnh báo Action Blocked:', err.message));
+
+                  // Chỉ dừng toàn bộ nếu tất cả các nhóm Via đều bị chặn
+                  const hasRemainingHealthyVias = viaGroups.some((g) => !g.isBlocked);
+                  if (!hasRemainingHealthyVias) {
+                    curSession.stopRequested = true;
+                    curSession.status = 'STOPPED';
+                    curSession.error = 'Toàn bộ dàn Via đều bị Facebook tạm thời hạn chế hành động (Action Blocked). Hệ thống đã tự động dừng khẩn cấp để bảo vệ an toàn tài khoản!';
+                    console.warn('[BuffStream] 🛑 Đã tự động ngắt tiến trình do toàn bộ Via bị Action Blocked.');
+                  }
                 }
               }
             }
@@ -1801,12 +1851,13 @@ app.post('/api/buff-like-stream', async (req, res) => {
     });
     const result = { details: allStreamDetails, total: selectedPages.length };
 
-    if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
-      if (activeLiveBuffSession.done >= activeLiveBuffSession.total || activeLiveBuffSession.stopRequested) {
-        activeLiveBuffSession.status = activeLiveBuffSession.stopRequested ? 'STOPPED' : 'DONE';
-        activeLiveBuffSession.currentRunningPageName = '';
+    const sess = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
+    if (sess) {
+      if (sess.done >= sess.total || sess.stopRequested || (targetKpi > 0 && sess.success >= targetKpi)) {
+        sess.status = sess.stopRequested ? 'STOPPED' : 'DONE';
+        sess.currentRunningPageName = '';
       }
-      activeLiveBuffSession.updatedAt = new Date().toISOString();
+      sess.updatedAt = new Date().toISOString();
     }
 
     const streamStartMs = activeLiveBuffSession?.startedAt ? new Date(activeLiveBuffSession.startedAt).getTime() : Date.now();

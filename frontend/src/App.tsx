@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { ConfigProvider, App as AntdApp, Layout, Spin } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Header from './components/Header';
 import Sidebar, { SidebarStats } from './components/Sidebar';
-import BuffEngagement from './pages/BuffEngagement';
-import LoginPage from './components/auth/LoginPage';
+import PageSkeleton from './components/common/SaaSLoadingSkeleton';
 import api from './config/axios';
 import { DEFAULT_NAV_KEY } from './config/navigation';
 import { DARK_THEME } from './theme/antdTheme';
@@ -19,6 +18,10 @@ import {
   getToken,
   saveUser,
 } from './auth/session';
+
+// Phân tách bundle (Code-splitting) tối ưu tốc độ tải trang ban đầu
+const BuffEngagement = lazy(() => import('./pages/BuffEngagement'));
+const LoginPage = lazy(() => import('./components/auth/LoginPage'));
 
 const { Content } = Layout;
 
@@ -159,15 +162,17 @@ const DashboardInner: React.FC<MainDashboardProps & { openViaManager: () => void
 
         <Content className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto">
           {/* BuffEngagement tự đếm accountsCount từ danh sách tài khoản và báo lên qua onStatsUpdate */}
-          <BuffEngagement
-            activeTabKey={activeTabKey}
-            onTabChange={handleSelectTab}
-            onOpenViaManager={openViaManager}
-            onOpenSettings={openSettings}
-            dbStatus={dbStatus}
-            onCheckDb={checkDb}
-            onStatsUpdate={handleStatsUpdate}
-          />
+          <Suspense fallback={<PageSkeleton title="Đang tải giao diện Buff Tương Tác 2.0..." />}>
+            <BuffEngagement
+              activeTabKey={activeTabKey}
+              onTabChange={handleSelectTab}
+              onOpenViaManager={openViaManager}
+              onOpenSettings={openSettings}
+              dbStatus={dbStatus}
+              onCheckDb={checkDb}
+              onStatsUpdate={handleStatsUpdate}
+            />
+          </Suspense>
         </Content>
       </Layout>
     </Layout>
@@ -242,7 +247,9 @@ const ThemedApp: React.FC = () => {
   return (
     <AntdApp>
       {!currentUser ? (
-        <LoginPage onLoginSuccess={setCurrentUser} />
+        <Suspense fallback={<div className="min-h-screen bg-[#090d16] flex items-center justify-center"><Spin size="large" /></div>}>
+          <LoginPage onLoginSuccess={setCurrentUser} />
+        </Suspense>
       ) : (
         <CurrentUserContext.Provider value={currentUser}>
           <MainDashboard currentUser={currentUser} onLogout={handleLogout} />

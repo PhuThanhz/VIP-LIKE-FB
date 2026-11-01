@@ -909,12 +909,12 @@ const readButtonState = (el) => {
 };
 
 // Xác nhận nút Like đã chuyển sang trạng thái "đã bày tỏ cảm xúc" sau khi click.
-// Tối ưu: Polling phản hồi nhanh mỗi 90ms, phản hồi tức thì trong 100-250ms
-async function verifyReacted(handle, beforeAria, refind = null, maxWaitMs = 1800, beforeText = '') {
+// Tối ưu: Polling phản hồi nhanh mỗi 50ms, phản hồi tức thì trong 60-150ms
+async function verifyReacted(handle, beforeAria, refind = null, maxWaitMs = 1200, beforeText = '') {
   const start = Date.now();
   let retried = false;
   while (Date.now() - start < maxWaitMs) {
-    await new Promise((r) => setTimeout(r, 90));
+    await new Promise((r) => setTimeout(r, 50));
     if (handle) {
       const state = await handle.evaluate(readButtonState).catch(() => null);
       if (isReactedState(state, beforeAria, beforeText)) return true;
@@ -924,10 +924,10 @@ async function verifyReacted(handle, beforeAria, refind = null, maxWaitMs = 1800
       if (fresh) {
         const state = await fresh.evaluate(readButtonState).catch(() => null);
         if (isReactedState(state, beforeAria, beforeText)) return true;
-        // Nếu qua 900ms Facebook chưa cập nhật, click bổ trợ 1 lần nữa để đảm bảo tương tác ăn 100%
-        if (!retried && Date.now() - start > 900) {
+        // Nếu qua 600ms Facebook chưa cập nhật, click bổ trợ 1 lần nữa để đảm bảo tương tác ăn 100%
+        if (!retried && Date.now() - start > 600) {
           retried = true;
-          await fresh.click({ timeout: 800 }).catch(async () => {
+          await fresh.click({ timeout: 600 }).catch(async () => {
             await fresh.evaluate((el) => {
               if (typeof el.click === 'function') el.click();
             }).catch(() => { });
@@ -954,16 +954,16 @@ function calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMi
     return baseWait + Math.floor(Math.random() * 2000);
   }
 
-  // Chế độ TURBO (Siêu Tốc: 0.9s - 1.4s)
-  if (speedMode === 'TURBO' || (delayMs > 0 && delayMs <= 1800)) {
-    const base = delayMs > 0 ? Math.min(delayMs, 1300) : 1000;
-    return base + Math.floor(Math.random() * 350);
+  // Chế độ TURBO (Siêu Tốc: 0.7s - 1.1s)
+  if (speedMode === 'TURBO' || (delayMs > 0 && delayMs <= 1500)) {
+    const base = delayMs > 0 ? Math.min(delayMs, 900) : 750;
+    return base + Math.floor(Math.random() * 250);
   }
 
-  // Chế độ FAST (Nhanh & Tối ưu: 1.6s - 2.2s)
-  if (speedMode === 'FAST' || (delayMs > 1800 && delayMs <= 3200)) {
-    const base = delayMs > 0 ? Math.min(delayMs, 2000) : 1700;
-    return base + Math.floor(Math.random() * 400);
+  // Chế độ FAST (Nhanh & Tối ưu: 1.4s - 1.8s)
+  if (speedMode === 'FAST' || (delayMs > 1500 && delayMs <= 3000)) {
+    const base = delayMs > 0 ? Math.min(delayMs, 1600) : 1400;
+    return base + Math.floor(Math.random() * 300);
   }
 
   // Chế độ SMART (Thích ứng thông minh: 2.2s - 2.8s)
@@ -1435,33 +1435,43 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '') {
         await seeAllBtn.click({ force: true });
         await tab.waitForTimeout(250);
 
-        const profileDlg = tab.locator('div[role="dialog"]').filter({
-          hasText: /Trang & trang cá nhân của bạn|Your profiles and Pages/
-        }).first();
+        // Bắt bất kỳ dialog nào vừa mở ra sau khi bấm "Xem tất cả trang cá nhân"
+        let profileDlg = tab.locator('div[role="dialog"]').last();
+        if (!(await profileDlg.isVisible({ timeout: 800 }).catch(() => false))) {
+          profileDlg = tab.locator('div[role="dialog"]').first();
+        }
 
-        if (await profileDlg.isVisible({ timeout: 1200 }).catch(() => false)) {
-          const pageItem = profileDlg.locator(
-            `div[role="button"]:has-text("${targetName}"), ` +
-            `div[role="listitem"]:has-text("${targetName}")`
+        if (await profileDlg.isVisible({ timeout: 1000 }).catch(() => false)) {
+          // Lọc ưu tiên bằng ô tìm kiếm trong modal để tìm chính xác trong kho BM lớn (hàng trăm Fanpage)
+          const searchBox = profileDlg.locator(
+            'input[placeholder*="Tìm"], input[aria-label*="Tìm"], input[placeholder*="Search"], input[aria-label*="Search"], input[type="search"], input[type="text"]'
           ).first();
 
-          if (await pageItem.isVisible({ timeout: 500 }).catch(() => false)) {
-            await pageItem.click({ force: true });
-            switched = true;
-          } else {
-            // Lọc bằng ô tìm kiếm trong modal
-            const searchBox = profileDlg.locator('input[type="search"], input[type="text"]').first();
-            if (await searchBox.isVisible({ timeout: 600 }).catch(() => false)) {
-              await searchBox.fill(targetName);
-              await tab.waitForTimeout(200);
-              const filteredItem = profileDlg.locator(
-                `div[role="button"]:has-text("${targetName}"), ` +
-                `div[role="listitem"]:has-text("${targetName}")`
-              ).first();
-              if (await filteredItem.isVisible({ timeout: 600 }).catch(() => false)) {
-                await filteredItem.click({ force: true });
-                switched = true;
-              }
+          if (await searchBox.isVisible({ timeout: 600 }).catch(() => false)) {
+            await searchBox.click({ force: true }).catch(() => {});
+            await searchBox.fill(targetName).catch(() => {});
+            await tab.waitForTimeout(250);
+            const filteredItem = profileDlg.locator(
+              `div[role="button"]:has-text("${targetName}"), ` +
+              `div[role="listitem"]:has-text("${targetName}"), ` +
+              `[aria-label*="${targetName}"]`
+            ).first();
+            if (await filteredItem.isVisible({ timeout: 800 }).catch(() => false)) {
+              await filteredItem.click({ force: true });
+              switched = true;
+            }
+          }
+
+          if (!switched) {
+            const pageItem = profileDlg.locator(
+              `div[role="button"]:has-text("${targetName}"), ` +
+              `div[role="listitem"]:has-text("${targetName}"), ` +
+              `[aria-label*="${targetName}"]`
+            ).first();
+
+            if (await pageItem.isVisible({ timeout: 500 }).catch(() => false)) {
+              await pageItem.click({ force: true });
+              switched = true;
             }
           }
         }
@@ -2061,7 +2071,8 @@ async function executePageInteraction({
         } else {
           if (currentReaction === 'LIKE') {
             await dispatchSyntheticClick(likeBtn);
-            const verified = await verifyReacted(likeHandle, currentAria, () => findLikeButtonOnTab(tab), 3200, beforeText);
+            const verifyTimeout = speedMode === 'TURBO' ? 700 : speedMode === 'FAST' ? 1200 : 2000;
+            const verified = await verifyReacted(likeHandle, currentAria, () => findLikeButtonOnTab(tab), verifyTimeout, beforeText);
             likeStatus = verified ? 'SUCCESS' : 'UNVERIFIED';
             console.log(`[FB-Buff]${workerTag} ${verified ? '✅' : '❔'} Page "${pageInfo.name}" thả LIKE ${verified ? 'đã xác nhận' : 'chưa xác nhận được trạng thái nút'}.`);
           } else {
@@ -2107,7 +2118,8 @@ async function executePageInteraction({
               currentReaction = 'LIKE';
               await dispatchSyntheticClick(likeBtn);
             }
-            const verified = await verifyReacted(likeHandle, currentAria, () => findLikeButtonOnTab(tab), 3200, beforeText);
+            const verifyTimeout = speedMode === 'TURBO' ? 700 : speedMode === 'FAST' ? 1200 : 2000;
+            const verified = await verifyReacted(likeHandle, currentAria, () => findLikeButtonOnTab(tab), verifyTimeout, beforeText);
             likeStatus = verified ? 'SUCCESS' : 'UNVERIFIED';
             console.log(`[FB-Buff]${workerTag} ${verified ? '✅' : '❔'} Page "${pageInfo.name}" thả ${currentReaction} ${verified ? 'đã xác nhận' : 'chưa xác nhận được trạng thái nút'}.`);
           }
@@ -2703,10 +2715,10 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           }
 
           if (actionBlocked) {
-            globalStopTriggered = true;
-            results.stopped = true;
+            results.consecutiveBlocks = (results.consecutiveBlocks || 0) + 1;
             results.failed++;
             results.details.push(resultItem);
+            console.warn(`[FB-Buff]${workerTag} ⚠️ Page "${pageInfo.name}" bị Action Blocked (lần ${results.consecutiveBlocks} liên tiếp). Skip qua page tiếp theo...`);
             if (typeof onProgress === 'function') {
               onProgress({
                 type: 'PAGE_FINISH',
@@ -2717,7 +2729,15 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
                 workerId,
               });
             }
-            break;
+            if (results.consecutiveBlocks >= 3) {
+              console.error(`[FB-Buff]${workerTag} 🛑 Bị Action Blocked liên tiếp ${results.consecutiveBlocks} lần! Dừng worker này để bảo vệ Via.`);
+              break;
+            }
+            // Nghỉ thêm 8s trước khi thử page tiếp theo
+            await new Promise((r) => setTimeout(r, 8000));
+            continue;
+          } else {
+            results.consecutiveBlocks = 0;
           }
 
           completedCount++;

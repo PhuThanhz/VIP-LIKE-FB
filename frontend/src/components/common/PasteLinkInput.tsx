@@ -61,6 +61,37 @@ export const cleanSocialUrl = (rawUrl: string): string => {
   }
 };
 
+export interface ContentTypeInfo {
+  type: 'REEL' | 'GROUP' | 'PAGE_POST' | 'VIDEO' | 'PHOTO' | 'STANDARD_POST';
+  label: string;
+  color: string;
+  icon: string;
+}
+
+export const detectContentType = (url?: string): ContentTypeInfo | null => {
+  if (!url) return null;
+  const lower = url.toLowerCase();
+  if (lower.includes('/reel/') || lower.includes('/share/r/')) {
+    return { type: 'REEL', label: 'Facebook Reel', color: 'purple', icon: '🎬' };
+  }
+  if (lower.includes('/groups/')) {
+    return { type: 'GROUP', label: 'Bài viết Nhóm (Group)', color: 'blue', icon: '👥' };
+  }
+  if (lower.includes('/videos/') || lower.includes('fb.watch') || lower.includes('/watch')) {
+    return { type: 'VIDEO', label: 'Video Facebook', color: 'volcano', icon: '📺' };
+  }
+  if (lower.includes('/photos/') || lower.includes('/photo/')) {
+    return { type: 'PHOTO', label: 'Hình ảnh Facebook', color: 'green', icon: '🖼️' };
+  }
+  if (lower.includes('/posts/') || lower.includes('/share/p/') || lower.includes('permalink') || lower.includes('fbid=')) {
+    return { type: 'PAGE_POST', label: 'Bài viết Fanpage/Feed', color: 'cyan', icon: '📄' };
+  }
+  if (lower.includes('facebook.com') || lower.includes('fb.com')) {
+    return { type: 'STANDARD_POST', label: 'Liên kết Facebook', color: 'blue', icon: '🌐' };
+  }
+  return null;
+};
+
 export const detectPlatform = (url?: string): { name: string; color: string; icon?: React.ReactNode } | null => {
   if (!url) return null;
   const lower = url.toLowerCase();
@@ -90,6 +121,7 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
   const [modalVisible, setModalVisible] = React.useState(false);
   const [modalText, setModalText] = React.useState('');
   const platform = showPlatformBadge ? detectPlatform(value) : null;
+  const contentType = showPlatformBadge ? detectContentType(value) : null;
 
   const handlePasteFromClipboard = async () => {
     // Thử dùng Clipboard API trước
@@ -159,6 +191,21 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
 
         {addonAfter}
       </div>
+
+      {showPlatformBadge && Boolean(value) && (platform || contentType) && (
+        <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
+          {platform && (
+            <Tag color={platform.color} icon={platform.icon} className="text-xs font-semibold rounded-md border-0 m-0 shadow-sm">
+              {platform.name}
+            </Tag>
+          )}
+          {contentType && (
+            <Tag color={contentType.color} className="text-xs font-semibold rounded-md border-0 m-0 shadow-sm">
+              {contentType.icon} {contentType.label}
+            </Tag>
+          )}
+        </div>
+      )}
 
       {/* MODAL DÁN SIÊU TỐC KHÔNG BỊ CHẶN BỞI HTTP SAFARI */}
       <Modal

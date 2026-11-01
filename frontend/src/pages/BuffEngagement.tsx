@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, useCallback, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback, lazy, Suspense, type ReactNode } from 'react';
 import {
   Card,
   Input,
@@ -65,12 +65,22 @@ import axios from 'axios';
 import api, { WORKER_BASE_URL } from '../config/axios';
 import PasteLinkInput from '../components/common/PasteLinkInput';
 import { triggerCookieExpiredAlert, useCookieAlert } from '../components/common/CookieAlertManager';
+import { TableSkeleton, PageSkeleton, CardSkeleton } from '../components/common/SaaSLoadingSkeleton';
 
-import PostHunterTab from '../components/buff/PostHunterTab';
-import BuffQueueTab, { formatDuration } from '../components/buff/BuffQueueTab';
-import ViaManagementPage from './ViaManagementPage';
-import SystemSettingsPage from './SystemSettingsPage';
-import LicenseManagementPage from './LicenseManagementPage';
+export const formatDuration = (totalSec: number): string => {
+  const sec = Math.max(0, Math.round(totalSec));
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  if (m < 60) return `${m}p ${sec % 60}s`;
+  return `${Math.floor(m / 60)}g ${m % 60}p`;
+};
+
+// Tách nhỏ bundle (Code-splitting) với React.lazy cho các phân hệ quản trị lớn
+const PostHunterTab = lazy(() => import('../components/buff/PostHunterTab'));
+const BuffQueueTab = lazy(() => import('../components/buff/BuffQueueTab'));
+const ViaManagementPage = lazy(() => import('./ViaManagementPage'));
+const SystemSettingsPage = lazy(() => import('./SystemSettingsPage'));
+const LicenseManagementPage = lazy(() => import('./LicenseManagementPage'));
 
 interface FanpageItem {
   id: string;
@@ -328,7 +338,7 @@ export interface BatchOrder {
   id: number;
   url: string;
   orderNumber: number;
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'PAUSED' | 'FAILED';
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'PARTIAL' | 'PAUSED' | 'FAILED';
   successLikes: number;
   totalLikesTarget: number;
   percent?: number;
@@ -1551,12 +1561,37 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   // History & Anti-Duplicate States
   const [buffLogs, setBuffLogs] = useState<BuffLogEntry[]>([]);
   const [buffLogsLoading, setBuffLogsLoading] = useState(true);
+  const [loadingLogDetailId, setLoadingLogDetailId] = useState<string | null>(null);
+
+  const handleViewLogDetail = useCallback(async (log: BuffLogEntry) => {
+    if (Array.isArray(log.details) && log.details.length > 0) {
+      setSelectedLogDetail(log);
+      return;
+    }
+    try {
+      setLoadingLogDetailId(log.id);
+      const res = await api.get(`/buff-logs/${log.id}`);
+      if (res.data?.success && res.data.log) {
+        setSelectedLogDetail(res.data.log);
+        setBuffLogs((prev) =>
+          prev.map((item) => (item.id === log.id ? { ...item, details: res.data.log.details } : item))
+        );
+      } else {
+        setSelectedLogDetail(log);
+      }
+    } catch {
+      setSelectedLogDetail(log);
+    } finally {
+      setLoadingLogDetailId(null);
+    }
+  }, []);
 
   const reloadBuffLogs = useCallback(
     async (silent = false) => {
       try {
         if (!silent) setBuffLogsLoading(true);
-        const res = await api.get('/buff-logs', { params: { limit: 500 } });
+        // Tối ưu hóa siêu tốc: chỉ nạp summary không nạp mảng JSON details nặng nề
+        const res = await api.get('/buff-logs', { params: { limit: 500, summary: 'true' } });
         const fetched: BuffLogEntry[] = Array.isArray(res.data?.logs) ? res.data.logs : [];
         setBuffLogs((prev) => mergeBuffLogs(fetched, prev));
       } catch (err: any) {
@@ -1579,7 +1614,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           localStorage.removeItem(LEGACY_BUFF_LOGS_STORAGE_KEY);
           if (!cancelled) message.success(`Đã đồng bộ ${legacy.length} lượt lịch sử cũ lên hệ thống`);
         }
-        const res = await api.get('/buff-logs', { params: { limit: 500 } });
+        const res = await api.get('/buff-logs', { params: { limit: 500, summary: 'true' } });
         const fetched: BuffLogEntry[] = Array.isArray(res.data?.logs) ? res.data.logs : [];
         // Giữ log vừa chạy xong trong lúc đang tải
         if (!cancelled) setBuffLogs((prev) => mergeBuffLogs(fetched, prev));
@@ -3150,17 +3185,20 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
       const counts = summarizeBuffDetails(orderDetails);
       const wasStopped = controller.signal.aborted || batchAbortRef.current;
+      const isTargetReached = counts.success >= targetLikes;
       const finalStatus: BatchOrder['status'] = wasStopped
         ? 'PAUSED'
-        : counts.success + counts.alreadyLiked + counts.unverified > 0
+        : isTargetReached
         ? 'COMPLETED'
+        : counts.success + counts.alreadyLiked + counts.unverified > 0
+        ? 'PARTIAL'
         : 'FAILED';
 
       const actualOrderPercent = Math.min(100, Math.round((counts.success / Math.max(1, targetLikes)) * 100));
 
       publishOrder({
         status: finalStatus,
-        percent: counts.success >= targetLikes ? 100 : actualOrderPercent,
+        percent: isTargetReached ? 100 : actualOrderPercent,
         currentRunningPageName: undefined,
         ...(finalStatus === 'FAILED' ? { error: orderError || 'Không có Page nào tương tác thành công' } : {}),
       });
@@ -3253,6 +3291,24 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     handleSelectRandomPages(missing);
     setActiveTabKey('buff-stream');
     message.success(`⚡ Đã chuyển sang chế độ Tương Tác Trực Tiếp và chọn sẵn ${missing} Fanpage từ kho LIVE để bù like! Bấm "Bắt đầu tương tác" để chạy.`);
+  };
+
+  const handleRefillBatchIncomplete = () => {
+    const incompleteOrders = batchOrders.filter(
+      (o) => (o.successLikes || 0) < o.totalLikesTarget
+    );
+    if (incompleteOrders.length === 0) {
+      message.success('Tất cả các bài trong Batch đều đã đạt 100% KPI!');
+      return;
+    }
+    const lines = incompleteOrders.map((o) => o.url).join('\n');
+    const maxMissing = Math.max(...incompleteOrders.map((o) => o.totalLikesTarget - (o.successLikes || 0)));
+    setBuffMode('BATCH');
+    setBatchLinksText(lines);
+    setBatchLikesPerOrder(maxMissing);
+    setSelectedAccountId('ALL_VIAS');
+    setActiveTabKey('buff-like');
+    message.success(`⚡ Đã tải ${incompleteOrders.length} bài viết còn thiếu vào danh sách Batch với chế độ Gộp Toàn Bộ Via (${fbAccounts.length} Via)! Bấm "Bắt đầu tương tác" để chạy nốt.`);
   };
 
   // Quick Action Presets
@@ -5473,17 +5529,29 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   {batchLinkConcurrency === 2 ? '⚡ Chạy song song 2 bài' : '🛡️ Chạy tuần tự 1 bài'}
                                 </Tag>
                               </div>
-                              <div className="flex items-center gap-2.5 mt-1 flex-wrap">
-                                <span className="text-sm sm:text-base font-bold text-slate-100">
-                                  Đã hoàn tất <b className="text-emerald-400">{batchOrders.filter((o) => o.status === 'COMPLETED').length}</b> / {batchOrders.length} bài viết
-                                </span>
-                                {batchOrders.filter((o) => o.status === 'RUNNING').length > 0 && (
-                                  <span className="text-[11px] text-cyan-300 font-semibold bg-cyan-950/70 border border-cyan-800/70 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-                                    {batchOrders.filter((o) => o.status === 'RUNNING').length} bài đang chạy đồng thời
-                                  </span>
-                                )}
-                              </div>
+                              {(() => {
+                                const completedCount = batchOrders.filter((o) => o.status === 'COMPLETED').length;
+                                const partialCount = batchOrders.filter((o) => o.status === 'PARTIAL').length;
+                                const runningCount = batchOrders.filter((o) => o.status === 'RUNNING').length;
+                                return (
+                                  <div className="flex items-center gap-2.5 mt-1 flex-wrap">
+                                    <span className="text-sm sm:text-base font-bold text-slate-100">
+                                      Đã hoàn tất <b className="text-emerald-400">{completedCount}</b> / {batchOrders.length} bài viết
+                                      {partialCount > 0 && (
+                                        <span className="text-amber-400 font-semibold ml-2 text-xs sm:text-sm">
+                                          ({partialCount} bài cần bù like)
+                                        </span>
+                                      )}
+                                    </span>
+                                    {runningCount > 0 && (
+                                      <span className="text-[11px] text-cyan-300 font-semibold bg-cyan-950/70 border border-cyan-800/70 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                                        {runningCount} bài đang chạy đồng thời
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           ) : (
                             <div className="space-y-2">
@@ -5813,20 +5881,37 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                             {isBatch ? totalBatchAlreadyLiked : (autoBuffProgress.alreadyLiked || 0)}
                           </div>
                         </div>
-                        <div className="p-3.5 rounded-xl border bg-rose-950/40 border-rose-800/50 text-center">
-                          <div className="text-xs text-rose-400 font-medium">Lỗi / Bỏ qua</div>
-                          <div className="text-2xl font-extrabold text-rose-300 tabular-nums mt-1">
-                            {isBatch ? totalBatchFailed : (autoBuffProgress.failed || 0)}
+                        <div className={`p-3.5 rounded-xl border text-center ${
+                          isBatch && totalBatchLikesTarget > totalBatchSuccess
+                            ? 'bg-amber-950/40 border-amber-800/50'
+                            : 'bg-rose-950/40 border-rose-800/50'
+                        }`}>
+                          <div className={`text-xs font-medium ${
+                            isBatch && totalBatchLikesTarget > totalBatchSuccess ? 'text-amber-400' : 'text-rose-400'
+                          }`}>
+                            {isBatch && totalBatchLikesTarget > totalBatchSuccess ? 'Còn thiếu / Cần bù' : 'Lỗi / Bỏ qua'}
                           </div>
+                          <div className={`text-2xl font-extrabold tabular-nums mt-1 ${
+                            isBatch && totalBatchLikesTarget > totalBatchSuccess ? 'text-amber-300' : 'text-rose-300'
+                          }`}>
+                            {isBatch && totalBatchLikesTarget > totalBatchSuccess
+                              ? totalBatchLikesTarget - totalBatchSuccess
+                              : (isBatch ? totalBatchFailed : (autoBuffProgress.failed || 0))}
+                          </div>
+                          {isBatch && totalBatchLikesTarget > totalBatchSuccess && (
+                            <div className="text-[10px] text-amber-400 mt-0.5 font-medium">
+                              Thiếu {totalBatchLikesTarget - totalBatchSuccess} like
+                            </div>
+                          )}
                         </div>
                       </div>
 
                       {/* If DONE, ERROR or STOPPED: Action & Summary Box (Only show when NOT RUNNING) */}
-                      {autoBuffProgress.status !== 'RUNNING' && autoBuffProgress.status !== 'IDLE' && (autoBuffProgress.status === 'DONE' || autoBuffProgress.status === 'ERROR' || autoBuffProgress.status === 'STOPPED' || (autoBuffProgress.details.length > 0 && (autoBuffProgress.total || 0) > 0)) && (() => {
-                        const success = autoBuffProgress.success || 0;
-                        const total = autoBuffProgress.total || 0;
-                        const failed = autoBuffProgress.failed || 0;
-                        const isExhaustedBox = autoBuffProgress.details.length > 0 && success + failed < total && total > 0;
+                      {autoBuffProgress.status !== 'RUNNING' && !isBatchRunning && (autoBuffProgress.status === 'DONE' || autoBuffProgress.status === 'ERROR' || autoBuffProgress.status === 'STOPPED' || (isBatch ? (totalBatchSuccess > 0 || batchOrders.some((o) => o.status === 'COMPLETED' || o.status === 'PARTIAL')) : (autoBuffProgress.details.length > 0 && (autoBuffProgress.total || 0) > 0))) && (() => {
+                        const success = isBatch ? totalBatchSuccess : (autoBuffProgress.success || 0);
+                        const total = isBatch ? totalBatchLikesTarget : (autoBuffProgress.total || 0);
+                        const failed = isBatch ? totalBatchFailed : (autoBuffProgress.failed || 0);
+                        const isExhaustedBox = isBatch ? (totalBatchSuccess < totalBatchLikesTarget) : (autoBuffProgress.details.length > 0 && success + failed < total && total > 0);
                         const isError = autoBuffProgress.status === 'ERROR';
                         const isStopped = Boolean(autoBuffProgress.isStopped || autoBuffProgress.status === 'STOPPED' || isExhaustedBox);
                         const isHighFailure = failed > success || failed >= 5 || isError;
@@ -5835,6 +5920,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                         if (isHighFailure || isStopped || isError || isExhaustedBox || success < total) {
                           const bannerTitle = isError
                             ? 'Chiến dịch tạm ngắt quãng do kết nối'
+                            : isBatch
+                            ? (success < total ? `Chiến dịch Batch hoàn tất một phần (${success}/${total} like - Đạt ${Math.round((success / Math.max(1, total)) * 100)}%)` : 'Chiến dịch Batch đã hoàn tất')
                             : isExhaustedBox
                             ? 'Chiến dịch tạm dừng do đã duyệt hết nick hiện có'
                             : isStopped
@@ -5855,12 +5942,22 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   <div className="text-xs text-slate-400">
                                     Đã like thành công: <span className="text-emerald-400 font-semibold">{success}</span>/{total}
                                     {missingLikes > 0 && <> • Còn thiếu: <span className="text-amber-400 font-bold">{missingLikes} like</span></>}
-                                    {failed > 0 && <> • Bù lỗi: <span className="text-rose-400 font-semibold">{failed}</span></>}
+                                    {failed > 0 && <> • Lỗi/bỏ qua: <span className="text-rose-400 font-semibold">{failed}</span></>}
                                   </div>
                                 </div>
                               </div>
                               <div className="flex items-center gap-2 flex-wrap">
-                                {missingLikes > 0 && (runningTargetInfo?.url || targetPostUrl) && (
+                                {isBatch && missingLikes > 0 && (
+                                  <Button
+                                    type="primary"
+                                    icon={<ThunderboltOutlined />}
+                                    onClick={handleRefillBatchIncomplete}
+                                    className="font-semibold text-xs rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 border-none shadow-md shadow-amber-600/20"
+                                  >
+                                    🚀 Bù like cho các bài còn thiếu ({missingLikes} like)
+                                  </Button>
+                                )}
+                                {!isBatch && missingLikes > 0 && (runningTargetInfo?.url || targetPostUrl) && (
                                   <Button
                                     type="primary"
                                     icon={<ThunderboltOutlined />}
@@ -6008,42 +6105,40 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                       {order.successLikes}/{order.totalLikesTarget} like
                                     </span>
                                     {order.status === 'COMPLETED' ? (
-                                      order.successLikes >= order.totalLikesTarget ? (
-                                        <Tag color="success" className="text-xs font-semibold m-0">
-                                          Hoàn thành (100%)
-                                        </Tag>
-                                      ) : (
-                                        <Tag color="warning" className="text-xs font-semibold m-0">
-                                          Đạt {order.successLikes}/{order.totalLikesTarget} (Hết Page)
-                                        </Tag>
-                                      )
+                                      <Tag color="success" className="text-xs font-semibold m-0">
+                                        ✅ Hoàn thành 100%
+                                      </Tag>
+                                    ) : order.status === 'PARTIAL' ? (
+                                      <Tag color="warning" className="text-xs font-semibold m-0">
+                                        ⚠️ Đạt {order.successLikes}/{order.totalLikesTarget} (Thiếu {order.totalLikesTarget - order.successLikes})
+                                      </Tag>
                                     ) : isRunning ? (
                                       <Tag color="processing" className="text-xs font-semibold m-0">
-                                        Đang chạy ({orderPercent}%)
+                                        ⚡ Đang chạy ({orderPercent}%)
                                       </Tag>
                                     ) : order.status === 'FAILED' ? (
                                       <Tag color="error" className="text-xs font-semibold m-0">
-                                        Thất bại
+                                        ❌ Thất bại
                                       </Tag>
                                     ) : order.status === 'PAUSED' ? (
                                       <Tag color="warning" className="text-xs font-semibold m-0">
-                                        Tạm dừng
+                                        ⏸️ Tạm dừng
                                       </Tag>
                                     ) : (
                                       <Tag color="default" className="text-xs font-semibold m-0">
-                                        Chờ đến lượt
+                                        ⏳ Chờ đến lượt
                                       </Tag>
                                     )}
 
-                                    {order.status === 'COMPLETED' && order.successLikes < order.totalLikesTarget && (
+                                    {order.successLikes < order.totalLikesTarget && (order.status === 'PARTIAL' || order.status === 'COMPLETED') && (
                                       <Button
                                         size="small"
                                         type="primary"
                                         icon={<ThunderboltOutlined />}
                                         onClick={() => handleRefillSingleOrder(order)}
-                                        className="bg-amber-600 hover:bg-amber-500 border-none text-[11px] font-bold h-6 px-2 shrink-0"
+                                        className="bg-amber-600 hover:bg-amber-500 border-none text-[11px] font-bold h-6 px-2 shrink-0 shadow-sm"
                                       >
-                                        Bù {order.totalLikesTarget - order.successLikes} like
+                                        🚀 Bù {order.totalLikesTarget - order.successLikes} like
                                       </Button>
                                     )}
                                     {order.details && order.details.length > 0 && (
@@ -6401,30 +6496,32 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               </span>
             ),
             children: (
-              <BuffQueueTab
-                workerBaseUrl={WORKER_BASE_URL}
-                queueItems={queueItems}
-                fbAccounts={fbAccounts}
-                scannedPages={scannedPages}
-                onRefresh={fetchBuffQueue}
-                onRunNow={handleRunNowQueueTask}
-                onRetry={handleRetryQueueTask}
-                onRemove={handleRemoveQueueTask}
-                onClearCompleted={handleClearCompletedQueue}
-                onEmergencyStop={handleEmergencyStop}
-                onResume={handleResumeSystem}
-                isEmergencyStopped={Boolean(bmOverview?.system?.isEmergencyStopped)}
-                totalAvailablePages={scannedPages.length || 50}
-                maxParallelTasks={systemSettings?.maxParallelTasks || 2}
-                onCreateNew={() => {
-                  setRunMode('QUEUE');
-                  setActiveTabKey('buff-like');
-                }}
-                onViewHistory={(url) => {
-                  if (url) setLogSearchQuery(url);
-                  setActiveTabKey('buff-history');
-                }}
-              />
+              <Suspense fallback={<TableSkeleton rows={5} columns={4} />}>
+                <BuffQueueTab
+                  workerBaseUrl={WORKER_BASE_URL}
+                  queueItems={queueItems}
+                  fbAccounts={fbAccounts}
+                  scannedPages={scannedPages}
+                  onRefresh={fetchBuffQueue}
+                  onRunNow={handleRunNowQueueTask}
+                  onRetry={handleRetryQueueTask}
+                  onRemove={handleRemoveQueueTask}
+                  onClearCompleted={handleClearCompletedQueue}
+                  onEmergencyStop={handleEmergencyStop}
+                  onResume={handleResumeSystem}
+                  isEmergencyStopped={Boolean(bmOverview?.system?.isEmergencyStopped)}
+                  totalAvailablePages={scannedPages.length || 50}
+                  maxParallelTasks={systemSettings?.maxParallelTasks || 2}
+                  onCreateNew={() => {
+                    setRunMode('QUEUE');
+                    setActiveTabKey('buff-like');
+                  }}
+                  onViewHistory={(url) => {
+                    if (url) setLogSearchQuery(url);
+                    setActiveTabKey('buff-history');
+                  }}
+                />
+              </Suspense>
             ),
           },
           {
@@ -6594,17 +6691,24 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
                 {/* List / Table of Logs */}
                 {buffLogsLoading && buffLogs.length === 0 ? (
-                  <Card className="app-surface text-center py-16">
-                    <Spin />
-                    <div className="text-xs text-slate-400 mt-3">Đang tải lịch sử tương tác...</div>
-                  </Card>
+                  <TableSkeleton rows={6} columns={5} />
                 ) : buffLogs.length === 0 ? (
-                  <Card className="app-surface text-center py-16">
-                    <div className="text-5xl mb-3"></div>
-                    <div className="text-base font-bold text-slate-200">Chưa có lịch sử buff tương tác nào</div>
-                    <div className="text-xs text-slate-400 max-w-md mx-auto mt-2 leading-relaxed">
-                      Mỗi khi bạn thực hiện buff like/cảm xúc (đơn lẻ hoặc hàng loạt), hệ thống sẽ tự động ghi nhớ link bài viết, danh sách Page đã like và thời gian tại đây để bạn kiểm tra và tránh like trùng!
+                  <Card className="app-surface text-center py-16 border-slate-800">
+                    <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-3xl shadow-inner text-cyan-400">
+                      <HistoryOutlined />
                     </div>
+                    <div className="text-base font-bold text-slate-100">Chưa có lịch sử tương tác nào</div>
+                    <div className="text-xs text-slate-400 max-w-md mx-auto mt-2 leading-relaxed">
+                      Mỗi khi bạn thực hiện chiến dịch tương tác trực tiếp hoặc chạy nền, nhật ký và báo cáo kết quả sẽ hiển thị tại đây để bạn dễ dàng theo dõi và đối soát.
+                    </div>
+                    <Button
+                      type="primary"
+                      icon={<PlayCircleOutlined />}
+                      onClick={() => setActiveTabKey('buff-like')}
+                      className="mt-4 rounded-xl font-bold bg-cyan-600 hover:bg-cyan-500 border-none"
+                    >
+                      Bắt đầu chiến dịch đầu tiên
+                    </Button>
                   </Card>
                 ) : (
                   <Card className="app-surface p-0 overflow-hidden">
@@ -6754,7 +6858,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               <Button
                                 size="small"
                                 type="text"
-                                onClick={() => setSelectedLogDetail(log)}
+                                onClick={() => handleViewLogDetail(log)}
+                                loading={loadingLogDetailId === log.id}
                                 className="text-xs text-slate-300 h-7 px-1.5"
                               >
                                 Chi tiết
@@ -6797,67 +6902,77 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             key: 'buff-hunter',
             label: `Săn bài tự động (${monitors.length})`,
             children: (
-              <PostHunterTab
-                workerBaseUrl={WORKER_BASE_URL}
-                monitors={monitors as any}
-                queueItems={queueItems}
-                autoBuffOwnPosts={Boolean(bmOverview?.system?.autoBuffOwnPosts)}
-                maxPagesPerPost={Number(bmOverview?.system?.maxPagesPerPost) || 60}
-                onRefresh={fetchBuffMonitors}
-                onAdd={(url) => handleOpenAddMonitorModal(undefined, url)}
-                onEdit={(m) => handleOpenAddMonitorModal(m as any)}
-                onToggle={handleToggleMonitor}
-                onDelete={handleDeleteMonitor}
-                onScanNow={handleScanNowMonitor}
-                onQueueUrl={(url) => {
-                  setTargetPostUrl(url);
-                  setActiveTabKey('buff-like');
-                }}
-                onOpenQueue={() => setActiveTabKey('buff-queue')}
-                onOpenSettings={() => {
-                  setActiveTabKey('system-settings');
-                }}
-              />
+              <Suspense fallback={<TableSkeleton rows={4} columns={3} />}>
+                <PostHunterTab
+                  workerBaseUrl={WORKER_BASE_URL}
+                  monitors={monitors as any}
+                  queueItems={queueItems}
+                  autoBuffOwnPosts={Boolean(bmOverview?.system?.autoBuffOwnPosts)}
+                  maxPagesPerPost={Number(bmOverview?.system?.maxPagesPerPost) || 60}
+                  onRefresh={fetchBuffMonitors}
+                  onAdd={(url) => handleOpenAddMonitorModal(undefined, url)}
+                  onEdit={(m) => handleOpenAddMonitorModal(m as any)}
+                  onToggle={handleToggleMonitor}
+                  onDelete={handleDeleteMonitor}
+                  onScanNow={handleScanNowMonitor}
+                  onQueueUrl={(url) => {
+                    setTargetPostUrl(url);
+                    setActiveTabKey('buff-like');
+                  }}
+                  onOpenQueue={() => setActiveTabKey('buff-queue')}
+                  onOpenSettings={() => {
+                    setActiveTabKey('system-settings');
+                  }}
+                />
+              </Suspense>
             ),
           },
           {
             key: 'via-management',
             label: 'Dàn Via & Fanpage',
             children: (
-              <ViaManagementPage
-                accounts={accounts as any[]}
-                loading={loadingAccounts}
-                onRefresh={() => {
-                  refetchAccounts();
-                  fetchBmOverview();
-                }}
-                dbStatus={props.dbStatus}
-                onCheckDb={props.onCheckDb}
-                onNavigateToBuff={() => setActiveTabKey('buff-like')}
-              />
+              <Suspense fallback={<PageSkeleton title="Đang tải Dàn Via & Fanpage..." />}>
+                <ViaManagementPage
+                  accounts={accounts as any[]}
+                  loading={loadingAccounts}
+                  onRefresh={() => {
+                    refetchAccounts();
+                    fetchBmOverview();
+                  }}
+                  dbStatus={props.dbStatus}
+                  onCheckDb={props.onCheckDb}
+                  onNavigateToBuff={() => setActiveTabKey('buff-like')}
+                />
+              </Suspense>
             ),
           },
           {
             key: 'system-settings',
             label: 'Cấu Hình & Telegram',
             children: (
-              <SystemSettingsPage
-                systemSettings={systemSettings}
-                setSystemSettings={setSystemSettings}
-                savingSettings={savingSettings}
-                onSaveSettings={handleSaveSettings}
-                testingTelegram={testingTelegram}
-                onTestTelegram={handleTestTelegram}
-                bmOverview={bmOverview}
-                onEmergencyStop={handleEmergencyStop}
-                onResumeSystem={handleResumeSystem}
-              />
+              <Suspense fallback={<PageSkeleton title="Đang tải Cấu hình hệ thống..." />}>
+                <SystemSettingsPage
+                  systemSettings={systemSettings}
+                  setSystemSettings={setSystemSettings}
+                  savingSettings={savingSettings}
+                  onSaveSettings={handleSaveSettings}
+                  testingTelegram={testingTelegram}
+                  onTestTelegram={handleTestTelegram}
+                  bmOverview={bmOverview}
+                  onEmergencyStop={handleEmergencyStop}
+                  onResumeSystem={handleResumeSystem}
+                />
+              </Suspense>
             ),
           },
           {
             key: 'license-management',
             label: 'Cho Thuê & Bản Quyền',
-            children: <LicenseManagementPage />,
+            children: (
+              <Suspense fallback={<PageSkeleton title="Đang tải Quản lý Bản quyền..." />}>
+                <LicenseManagementPage />
+              </Suspense>
+            ),
           },
         ]}
       />

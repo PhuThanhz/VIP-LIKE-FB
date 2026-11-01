@@ -43,8 +43,8 @@ const dbConfig = {
   password: process.env.DB_PASSWORD || '26082003',
   database: process.env.DB_NAME || 'viplike_radiant',
   waitForConnections: true,
-  connectionLimit: 15,
-  maxIdle: 10,
+  connectionLimit: 25,
+  maxIdle: 15,
   idleTimeout: 60000,
   queueLimit: 0,
   connectTimeout: 8000,
@@ -63,6 +63,48 @@ function getPool() {
   return pool;
 }
 
+let performanceIndexesReady = false;
+async function ensurePerformanceIndexes(p) {
+  if (performanceIndexesReady) return;
+  try {
+    const indexes = [
+      {
+        table: 'buff_history',
+        name: 'idx_history_created_covering',
+        sql: 'CREATE INDEX idx_history_created_covering ON buff_history (created_at DESC, status, page_id)',
+      },
+      {
+        table: 'facebook_page_accesses',
+        name: 'idx_page_profile_active',
+        sql: 'CREATE INDEX idx_page_profile_active ON facebook_page_accesses (personal_profile_id, active, page_id)',
+      },
+      {
+        table: 'buff_queue',
+        name: 'idx_queue_status_time',
+        sql: 'CREATE INDEX idx_queue_status_time ON buff_queue (status, schedule_time, id)',
+      },
+      {
+        table: 'buff_logs',
+        name: 'idx_logs_type_time',
+        sql: 'CREATE INDEX idx_logs_type_time ON buff_logs (run_type, created_at DESC)',
+      },
+    ];
+
+    for (const item of indexes) {
+      try {
+        const [existing] = await p.query(`SHOW INDEX FROM ${item.table} WHERE Key_name = ?`, [item.name]);
+        if (!existing || existing.length === 0) {
+          await p.query(item.sql);
+          console.log(`[DB Indexing] ⚡ Tối ưu hóa Database: Đã tạo Index '${item.name}' trên bảng '${item.table}'`);
+        }
+      } catch (err) {}
+    }
+    performanceIndexesReady = true;
+  } catch (err) {
+    console.warn('[DB Indexing] ⚠️ Bỏ qua lỗi tạo Index:', err.message);
+  }
+}
+
 /**
  * Kiểm tra kết nối tới MySQL Workbench
  */
@@ -71,6 +113,7 @@ async function testConnection() {
     const p = getPool();
     const [rows] = await p.execute('SELECT 1 as test');
     const [tables] = await p.execute('SHOW TABLES');
+    ensurePerformanceIndexes(p).catch(() => {});
     return {
       success: true,
       connected: true,
@@ -850,29 +893,58 @@ async function flushPendingBuffLogs(p) {
 /**
  * Lấy lịch sử tương tác mới nhất (MySQL, hoặc cache khi MySQL lỗi)
  */
-async function getBuffLogs(limit = 500) {
+async function getBuffLogs(limit = 500, summaryOnly = false) {
   const safeLimit = Math.min(Math.max(toInt(limit) || 500, 1), BUFF_LOGS_CACHE_MAX);
   try {
     const p = getPool();
     await ensureBuffLogsTable(p);
     await flushPendingBuffLogs(p);
+    const selectCols = summaryOnly
+      ? `id, run_type as type, target_url as targetUrl, reaction_type as reactionType,
+         engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages,
+         success_count as successCount, already_liked_count as alreadyLikedCount,
+         failed_count as failedCount, comment_count as commentCount, created_at as createdAt`
+      : `id, run_type as type, target_url as targetUrl, reaction_type as reactionType,
+         engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages,
+         success_count as successCount, already_liked_count as alreadyLikedCount,
+         failed_count as failedCount, comment_count as commentCount, details, created_at as createdAt`;
     const [rows] = await p.query(
-      `SELECT id, run_type as type, target_url as targetUrl, reaction_type as reactionType,
-        engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages,
-        success_count as successCount, already_liked_count as alreadyLikedCount,
-        failed_count as failedCount, comment_count as commentCount, details, created_at as createdAt
-       FROM buff_logs ORDER BY created_at DESC LIMIT ?`,
+      `SELECT ${selectCols} FROM buff_logs ORDER BY created_at DESC LIMIT ?`,
       [safeLimit]
     );
-    const logs = rows.map(rowToBuffLog);
-    saveBuffLogsCache(logs);
+    const logs = rows.map((r) => (summaryOnly ? { ...r, details: [] } : rowToBuffLog(r)));
+    if (!summaryOnly) saveBuffLogsCache(logs);
     return { logs, source: 'mysql' };
   } catch (err) {
     console.warn('[MySQL Workbench] ⚠️ Lỗi đọc buff_logs, dùng cache:', err.message);
     const logs = loadBuffLogsCache()
       .slice(0, safeLimit)
-      .map(({ _pending, ...l }) => l);
+      .map(({ _pending, ...l }) => (summaryOnly ? { ...l, details: [] } : l));
     return { logs, source: 'cache' };
+  }
+}
+
+/**
+ * Lấy chi tiết đầy đủ của một lượt chạy theo ID (kèm JSON details)
+ */
+async function getBuffLogById(id) {
+  if (!id) return null;
+  try {
+    const p = getPool();
+    await ensureBuffLogsTable(p);
+    const [rows] = await p.query(
+      `SELECT id, run_type as type, target_url as targetUrl, reaction_type as reactionType,
+        engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages,
+        success_count as successCount, already_liked_count as alreadyLikedCount,
+        failed_count as failedCount, comment_count as commentCount, details, created_at as createdAt
+       FROM buff_logs WHERE id = ? LIMIT 1`,
+      [id]
+    );
+    if (!rows || rows.length === 0) return null;
+    return rowToBuffLog(rows[0]);
+  } catch (err) {
+    console.warn('[DB] ⚠️ Lỗi đọc log theo id:', err.message);
+    return null;
   }
 }
 
@@ -1202,6 +1274,7 @@ module.exports = {
   loadLicensesCache,
   saveLicensesCache,
   getBuffLogs,
+  getBuffLogById,
   saveBuffLogs,
   clearBuffLogs,
   ensureTelegramTable,
