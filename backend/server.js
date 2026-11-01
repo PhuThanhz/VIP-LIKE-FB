@@ -271,7 +271,8 @@ function getMaxParallelBuff() {
 }
 const busyBuffLanes = new Set();
 const buffLaneWaiters = [];
-const laneLeaseTimers = new Map();
+const activeLaneLeases = new Map(); // uid -> { leaseToken, abortController, leaseTimer, acquiredAt }
+let nextLeaseToken = 0;
 const LANE_LEASE_TIMEOUT_MS = 8 * 60 * 1000; // 8 phút tối đa cho 1 lượt chiếm lane
 const WAITER_TIMEOUT_MS = 60 * 1000; // 60 giây chờ tối đa trong hàng chờ
 
@@ -298,24 +299,48 @@ function pumpBuffLanes() {
     if (busyBuffLanes.has(waiter.uid)) continue;
     buffLaneWaiters.splice(i--, 1);
     if (waiter.waiterTimer) clearTimeout(waiter.waiterTimer);
+
+    // Cấp phát Fencing Token độc nhất và tăng dần (Monotonic Lease Token)
+    const leaseToken = ++nextLeaseToken;
+    const abortController = new AbortController();
+
+    // Thiết lập Watchdog Lease Timer chống deadlock & hủy bỏ an toàn (Safe Cancellation)
+    const leaseTimer = setTimeout(() => {
+      const active = activeLaneLeases.get(waiter.uid);
+      if (active && active.leaseToken === leaseToken) {
+        console.warn(`[LaneLocker] ⚠️ CẢNH BÁO: Lane "${waiter.uid}" (LeaseToken: ${leaseToken}) chiếm dụng quá ${LANE_LEASE_TIMEOUT_MS / 1000}s. Kích hoạt hủy bỏ an toàn (Safe Abort) trước khi thu hồi.`);
+        try {
+          abortController.abort(new Error(`Lane lease timeout expired (${LANE_LEASE_TIMEOUT_MS / 1000}s)`));
+        } catch (_) {}
+        activeLaneLeases.delete(waiter.uid);
+        busyBuffLanes.delete(waiter.uid);
+        pumpBuffLanes();
+      }
+    }, LANE_LEASE_TIMEOUT_MS);
+
+    activeLaneLeases.set(waiter.uid, {
+      leaseToken,
+      abortController,
+      leaseTimer,
+      acquiredAt: Date.now(),
+    });
     busyBuffLanes.add(waiter.uid);
 
-    // Thiết lập Watchdog Lease Timer chống deadlock khi Chromium bị treo
-    const leaseTimer = setTimeout(() => {
-      console.warn(`[LaneLocker] ⚠️ CẢNH BÁO: Lane "${waiter.uid}" chiếm dụng quá ${LANE_LEASE_TIMEOUT_MS / 1000}s. Tự động giải phóng (Deadlock Prevention).`);
-      busyBuffLanes.delete(waiter.uid);
-      laneLeaseTimers.delete(waiter.uid);
-      pumpBuffLanes();
-    }, LANE_LEASE_TIMEOUT_MS);
-    laneLeaseTimers.set(waiter.uid, leaseTimer);
-
-    waiter.resolve();
+    waiter.resolve({
+      leaseToken,
+      abortController,
+      signal: abortController.signal,
+      isStale: () => {
+        const cur = activeLaneLeases.get(waiter.uid);
+        return !cur || cur.leaseToken !== leaseToken || abortController.signal.aborted;
+      },
+    });
   }
 }
 
 async function withBuffLane(uid, fn) {
   const key = uid || 'unknown';
-  await new Promise((resolve, reject) => {
+  const leaseContext = await new Promise((resolve, reject) => {
     let waiterObj;
     const waiterTimer = setTimeout(() => {
       const idx = buffLaneWaiters.indexOf(waiterObj);
@@ -330,16 +355,21 @@ async function withBuffLane(uid, fn) {
     pumpBuffLanes();
   });
 
+  const { leaseToken, signal, isStale } = leaseContext;
+
   try {
-    return await fn();
+    return await fn({ leaseToken, signal, isStale });
   } finally {
-    const existingLease = laneLeaseTimers.get(key);
-    if (existingLease) {
-      clearTimeout(existingLease);
-      laneLeaseTimers.delete(key);
+    const active = activeLaneLeases.get(key);
+    // CHỈ giải phóng khoá nếu Fencing Token của tác vụ này trùng khớp với Token đang sở hữu làn
+    if (active && active.leaseToken === leaseToken) {
+      clearTimeout(active.leaseTimer);
+      activeLaneLeases.delete(key);
+      busyBuffLanes.delete(key);
+      pumpBuffLanes();
+    } else {
+      console.warn(`[LaneLocker] 🛡️ Fencing Guard: Bỏ qua giải phóng làn [${key}] vì LeaseToken ${leaseToken} đã bị thu hồi/hết hạn.`);
     }
-    busyBuffLanes.delete(key);
-    pumpBuffLanes();
   }
 }
 
@@ -1472,7 +1502,7 @@ app.post('/api/buff-like', async (req, res) => {
 
     await runWithConcurrency(viaGroups, parallelVias, async (group) => {
       const grpProxy = await resolveViaProxy(group.cookieString, group.proxyUrl || explicitProxy);
-      const subResult = await withBuffLane(group.laneUid, () =>
+      const subResult = await withBuffLane(group.laneUid, (fence) =>
         fbBuffTool.buffLikesWithPages(group.cookieString, targetUrl, {
           reactionType,
           selectedPages: group.pages,
@@ -1491,6 +1521,7 @@ app.post('/api/buff-like', async (req, res) => {
           concurrency: Math.max(1, Math.min(3, Math.ceil((parseInt(concurrency, 10) || 2) / parallelVias) || 1)),
           dripFeedMode: Boolean(dripFeedMode),
           dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
+          shouldStop: () => fence?.isStale() || isEmergencyStopped(),
         })
       );
       if (subResult?.details) allDetails.push(...subResult.details);
@@ -1848,7 +1879,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
       if (targetKpi > 0 && (activeLiveBuffSession?.success || 0) >= targetKpi) return;
 
       const grpProxy = await resolveViaProxy(group.cookieString, group.proxyUrl || explicitProxy);
-      const subResult = await withBuffLane(group.laneUid, () =>
+      const subResult = await withBuffLane(group.laneUid, (fence) =>
         fbBuffTool.buffLikesWithPages(group.cookieString, targetUrl, {
           reactionType,
           selectedPages: group.pages,
@@ -1868,10 +1899,11 @@ app.post('/api/buff-like-stream', async (req, res) => {
           concurrency: Math.max(1, Math.min(3, Math.ceil((parseInt(concurrency, 10) || 2) / parallelVias) || 1)),
           dripFeedMode: Boolean(dripFeedMode),
           dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
-          // CHỈ DỪNG KHI NGƯỜI DÙNG BẤM NÚT DỪNG HOẶC DỪNG KHẨN CẤP HOẶC ĐẠT ĐỦ KPI
+          // CHỈ DỪNG KHI NGƯỜI DÙNG BẤM NÚT DỪNG, DỪNG KHẨN CẤP, HẾT HẠN LEASE HOẶC ĐẠT ĐỦ KPI
           shouldStop: () => {
             const curSession = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
             return (
+              Boolean(fence?.isStale()) ||
               Boolean(curSession?.stopRequested) ||
               isEmergencyStopped() ||
               (targetKpi > 0 && (curSession?.success || 0) >= targetKpi)
@@ -2077,6 +2109,14 @@ function addBuffQueueTask(taskPayload) {
     return { skipped: true, history: history[normUrl] };
   }
 
+  // Kiểm tra Idempotency Key (chống trùng lặp tuyệt đối khi mạng lag bấm nhiều lần)
+  if (taskPayload.idempotencyKey) {
+    const byKey = queueData.items.find((it) => it.idempotencyKey === taskPayload.idempotencyKey);
+    if (byKey) {
+      return { alreadyQueued: true, task: byKey, idempotent: true };
+    }
+  }
+
   // Chỉ chặn nếu bài viết THỰC SỰ ĐANG CHẠY hoặc ĐANG CHỜ trong hàng đợi
   const existing = queueData.items.find(
     (it) => it.normalizedUrl === normUrl && (it.status === 'QUEUED' || it.status === 'RUNNING')
@@ -2088,6 +2128,7 @@ function addBuffQueueTask(taskPayload) {
   const delayMin = parseDelayMinutes(taskPayload.delayMinutes);
   const newTask = {
     id: `task_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    idempotencyKey: taskPayload.idempotencyKey || null,
     source: taskPayload.source || 'MANUAL',
     targetUrl: taskPayload.targetUrl,
     normalizedUrl: normUrl,
@@ -2509,7 +2550,7 @@ async function executeQueueTask(task) {
       if (task.targetLikes !== 'ALL' && totalSuccess >= desiredLikes) return;
 
       const laneUid = fbBuffTool.getUserIdFromCookie(group.cookieString);
-      await withBuffLane(laneUid, () =>
+      await withBuffLane(laneUid, (fence) =>
         fbBuffTool.buffLikesWithPages(group.cookieString, task.targetUrl, {
           reactionType: task.reactionType || 'RANDOM_POSITIVE',
           speedMode: task.speedMode || 'FAST',
@@ -2526,7 +2567,7 @@ async function executeQueueTask(task) {
           comments: task.comments || [],
           proxyUrl: group.proxyUrl,
           proxyPool,
-          shouldStop: () => isEmergencyStopped() || (task.targetLikes !== 'ALL' && totalSuccess >= desiredLikes),
+          shouldStop: () => fence?.isStale() || isEmergencyStopped() || (task.targetLikes !== 'ALL' && totalSuccess >= desiredLikes),
           onProgress: (ev) => {
             if (ev.actionBlocked) {
               console.warn(`[QueueWorker] 🛑 Phát hiện Via bị Facebook hạn chế tốc độ (Action Blocked) trên task ${task.id}. Tự động ngắt task bảo vệ Via!`);
