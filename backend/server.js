@@ -2928,7 +2928,21 @@ app.post('/api/buff-queue/clear-completed', async (req, res) => {
     const prevLen = queueData.items.length;
     queueData.items = queueData.items.filter((it) => it.status === 'QUEUED' || it.status === 'RUNNING');
     saveBuffQueue(queueData);
+    await db.getPool().execute('DELETE FROM buff_queue WHERE status IN ("COMPLETED", "FAILED", "STOPPED", "CANCELLED")').catch(() => {});
     return res.json({ success: true, cleared: prevLen - queueData.items.length });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/buff-queue/clear-all', async (req, res) => {
+  try {
+    const queueData = loadBuffQueue();
+    const prevLen = queueData.items.length;
+    queueData.items = [];
+    saveBuffQueue(queueData);
+    await db.getPool().execute('DELETE FROM buff_queue').catch(() => {});
+    return res.json({ success: true, cleared: prevLen });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }

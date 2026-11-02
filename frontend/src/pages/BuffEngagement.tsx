@@ -1235,6 +1235,27 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     }
   };
 
+  const handleClearAllQueue = () => {
+    modal.confirm({
+      title: 'Xoá toàn bộ hàng đợi?',
+      content: 'Thao tác này sẽ xoá sạch tất cả các bài viết trong hàng đợi.',
+      okText: 'Xoá tất cả',
+      cancelText: 'Huỷ',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/clear-all`);
+          if (res.data?.success) {
+            message.success('Đã xoá sạch toàn bộ hàng đợi!');
+            fetchBuffQueue();
+          }
+        } catch (err: any) {
+          message.error(err.message);
+        }
+      },
+    });
+  };
+
   const handleRetryQueueTask = async (id: string) => {
     try {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/retry/${id}`);
@@ -6547,6 +6568,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                   onRetry={handleRetryQueueTask}
                   onRemove={handleRemoveQueueTask}
                   onClearCompleted={handleClearCompletedQueue}
+                  onClearAll={handleClearAllQueue}
                   onEmergencyStop={handleEmergencyStop}
                   onResume={handleResumeSystem}
                   isEmergencyStopped={Boolean(bmOverview?.system?.isEmergencyStopped)}

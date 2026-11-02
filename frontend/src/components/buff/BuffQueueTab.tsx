@@ -127,6 +127,7 @@ export interface BuffQueueTabProps {
   onRetry: (id: string) => Promise<void> | void;
   onRemove: (id: string) => Promise<void> | void;
   onClearCompleted: () => Promise<void> | void;
+  onClearAll?: () => Promise<void> | void;
   onEmergencyStop?: () => Promise<void> | void;
   /** Mở tab Tạo mới ở chế độ "Đưa vào hàng đợi" */
   onCreateNew?: () => void;
@@ -174,6 +175,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
   onRetry,
   onRemove,
   onClearCompleted,
+  onClearAll,
   onEmergencyStop,
   onCreateNew,
   onResume,
@@ -717,6 +719,11 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             {completedItems.length > 0 && (
               <Button type="text" onClick={onClearCompleted} className="text-slate-400 hover:text-slate-200">
                 Dọn bài đã xong ({completedItems.length})
+              </Button>
+            )}
+            {queueItems.length > 0 && onClearAll && (
+              <Button type="text" danger onClick={onClearAll} className="hover:bg-rose-950/40">
+                Xoá tất cả ({queueItems.length})
               </Button>
             )}
             <Button onClick={onRefresh} icon={<ReloadOutlined />}>
