@@ -1508,6 +1508,16 @@ app.post('/api/buff-like', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Thiếu cookieString hoặc targetUrl' });
   }
 
+  if (isEmergencyStopped()) {
+    const sysSettings = loadBuffSettings();
+    const reason = sysSettings.emergencyReason || 'Người quản trị kích hoạt DỪNG KHẨN CẤP';
+    return res.status(403).json({
+      success: false,
+      isEmergencyStopped: true,
+      error: `Hệ thống đang ở trạng thái DỪNG KHẨN CẤP (Emergency Stop): "${reason}". Vui lòng bấm nút "Khôi phục hoạt động" (Resume) ở thanh công cụ để tiếp tục.`,
+    });
+  }
+
   try {
     const sysSettings = loadBuffSettings();
     const proxyPool = Array.isArray(sysSettings.proxyPool) ? sysSettings.proxyPool : [];
@@ -1800,6 +1810,16 @@ app.post('/api/buff-like-stream', async (req, res) => {
     return res.status(400).json({ success: false, error: 'Thiếu cookieString hoặc targetUrl' });
   }
 
+  if (isEmergencyStopped()) {
+    const sysSettings = loadBuffSettings();
+    const reason = sysSettings.emergencyReason || 'Người quản trị kích hoạt DỪNG KHẨN CẤP';
+    return res.status(403).json({
+      success: false,
+      isEmergencyStopped: true,
+      error: `Hệ thống đang ở trạng thái DỪNG KHẨN CẤP (Emergency Stop): "${reason}". Vui lòng bấm nút "Khôi phục hoạt động" (Resume) ở thanh công cụ để tiếp tục.`,
+    });
+  }
+
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -1919,13 +1939,21 @@ app.post('/api/buff-like-stream', async (req, res) => {
     console.log(`[BuffStream] 🚀 Kích hoạt Multi-Via Parallel Engine: Chạy đồng thời ${parallelVias} Via song song trên tổng ${viaGroups.length} nhóm Via (${allPages.length} Pages)`);
 
     const allStreamDetails = [];
-    await runWithConcurrency(viaGroups, parallelVias, async (group) => {
-      if (Boolean(activeLiveBuffSession?.stopRequested) || isEmergencyStopped()) return;
-      if (targetKpi > 0 && (activeLiveBuffSession?.success || 0) >= targetKpi) return;
+    await runWithConcurrency(viaGroups, parallelVias, async (group, gIdx) => {
+      const curSession = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
+      if (isEmergencyStopped()) {
+        sendEvent('error', {
+          isEmergencyStopped: true,
+          error: 'Hệ thống đang ở trạng thái DỪNG KHẨN CẤP. Tác vụ đã dừng ngay lập tức để bảo vệ an toàn tài khoản.',
+        });
+        return;
+      }
+      if (Boolean(curSession?.stopRequested)) return;
+      if (targetKpi > 0 && (curSession?.success || 0) >= targetKpi) return;
 
       const grpProxy = await resolveViaProxy(group.cookieString, group.proxyUrl || explicitProxy);
-      const subResult = await withBuffLane(group.laneUid, (fence) =>
-        fbBuffTool.buffLikesWithPages(group.cookieString, targetUrl, {
+      const subResult = await withBuffLane(group.laneUid, async (fence) => {
+        return await fbBuffTool.buffLikesWithPages(group.cookieString, targetUrl, {
           reactionType,
           selectedPages: group.pages,
           kpiTarget: targetKpi,
@@ -1946,12 +1974,12 @@ app.post('/api/buff-like-stream', async (req, res) => {
           dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
           // CHỈ DỪNG KHI NGƯỜI DÙNG BẤM NÚT DỪNG, DỪNG KHẨN CẤP, HẾT HẠN LEASE HOẶC ĐẠT ĐỦ KPI
           shouldStop: () => {
-            const curSession = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
+            const liveSess = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
             return (
               Boolean(fence?.isStale()) ||
-              Boolean(curSession?.stopRequested) ||
+              Boolean(liveSess?.stopRequested) ||
               isEmergencyStopped() ||
-              (targetKpi > 0 && (curSession?.success || 0) >= targetKpi)
+              (targetKpi > 0 && (liveSess?.success || 0) >= targetKpi)
             );
           },
           onProgress: (evt) => {
@@ -2032,8 +2060,8 @@ app.post('/api/buff-like-stream', async (req, res) => {
             }
             sendEvent('progress', evt);
           },
-        })
-      );
+        });
+      });
       if (subResult?.details) allStreamDetails.push(...subResult.details);
     });
     const result = { details: allStreamDetails, total: selectedPages.length };

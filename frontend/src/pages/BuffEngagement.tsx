@@ -180,7 +180,12 @@ async function runBuffStream(
       signal,
     });
     if (!response.ok || !response.body) {
-      throw new Error(`Worker stream error: ${response.status}`);
+      let errText = `Worker stream error: ${response.status}`;
+      try {
+        const errJson = await response.json();
+        if (errJson?.error) errText = errJson.error;
+      } catch (_) {}
+      throw new BuffStreamError(errText, false);
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -2568,6 +2573,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   // Mutation: Auto Buff Like (Playwright Bot - Real-time SSE Stream)
   const autoBuffMutation = useMutation({
     mutationFn: async () => {
+      if (bmOverview?.system?.isEmergencyStopped) {
+        throw new Error('Hệ thống đang ở trạng thái DỪNG KHẨN CẤP (Emergency Stop)! Vui lòng bấm nút "Khôi phục hoạt động" màu xanh ở góc trên thanh công cụ trước khi bắt đầu.');
+      }
       if (!activeCookie) {
         throw new Error('Vui lòng chọn tài khoản hoặc dán Cookie Facebook!');
       }
@@ -2925,7 +2933,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     },
     onSuccess: ({ details, runTargetUrl, runAccountName, stopped }) => {
       const counts = summarizeBuffDetails(details);
-      if (runTargetUrl && details.length > 0) {
+      const hasAnyExecuted = details.some((d) => d.status !== 'WAITING');
+      if (runTargetUrl && details.length > 0 && hasAnyExecuted) {
         const newLog: BuffLogEntry = {
           id: 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
           createdAt: new Date().toISOString(),
