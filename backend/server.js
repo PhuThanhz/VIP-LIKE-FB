@@ -137,16 +137,44 @@ function recoverStaleRunningQueueTasks() {
   try {
     const qd = loadBuffQueue();
     let recoveredCount = 0;
+    let reviewCount = 0;
+    let completedCount = 0;
+
     for (const it of qd.items || []) {
       if (it.status === 'RUNNING') {
-        it.status = 'QUEUED';
-        it.error = 'Máy chủ đã khởi động lại khi đang chạy. Tác vụ đã được tự động phục hồi về hàng đợi để tiếp tục.';
-        recoveredCount++;
+        const hasExternalSideEffects =
+          it.executionStage === 'INTERACTING' ||
+          Number(it.progress?.done || 0) > 0 ||
+          Number(it.progress?.success || 0) > 0 ||
+          Number(it.progressLikes || 0) > 0 ||
+          (Array.isArray(it.pageDetails) && it.pageDetails.length > 0) ||
+          Boolean(it.dispatchedAt);
+
+        if (it.executionStage === 'SYNCING') {
+          // Đã hoàn thành tương tác, chỉ chưa kịp sync log -> hoàn tất an toàn
+          it.status = 'COMPLETED';
+          it.executionStage = 'COMPLETED';
+          it.finishedAt = it.finishedAt || new Date().toISOString();
+          completedCount++;
+        } else if (!hasExternalSideEffects) {
+          // Chưa gửi bất kỳ thao tác nào ra nền tảng bên ngoài -> An toàn phục hồi về QUEUED
+          it.status = 'QUEUED';
+          it.executionStage = 'INITIALIZED';
+          it.error = 'Máy chủ đã khởi động lại trước khi tác vụ bắt đầu thao tác bên ngoài. Đã phục hồi về hàng đợi an toàn.';
+          recoveredCount++;
+        } else {
+          // ĐÃ hoặc ĐANG thực hiện thao tác ra nền tảng bên ngoài -> Chuyển sang NEEDS_REVIEW, cấm tự động retry
+          it.status = 'NEEDS_REVIEW';
+          it.executionStage = 'NEEDS_REVIEW';
+          it.reviewReason = 'CRASH_DURING_EXTERNAL_INTERACTION';
+          it.error = `Tác vụ bị gián đoạn khi máy chủ khởi động lại trong lúc đang tương tác bên ngoài (Đã like thành công: ${it.progress?.success || it.progressLikes || 0}). Chuyển sang NEEDS_REVIEW để đối soát thủ công, chống duplicate tương tác.`;
+          reviewCount++;
+        }
       }
     }
-    if (recoveredCount > 0) {
+    if (recoveredCount > 0 || reviewCount > 0 || completedCount > 0) {
       saveBuffQueue(qd);
-      console.log(`[Queue Recovery] 🔄 Đã tự động phục hồi ${recoveredCount} tác vụ bị gián đoạn do khởi động lại máy chủ sang QUEUED.`);
+      console.log(`[Queue Recovery] 🔄 Phục hồi sau restart/crash: ${recoveredCount} task về QUEUED, ${completedCount} task sync xong về COMPLETED, ${reviewCount} task chuyển sang NEEDS_REVIEW để bảo vệ chống trùng.`);
     }
   } catch (e) {
     console.warn('[Queue Recovery] ⚠️ Lỗi kiểm tra phục hồi task:', e.message);
@@ -272,7 +300,24 @@ function getMaxParallelBuff() {
 const busyBuffLanes = new Set();
 const buffLaneWaiters = [];
 const activeLaneLeases = new Map(); // uid -> { leaseToken, abortController, leaseTimer, acquiredAt }
-let nextLeaseToken = 0;
+
+// FENCING TOKEN ENGINE ĐƠN ĐIỆU BỀN VỮNG (MONOTONIC DISTRIBUTED FENCING)
+let currentFenceEpoch = 0;
+async function initFenceEpoch() {
+  try {
+    currentFenceEpoch = await db.allocateFencingToken();
+    console.log(`[Fencing Token] 🛡️ Đã cấp phát Epoch phân tán bền vững từ MySQL: ${currentFenceEpoch}`);
+  } catch (e) {
+    currentFenceEpoch = Date.now() * 1000;
+  }
+}
+function getNextFencingToken() {
+  if (!currentFenceEpoch) {
+    currentFenceEpoch = Date.now() * 1000;
+  }
+  return ++currentFenceEpoch;
+}
+
 const LANE_LEASE_TIMEOUT_MS = 8 * 60 * 1000; // 8 phút tối đa cho 1 lượt chiếm lane
 const WAITER_TIMEOUT_MS = 60 * 1000; // 60 giây chờ tối đa trong hàng chờ
 
@@ -301,7 +346,7 @@ function pumpBuffLanes() {
     if (waiter.waiterTimer) clearTimeout(waiter.waiterTimer);
 
     // Cấp phát Fencing Token độc nhất và tăng dần (Monotonic Lease Token)
-    const leaseToken = ++nextLeaseToken;
+    const leaseToken = getNextFencingToken();
     const abortController = new AbortController();
 
     // Thiết lập Watchdog Lease Timer chống deadlock & hủy bỏ an toàn (Safe Cancellation)
@@ -2366,6 +2411,57 @@ app.post('/api/buff-queue/retry/:id', (req, res) => {
   }
 });
 
+// Xử lý đối soát thủ công cho các task cần duyệt (NEEDS_REVIEW)
+app.post('/api/buff-queue/review-resolve/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action } = req.body; // 'RESUME' | 'COMPLETE' | 'CANCEL'
+    const queueData = loadBuffQueue();
+    const task = queueData.items.find((it) => it.id === id);
+    if (!task) return res.status(404).json({ success: false, error: 'Không tìm thấy task' });
+
+    if (task.status !== 'NEEDS_REVIEW' && task.status !== 'FAILED') {
+      return res.status(400).json({ success: false, error: `Task đang ở trạng thái ${task.status}, không cần đối soát.` });
+    }
+
+    if (action === 'RESUME') {
+      const currentSuccess = Number(task.progress?.success || task.progressLikes || 0);
+      const originalTarget = parseTargetLikes(task.targetLikes, 30);
+      const remainingTarget = originalTarget === 'ALL' ? 'ALL' : Math.max(1, originalTarget - currentSuccess);
+
+      task.targetLikes = remainingTarget;
+      task.status = 'QUEUED';
+      task.executionStage = 'INITIALIZED';
+      task.error = null;
+      task.runAfter = new Date().toISOString();
+      task.reviewResolvedAt = new Date().toISOString();
+      task.reviewResolution = `Tiếp tục chạy nốt ${remainingTarget} like còn thiếu (đã trừ ${currentSuccess} like đã like trước đó).`;
+      saveBuffQueue(queueData);
+      setImmediate(runQueueWorker);
+      return res.json({ success: true, message: `Đã đưa task trở lại hàng đợi để chạy tiếp ${remainingTarget} like còn thiếu`, task });
+    } else if (action === 'COMPLETE') {
+      task.status = 'COMPLETED';
+      task.executionStage = 'COMPLETED';
+      task.finishedAt = new Date().toISOString();
+      task.reviewResolvedAt = new Date().toISOString();
+      task.reviewResolution = 'Chấp nhận kết quả hiện tại và đóng tác vụ.';
+      saveBuffQueue(queueData);
+      return res.json({ success: true, message: 'Đã hoàn tất tác vụ theo đối soát', task });
+    } else if (action === 'CANCEL') {
+      task.status = 'CANCELLED';
+      task.executionStage = 'CANCELLED';
+      task.reviewResolvedAt = new Date().toISOString();
+      task.reviewResolution = 'Hủy bỏ tác vụ theo đối soát.';
+      saveBuffQueue(queueData);
+      return res.json({ success: true, message: 'Đã hủy tác vụ', task });
+    } else {
+      return res.status(400).json({ success: false, error: 'Hành động không hợp lệ. Hỗ trợ: RESUME, COMPLETE, CANCEL.' });
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // =============================================================================
 // QUEUE WORKER ENGINE (XỬ LÝ HÀNG ĐỢI TỰ ĐỘNG)
 // =============================================================================
@@ -2382,6 +2478,7 @@ async function executeQueueTask(task) {
   }
 
   currentTask.status = 'RUNNING';
+  currentTask.executionStage = 'PREPARING';
   currentTask.startedAt = new Date().toISOString();
   saveBuffQueue(queueData);
 
@@ -2553,6 +2650,14 @@ async function executeQueueTask(task) {
     const proxyPool = Array.isArray(sysSettings.proxyPool) ? sysSettings.proxyPool : [];
     const maxViaParallel = Math.min(viaGroups.length, getMaxParallelBuff());
 
+    const qdDispatch = loadBuffQueue();
+    const tDispatch = qdDispatch.items.find((it) => it.id === task.id);
+    if (tDispatch) {
+      tDispatch.executionStage = 'DISPATCHING';
+      tDispatch.dispatchedAt = new Date().toISOString();
+      saveBuffQueue(qdDispatch);
+    }
+
     // Chạy song song các Via độc lập (Multi-Via Concurrency) để tăng tốc độ x2 - x3 lần
     await runWithConcurrency(viaGroups, maxViaParallel, async (group) => {
       if (isEmergencyStopped()) return;
@@ -2595,6 +2700,7 @@ async function executeQueueTask(task) {
               const qd = loadBuffQueue();
               const t = qd.items.find((it) => it.id === task.id);
               if (t) {
+                t.executionStage = 'INTERACTING';
                 t.progress = { done: totalDone, total: desiredLikes, success: totalSuccess };
                 t.pageDetails = t.pageDetails || [];
                 t.pageDetails.push({
@@ -2627,6 +2733,7 @@ async function executeQueueTask(task) {
       const autoRefilledCount = Math.max(0, (finalSuccess + finalFailed) - desiredLikes);
 
       t.status = isEmergencyStopped() ? 'STOPPED' : 'COMPLETED';
+      t.executionStage = isEmergencyStopped() ? 'STOPPED' : 'COMPLETED';
       t.finishedAt = new Date().toISOString();
       t.result = {
         total: desiredLikes,
@@ -4069,12 +4176,14 @@ app.post('/api/license/admin/update-status', requireAdmin, async (req, res) => {
 // Nạp dữ liệu từ MySQL (hoặc chuyển JSON cũ lên MySQL lần đầu) rồi mới nhận request
 store
   .init(db)
-  .then((r) => {
+  .then(async (r) => {
     console.log(
       r.dbOk
         ? `[StateStore] ✅ Đã nạp dữ liệu từ MySQL${r.pendingSync.length ? ` (chờ đồng bộ: ${r.pendingSync.join(', ')})` : ''}.`
         : '[StateStore] ⚠️ MySQL không dùng được, đang chạy bằng file JSON dự phòng; sẽ tự đồng bộ lại khi MySQL sống.'
     );
+    // Khởi tạo Fencing Token Epoch bền vững từ MySQL
+    await initFenceEpoch();
     // Tự động kiểm tra và phục hồi các task bị treo ở trạng thái RUNNING sau khi dữ liệu MySQL đã nạp hoàn tất vào bộ nhớ!
     recoverStaleRunningQueueTasks();
   })

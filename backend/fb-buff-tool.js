@@ -939,6 +939,25 @@ async function verifyReacted(handle, beforeAria, refind = null, maxWaitMs = 1200
   return false;
 }
 
+// Hỗ trợ dừng chờ ngay lập tức khi AbortSignal kích hoạt (Deep Cancellation)
+function cancellableSleep(ms, signal) {
+  if (ms <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    let timer;
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    timer = setTimeout(() => {
+      if (signal) signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
+}
+
 // Hàm tính toán độ trễ tối ưu giữa các trang theo chuẩn Safe Human Pacing (chống spam, chống checkpoint)
 function calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMinutes, totalPages, concurrency, speedMode = 'FAST') {
   if (dripFeedMode && dripDurationMinutes > 0) {
@@ -1690,7 +1709,21 @@ async function executePageInteraction({
   pageIndex = 0,
   workerTag = '',
   speedMode = 'SMART',
+  signal = null,
 }) {
+  if (signal?.aborted) {
+    return {
+      aborted: true,
+      deadReason: 'Tác vụ đã bị dừng bởi AbortSignal / Lease hết hạn',
+      item: {
+        pageId: pageInfo.id,
+        pageName: pageInfo.name,
+        status: 'SKIPPED',
+        error: 'Tác vụ đã bị hủy bởi AbortSignal',
+      },
+    };
+  }
+
   // BƯỚC 0: KIỂM TRA ĐĂNG XUẤT / HẾT HẠN COOKIE TRÊN TAB
   const isLoginPageOnTab = await tab.evaluate(() => {
     const hasInputs = Boolean(document.querySelector('input[name="email"], input[name="pass"], #login_form'));
@@ -2408,8 +2441,9 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     targetLikes = 0,       // Alias cho kpiTarget
     onProgress,            // Callback nhận tiến trình: onProgress(event)
     shouldStop,            // () => boolean: người gọi yêu cầu dừng (client ngắt kết nối, dừng khẩn cấp...)
+    signal = options.signal || (options.fence?.signal) || null, // AbortSignal hỗ trợ deep cancellation
   } = options;
-  const isStopRequested = () => isEmergencyStopped() || (typeof shouldStop === 'function' && shouldStop());
+  const isStopRequested = () => isEmergencyStopped() || Boolean(signal?.aborted) || (typeof shouldStop === 'function' && shouldStop());
 
   if (isEmergencyStopped()) {
     throw new Error('Hệ thống đang ở trạng thái DỪNG KHẨN CẤP (Emergency Stop). Tác vụ đã bị từ chối thực thi.');
@@ -2524,6 +2558,25 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
   let completedCount = cappedDetails.length;
   let globalStopTriggered = false;
 
+  // QUẢN LÝ DEEP CANCELLATION: Đóng ngay toàn bộ tab/context khi AbortSignal kích hoạt
+  const trackedContexts = new Set();
+  const trackedTabs = new Set();
+  const abortCleanup = () => {
+    console.warn(`[FB-Buff] 🛑 AbortSignal kích hoạt (Lease hết hạn hoặc User Abort)! Đóng ngay lập tức các Tab/Context Playwright...`);
+    results.stopped = true;
+    globalStopTriggered = true;
+    for (const t of trackedTabs) {
+      try { t.close().catch(() => {}); } catch (_) {}
+    }
+    for (const c of trackedContexts) {
+      try { c.close().catch(() => {}); } catch (_) {}
+    }
+  };
+  if (signal) {
+    if (signal.aborted) abortCleanup();
+    else signal.addEventListener('abort', abortCleanup, { once: true });
+  }
+
   if (isMultiWorker) {
     // ========================================================
     // CHẾ ĐỘ 1: BUFF ĐA LUỒNG SONG SONG (MULTI-WORKER CONCURRENCY)
@@ -2586,6 +2639,8 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         });
       }
 
+      if (workerContext) trackedContexts.add(workerContext);
+
       try {
         await applyFingerprintToContext(workerContext, device);
         await applyResourceOptimization(workerContext, false, true);
@@ -2593,6 +2648,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           await workerContext.addCookies(cookies);
         }
         let workerTab = await workerContext.newPage();
+        trackedTabs.add(workerTab);
         await workerTab.route('**/*.{png,jpg,jpeg,webp,gif,avif,ico,mp4,mov,m4v,avi,webm,m3u8,ts,woff,woff2,ttf,otf}', (route) => route.abort());
         await workerTab.route('**/*{google-analytics,doubleclick,connect.facebook.net/signals,pixel.facebook.com,facebook.com/tr/}*', (route) => route.abort());
 
@@ -2670,6 +2726,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             pageIndex: originalIndex,
             workerTag,
             speedMode,
+            signal,
           });
 
           if (browserDead) {
@@ -2816,7 +2873,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
               });
             }
 
-            await new Promise((r) => setTimeout(r, batchRest));
+            await cancellableSleep(batchRest, signal);
 
             if (typeof onProgress === 'function') {
               onProgress({
@@ -2838,11 +2895,14 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           // Độ trễ tối ưu giữa các page
           if (i < workerPages.length - 1) {
             const waitTime = calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMinutes, pages.length, actualConcurrency, speedMode);
-            await new Promise((r) => setTimeout(r, waitTime));
+            await cancellableSleep(waitTime, signal);
           }
         }
       } finally {
-        if (workerContext) await workerContext.close().catch(() => {});
+        if (workerContext) {
+          trackedContexts.delete(workerContext);
+          await workerContext.close().catch(() => {});
+        }
       }
     };
 
@@ -2913,6 +2973,8 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         await context.addCookies(cookies);
       }
       let tab = context.pages().length ? context.pages()[0] : await context.newPage();
+      if (context) trackedContexts.add(context);
+      if (tab) trackedTabs.add(tab);
       await tab.route('**/*.{png,jpg,jpeg,webp,gif,avif,ico,mp4,mov,m4v,avi,webm,m3u8,ts,woff,woff2,ttf,otf}', (route) => route.abort());
       await tab.route('**/*{google-analytics,doubleclick,connect.facebook.net/signals,pixel.facebook.com,facebook.com/tr/}*', (route) => route.abort());
 
@@ -2988,6 +3050,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           pageIndex: i,
           workerTag: '',
           speedMode,
+          signal,
         });
 
           if (browserDead) {
@@ -3053,7 +3116,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
               break;
             }
             // Nghỉ thêm 15s trước khi thử page tiếp theo
-            await new Promise((r) => setTimeout(r, 15000));
+            await cancellableSleep(15000, signal);
             completedCount++;
             continue;
           }
@@ -3136,7 +3199,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
               });
             }
 
-            await new Promise((r) => setTimeout(r, batchRest));
+            await cancellableSleep(batchRest, signal);
 
             if (typeof onProgress === 'function') {
               onProgress({
@@ -3150,14 +3213,20 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           // Độ trễ tối ưu giữa các page
           if (i < pages.length - 1) {
             const waitTime = calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMinutes, pages.length, 1, speedMode);
-            await new Promise((r) => setTimeout(r, waitTime));
+            await cancellableSleep(waitTime, signal);
           }
         }
       } finally {
-        if (context) await context.close().catch(() => { });
+        if (context) {
+          trackedContexts.delete(context);
+          await context.close().catch(() => { });
+        }
         if (browser) await browser.close().catch(() => { });
+        if (signal) signal.removeEventListener('abort', abortCleanup);
       }
     }
+
+    if (signal) signal.removeEventListener('abort', abortCleanup);
 
     console.log(`[FB-Buff] 🏁 Hoàn thành buff Like: Thành công ${results.success}/${effectiveKpi > 0 ? effectiveKpi : results.total} (Thất bại/Bù lỗi: ${results.failed}, Luồng: ${actualConcurrency})`);
     return results;

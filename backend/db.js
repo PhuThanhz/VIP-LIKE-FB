@@ -1165,6 +1165,42 @@ async function getAppState(key) {
   return rows && rows[0] ? { value: rows[0].value, updatedMs: Number(rows[0].updatedMs) } : null;
 }
 
+let localTokenSequence = 0;
+
+/**
+ * Cấp phát Fencing Token độc nhất, tăng dần đơn điệu (Monotonic Fencing Token)
+ * Được bảo đảm bền vững qua MySQL (app_state) và không bị trùng/reset sau restart server
+ * @returns {Promise<number>}
+ */
+async function allocateFencingToken() {
+  const nowMs = Date.now();
+  try {
+    await ensureAppStateTable();
+    const p = getPool();
+    // Nguyên tử hóa việc tăng epoch trên MySQL:
+    await p.query(
+      `INSERT INTO app_state (state_key, state_value, updated_ms)
+       VALUES ('global_fencing_epoch', '1', ?)
+       ON DUPLICATE KEY UPDATE
+         state_value = CAST(CAST(state_value AS UNSIGNED) + 1 AS CHAR),
+         updated_ms = VALUES(updated_ms)`,
+      [nowMs]
+    );
+    const [rows] = await p.execute(
+      "SELECT CAST(state_value AS UNSIGNED) AS val FROM app_state WHERE state_key = 'global_fencing_epoch'"
+    );
+    if (rows && rows[0] && rows[0].val) {
+      const epochVal = Number(rows[0].val);
+      localTokenSequence = (localTokenSequence + 1) % 1000;
+      return (epochVal * 1000) + localTokenSequence;
+    }
+  } catch (err) {
+    console.warn('[DB] ⚠️ Không truy cập được MySQL app_state, dùng monotonic clock fallback:', err.message);
+  }
+  localTokenSequence = (localTokenSequence + 1) % 1000;
+  return (nowMs * 1000) + localTokenSequence;
+}
+
 async function saveAppState(key, jsonString) {
   await ensureAppStateTable();
   await getPool().execute(
@@ -1324,5 +1360,6 @@ module.exports = {
   ensureAppStateTable,
   getAppState,
   saveAppState,
+  allocateFencingToken,
 };
 
