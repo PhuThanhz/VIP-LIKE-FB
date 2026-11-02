@@ -1912,7 +1912,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const buffAbortRef = useRef<AbortController | null>(null);
   const batchStreamAbortControllersRef = useRef<Set<AbortController>>(new Set());
 
-  const isBatch = buffMode === 'BATCH' && batchOrders.length > 0;
+  const isBatch = (buffMode === 'BATCH' || batchOrders.length > 0) && batchOrders.length > 0;
   const totalBatchLikesTarget = batchOrders.reduce((sum, o) => sum + (o.totalLikesTarget || 0), 0);
   const totalBatchSuccess = batchOrders.reduce((sum, o) => sum + (o.successLikes || 0), 0);
   const totalBatchAlreadyLiked = batchOrders.reduce((sum, o) => sum + (o.details?.filter((d) => d.status === 'ALREADY_LIKED').length || 0), 0);
@@ -5610,7 +5610,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
                         {/* Top-Right Info & ETA Card (Style chuẩn theo mẫu bài đăng) */}
                         {(() => {
-                          const isBatch = buffMode === 'BATCH' && batchOrders.length > 0;
+                          const isBatch = (buffMode === 'BATCH' || batchOrders.length > 0) && batchOrders.length > 0;
                           const batchTotal = isBatch
                             ? batchOrders.reduce((s, o) => s + (o.totalLikesTarget || 0), 0)
                             : autoBuffProgress.total;
@@ -5622,14 +5622,14 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               ? Math.min(100, Math.round((batchDone / batchTotal) * 100))
                               : autoBuffProgress.percent;
 
-                          const isAllBatchOrdersDone = isBatch && batchOrders.length > 0 && batchOrders.every((o) => o.status === 'COMPLETED' || o.status === 'FAILED' || o.status === 'PAUSED');
+                          const isAllBatchOrdersDone = isBatch && batchOrders.length > 0 && batchOrders.every((o) => o.status === 'COMPLETED' || o.status === 'PARTIAL' || o.status === 'FAILED' || o.status === 'PAUSED');
                           const waitingCount = autoBuffProgress.details.filter((d) => d.status === 'WAITING').length;
                           const runningCount = autoBuffProgress.details.filter((d) => d.status === 'RUNNING').length;
                           const isWaitingOrRunning = waitingCount > 0 || runningCount > 0;
                           const isCooling = Boolean(autoBuffProgress.currentRunningPageName?.includes('🛡️'));
                           const isSingleRunning = autoBuffProgress.status === 'RUNNING' || isCooling;
                           const isAnyRunning = isBatch ? (isBatchRunning && !isAllBatchOrdersDone) : isSingleRunning;
-                          const isDoneFull = isBatch ? isAllBatchOrdersDone : (autoBuffProgress.status === 'DONE' || overallPercent >= 100);
+                          const isDoneFull = isBatch ? (isAllBatchOrdersDone && batchDone >= batchTotal) : (autoBuffProgress.status === 'DONE' || overallPercent >= 100);
                           const isExhausted = !isAnyRunning && !isDoneFull && (
                             isBatch
                               ? (isAllBatchOrdersDone && batchDone < batchTotal)
@@ -5738,7 +5738,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
                       {/* Glowing Live Progress Bar & Status Pill Badge */}
                       {(() => {
-                        const isBatch = buffMode === 'BATCH' && batchOrders.length > 0;
+                        const isBatch = (buffMode === 'BATCH' || batchOrders.length > 0) && batchOrders.length > 0;
                         const batchTotal = isBatch
                           ? batchOrders.reduce((s, o) => s + (o.totalLikesTarget || 0), 0)
                           : autoBuffProgress.total;
@@ -5750,14 +5750,14 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                             ? Math.min(100, Math.round((batchDone / batchTotal) * 100))
                             : autoBuffProgress.percent;
 
-                        const isAllBatchOrdersDone = isBatch && batchOrders.length > 0 && batchOrders.every((o) => o.status === 'COMPLETED' || o.status === 'FAILED' || o.status === 'PAUSED');
+                        const isAllBatchOrdersDone = isBatch && batchOrders.length > 0 && batchOrders.every((o) => o.status === 'COMPLETED' || o.status === 'PARTIAL' || o.status === 'FAILED' || o.status === 'PAUSED');
                         const waitingCount = autoBuffProgress.details.filter((d) => d.status === 'WAITING').length;
                         const runningCount = autoBuffProgress.details.filter((d) => d.status === 'RUNNING').length;
                         const isWaitingOrRunning = waitingCount > 0 || runningCount > 0;
                         const isCooling = Boolean(autoBuffProgress.currentRunningPageName?.includes('🛡️'));
                         const isSingleRunning = autoBuffProgress.status === 'RUNNING' || isCooling;
                         const isAnyRunning = isBatch ? (isBatchRunning && !isAllBatchOrdersDone) : isSingleRunning;
-                        const isDoneFull = isBatch ? isAllBatchOrdersDone : (autoBuffProgress.status === 'DONE' || overallPercent >= 100);
+                        const isDoneFull = isBatch ? (isAllBatchOrdersDone && batchDone >= batchTotal) : (autoBuffProgress.status === 'DONE' || overallPercent >= 100);
                         const isExhausted = !isAnyRunning && !isDoneFull && (
                           isBatch
                             ? (isAllBatchOrdersDone && batchDone < batchTotal)

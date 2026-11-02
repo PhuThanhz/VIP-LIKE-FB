@@ -1995,10 +1995,17 @@ app.post('/api/buff-like-stream', async (req, res) => {
 
     const sess = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
     if (sess) {
-      if (sess.done >= sess.total || sess.stopRequested || (targetKpi > 0 && sess.success >= targetKpi)) {
-        sess.status = sess.stopRequested ? 'STOPPED' : 'DONE';
-        sess.currentRunningPageName = '';
+      if (sess.stopRequested) {
+        sess.status = 'STOPPED';
+      } else if (targetKpi > 0 && sess.success >= targetKpi) {
+        sess.status = 'DONE';
+      } else if (sess.done >= sess.total) {
+        sess.status = 'DONE';
+      } else {
+        // Đã duyệt hết nick khả dụng trong đợt này (dù thiếu KPI do cạn nick) -> hoàn tất phiên, không treo RUNNING
+        sess.status = 'DONE';
       }
+      sess.currentRunningPageName = '';
       sess.updatedAt = new Date().toISOString();
     }
 
@@ -2057,10 +2064,12 @@ app.post('/api/buff-like-stream', async (req, res) => {
   } catch (err) {
     clearInterval(heartbeatTimer);
     console.error('[BuffStream] ❌ Lỗi stream:', err.message);
-    if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
-      activeLiveBuffSession.status = 'ERROR';
-      activeLiveBuffSession.error = err.message;
-      activeLiveBuffSession.updatedAt = new Date().toISOString();
+    const errSess = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
+    if (errSess) {
+      errSess.status = 'ERROR';
+      errSess.error = err.message;
+      errSess.currentRunningPageName = '';
+      errSess.updatedAt = new Date().toISOString();
     }
     sendEvent('error', { error: err.message });
     res.end();
