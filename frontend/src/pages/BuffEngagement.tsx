@@ -2245,11 +2245,41 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     }
   }, [scannedPages]);
 
-  const parsedBatchLinks = useMemo(() => {
-    return batchLinksText
-      .split('\n')
+  const { parsedBatchLinks, rawBatchLinesCount, invalidBatchLinesCount } = useMemo(() => {
+    const rawTokens = batchLinksText
+      .split(/[\r\n,;]+/)
       .map((l) => l.trim())
-      .filter((l) => l.length > 0 && (l.startsWith('http://') || l.startsWith('https://')));
+      .filter((l) => l.length > 0);
+
+    const validUrls: string[] = [];
+    const seen = new Set<string>();
+    let invalidCount = 0;
+
+    for (const token of rawTokens) {
+      let url = token;
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        if (url.includes('facebook.com') || url.includes('fb.watch') || url.includes('fb.com')) {
+          url = 'https://' + url.replace(/^\/+/, '');
+        }
+      }
+      if (
+        (url.startsWith('http://') || url.startsWith('https://')) &&
+        (url.includes('facebook.com') || url.includes('fb.watch') || url.includes('fb.com'))
+      ) {
+        if (!seen.has(url)) {
+          seen.add(url);
+          validUrls.push(url);
+        }
+      } else {
+        invalidCount++;
+      }
+    }
+
+    return {
+      parsedBatchLinks: validUrls,
+      rawBatchLinesCount: rawTokens.length,
+      invalidBatchLinesCount: invalidCount,
+    };
   }, [batchLinksText]);
 
   // Ước tính thời gian chạy: ưu tiên tốc độ thực tế từ các bài đã hoàn tất, nếu chưa có thì tính theo giãn cách đang chọn
@@ -3140,6 +3170,13 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       return;
     }
 
+    if (actorMode === 'VIAS' && batchLikesPerOrder > availablePages.length) {
+      message.error(
+        `Bạn đang chọn Dàn Nick cá nhân (${availablePages.length} Via) nên mỗi bài chỉ buff được tối đa ${availablePages.length} like (1 nick cá nhân chỉ like được 1 lần). Vui lòng bấm chọn "Page" (Dàn Fanpage vệ tinh) ở Bước 2 để buff đủ ${batchLikesPerOrder} like!`
+      );
+      return;
+    }
+
     const targetLikes = Math.min(batchLikesPerOrder, availablePages.length);
 
     const initialOrders: BatchOrder[] = parsedBatchLinks.map((url, idx) => ({
@@ -3808,10 +3845,15 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               <span className="text-xs font-bold text-slate-200">
                                 Danh sách link Facebook (Mỗi dòng một link):
                               </span>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-mono px-2.5 py-0.5 rounded-md bg-blue-950/90 border border-blue-700/70 text-blue-300 font-bold">
                                   {parsedBatchLinks.length} link hợp lệ
                                 </span>
+                                {invalidBatchLinesCount > 0 && (
+                                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-950/90 border border-amber-700/70 text-amber-300 font-semibold" title="Có dòng không nhận diện được định dạng Facebook hợp lệ">
+                                    ⚠️ {invalidBatchLinesCount} dòng lỗi/bỏ qua
+                                  </span>
+                                )}
                                 {batchLinksText && (
                                   <Button
                                     type="link"
@@ -3829,7 +3871,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               rows={4}
                               value={batchLinksText}
                               onChange={(e) => setBatchLinksText(e.target.value)}
-                              placeholder={`https://www.facebook.com/groups/123456/posts/7891011/\nhttps://www.facebook.com/share/p/1CmWWe4m7g/\nhttps://www.facebook.com/share/p/19ivmH7zUw/`}
+                              placeholder={`https://www.facebook.com/groups/123456/posts/7891011/\nfacebook.com/share/p/1CmWWe4m7g/\nhttps://www.facebook.com/share/p/19ivmH7zUw/`}
                               className="font-mono text-xs bg-slate-950 text-slate-100 border-slate-700 rounded-xl placeholder:text-slate-500 focus:border-blue-400"
                             />
 
@@ -3857,37 +3899,86 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               />
                             </div>
 
-                            {/* Chọn Nhanh Số Lượng Like Mỗi Bài trong Batch */}
-                            {scannedPages.length > 0 && (
-                              <div className="mt-2.5 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-sm">
+                            {/* Chọn & Nhập Số Lượng Like Mỗi Bài trong Batch */}
+                            <div className="mt-2.5 p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2.5 shadow-sm">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                                 <div>
                                   <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                                     <ThunderboltFilled className="text-amber-400" /> Mục tiêu Like mỗi bài:
                                   </span>
                                   <span className="text-[10px] text-slate-400 block mt-0.5">
-                                    Hệ thống sẽ chạy đủ số lượt like này cho từng bài trong danh sách
+                                    Nhập số Like mong muốn cho từng bài viết trong danh sách
                                   </span>
                                 </div>
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  {[20, 30, 50, 100, 200]
-                                    .filter((n) => n <= scannedPages.length)
-                                    .map((n) => (
-                                      <button
-                                        key={n}
-                                        type="button"
-                                        onClick={() => setBatchLikesPerOrder(n)}
-                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
-                                          batchLikesPerOrder === n
-                                            ? 'bg-blue-600 text-white border-blue-500 shadow-md'
-                                            : 'bg-slate-900 text-slate-300 border-slate-700/80 hover:border-blue-400'
-                                        }`}
-                                      >
-                                        {n} Like
-                                      </button>
-                                    ))}
+                                <div className="flex items-center gap-2">
+                                  <InputNumber
+                                    min={1}
+                                    max={Math.max(1, scannedPages.length || 1000)}
+                                    value={batchLikesPerOrder}
+                                    onChange={(val) => setBatchLikesPerOrder(Number(val) || 1)}
+                                    className="w-28 text-center font-mono font-bold bg-slate-900 border-slate-700 text-cyan-300"
+                                    addonAfter="Like"
+                                  />
                                 </div>
                               </div>
-                            )}
+
+                              {/* Nút chọn nhanh */}
+                              <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-800/60">
+                                <span className="text-[11px] text-slate-400 font-medium mr-1">Gợi ý nhanh:</span>
+                                {[10, 20, 50, 100, 200].map((n) => (
+                                  <button
+                                    key={n}
+                                    type="button"
+                                    onClick={() => {
+                                      setBatchLikesPerOrder(n);
+                                      if (n > fbAccounts.length && actorMode === 'VIAS') {
+                                        setActorMode('FANPAGES');
+                                        message.info(`Đã tự động chuyển sang Dàn Fanpage vệ tinh để có đủ ${n} like!`);
+                                      }
+                                    }}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                                      batchLikesPerOrder === n
+                                        ? 'bg-blue-600 text-white border-blue-500 shadow-md'
+                                        : 'bg-slate-900 text-slate-300 border-slate-700/80 hover:border-blue-400'
+                                    }`}
+                                  >
+                                    {n} Like
+                                  </button>
+                                ))}
+                                {scannedPages.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setBatchLikesPerOrder(scannedPages.length)}
+                                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                                      batchLikesPerOrder === scannedPages.length
+                                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-md'
+                                        : 'bg-slate-900 text-emerald-300 border-emerald-800/60 hover:border-emerald-400'
+                                    }`}
+                                  >
+                                    Tối đa ({scannedPages.length})
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Cảnh báo nếu đang ở chế độ Nick cá nhân mà chỉ có 3 Via */}
+                              {actorMode === 'VIAS' && (
+                                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-1">
+                                  <div className="text-[11px] text-amber-300 flex items-center gap-1.5">
+                                    <span>⚠️ Đang ở <b>Nick cá nhân ({fbAccounts.length} Via)</b>: Chỉ tối đa {fbAccounts.length} like/bài (1 nick chỉ like được 1 lần).</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActorMode('FANPAGES');
+                                      message.success('Đã chuyển sang Dàn Fanpage vệ tinh! Bạn có thể buff 100+ like mỗi bài.');
+                                    }}
+                                    className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer shrink-0 border-none transition-all shadow-sm"
+                                  >
+                                    👉 Bấm để chuyển sang Dàn Fanpage (634 Page)
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         )}
 
@@ -4064,38 +4155,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                 );
                               })}
                             </div>
-
-                            {/* Chọn Nhanh Số Lượng Like Mỗi Bài trong Batch */}
-                            {scannedPages.length > 0 && (
-                              <div className="mt-2.5 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-sm">
-                                <div>
-                                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                                    <ThunderboltFilled className="text-amber-400" /> Mục tiêu Like mỗi bài:
-                                  </span>
-                                  <span className="text-[10px] text-slate-400 block mt-0.5">
-                                    Hệ thống sẽ chạy đủ số lượt like này cho từng bài trong danh sách
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  {[20, 30, 50, 100, 200]
-                                    .filter((n) => n <= scannedPages.length)
-                                    .map((n) => (
-                                      <button
-                                        key={n}
-                                        type="button"
-                                        onClick={() => setBatchLikesPerOrder(n)}
-                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
-                                          batchLikesPerOrder === n
-                                            ? 'bg-blue-600 text-white border-blue-500 shadow-md'
-                                            : 'bg-slate-900 text-slate-300 border-slate-700/80 hover:border-blue-400'
-                                        }`}
-                                      >
-                                        {n} Like
-                                      </button>
-                                    ))}
-                                </div>
-                              </div>
-                            )}
                           </div>
                         )}
 
@@ -5932,7 +5991,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           </div>
                           {isBatch && totalBatchLikesTarget > 0 && (
                             <div className="text-[10px] text-emerald-400 mt-0.5 font-medium">
-                              Đạt {Math.round((totalBatchSuccess / Math.max(1, totalBatchLikesTarget)) * 100)}%
+                              Đạt {Math.min(100, Math.round((totalBatchSuccess / Math.max(1, totalBatchLikesTarget)) * 100))}%
+                              {totalBatchSuccess > totalBatchLikesTarget && ' (Vượt KPI)'}
                             </div>
                           )}
                         </div>
@@ -6163,7 +6223,14 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   </div>
                                   <div className="flex items-center gap-3 shrink-0">
                                     <span className="text-xs text-slate-300 font-mono font-semibold tabular-nums">
-                                      {order.successLikes}/{order.totalLikesTarget} like
+                                      {order.successLikes >= order.totalLikesTarget
+                                        ? `${order.totalLikesTarget}/${order.totalLikesTarget} like`
+                                        : `${order.successLikes}/${order.totalLikesTarget} like`}
+                                      {order.successLikes > order.totalLikesTarget && (
+                                        <span className="text-emerald-400 font-normal ml-1 text-[10px]">
+                                          (+{order.successLikes - order.totalLikesTarget} like)
+                                        </span>
+                                      )}
                                     </span>
                                     {order.status === 'COMPLETED' ? (
                                       <Tag color="success" className="text-xs font-semibold m-0">
