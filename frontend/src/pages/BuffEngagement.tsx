@@ -735,7 +735,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [targetPostUrl, setTargetPostUrl] = useState('');
   const [selectedReaction, setSelectedReaction] = useState('LIKE');
   const [scannedPages, setScannedPages] = useState<FanpageItem[]>([]);
-  const [actorMode, setActorMode] = useState<'VIAS' | 'FANPAGES'>('VIAS');
+  const [actorMode, setActorMode] = useState<'VIAS' | 'FANPAGES'>('FANPAGES');
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
   const handleTogglePageId = useCallback((pageId: string) => {
     setSelectedPageIds((prev) =>
@@ -1924,8 +1924,16 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   }, [targetPostUrl, buffLogs]);
 
   // Batch Buff State (Chạy like hàng loạt nhiều bài viết)
-  const [batchLinksText, setBatchLinksText] = useState<string>('');
-  const [batchLikesPerOrder, setBatchLikesPerOrder] = useState<number>(20);
+  const [batchLinksText, setBatchLinksText] = useState<string>(() => {
+    return [
+      'https://www.facebook.com/vietnameconomynews/posts/pfbid0CKLsordAmys5a5ewKRjKZgutBg9rJkoX5pnw4yzRMqtCq4PEVEV8HFfN2fQHQkg5l',
+      'https://www.facebook.com/share/p/1EBw7LFuKm/',
+      'https://www.facebook.com/share/p/1VuQkYgpni/',
+      'https://www.facebook.com/share/r/18PbJ7Zxs4/',
+      'https://www.facebook.com/share/p/19ekJcYmsb/',
+    ].join('\n');
+  });
+  const [batchLikesPerOrder, setBatchLikesPerOrder] = useState<number>(100);
   const [batchLinkConcurrency, setBatchLinkConcurrency] = useState<number>(2); // 1: Tuần tự, 2: Song song 2 link cùng lúc
   const batchWaitSeconds = 2;
   const [batchOrders, setBatchOrders] = useState<BatchOrder[]>([]);
@@ -6068,6 +6076,37 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                 </div>
                               </div>
                               <div className="flex items-center gap-2 flex-wrap">
+                                {isBatch && (
+                                  <Button
+                                    type="primary"
+                                    icon={<ThunderboltFilled />}
+                                    onClick={() => {
+                                      const urls = batchOrders.map((o) => o.url).join('\n');
+                                      setBuffMode('BATCH');
+                                      if (urls) setBatchLinksText(urls);
+                                      setBatchLikesPerOrder(100);
+                                      setActorMode('FANPAGES');
+                                      setSelectedAccountId('ALL_VIAS');
+                                      setBatchOrders([]);
+                                      setActiveTabKey('buff-like');
+                                      message.success('Đã tải sẵn 5 bài viết với 100 Like từ kho Fanpage! Bấm "Bắt đầu chạy" để khởi động.');
+                                    }}
+                                    className="font-bold text-xs rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border-none shadow-md shadow-emerald-600/20"
+                                  >
+                                    🚀 Chạy lại 5 bài với 100 Like (Fanpage)
+                                  </Button>
+                                )}
+                                {isBatch && (
+                                  <Button
+                                    onClick={() => {
+                                      setBatchOrders([]);
+                                      setActiveTabKey('buff-like');
+                                    }}
+                                    className="font-semibold text-xs rounded-xl text-slate-300 border-slate-700 hover:bg-slate-800"
+                                  >
+                                    Tạo mới / Làm sạch
+                                  </Button>
+                                )}
                                 {isBatch && missingLikes > 0 && (
                                   <Button
                                     type="primary"
