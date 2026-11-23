@@ -2041,6 +2041,8 @@ app.post('/api/buff-live/stop', (req, res) => {
     if (reqSessionId && activeLiveBuffSessions.has(reqSessionId)) {
       const sess = activeLiveBuffSessions.get(reqSessionId);
       sess.stopRequested = true;
+      // Trình duyệt chủ động dừng (đủ KPI / bấm Dừng) → trình duyệt sẽ tự lưu lịch sử
+      sess.stoppedByClient = true;
       sess.status = 'STOPPED';
       sess.updatedAt = new Date().toISOString();
       return res.json({ success: true, message: 'Đã gửi lệnh dừng tiến trình session ' + reqSessionId, activeSession: sess });
@@ -2505,7 +2507,9 @@ app.post('/api/buff-like-stream', async (req, res) => {
     // Tự động lưu lịch sử buff vào MySQL ngay trên Server (đảm bảo không bao giờ bị mất log).
     // Nếu trình duyệt báo sẽ tự lưu (clientSavesLog) và vẫn còn kết nối thì bỏ qua để không ghi trùng 2 bản;
     // khi trình duyệt đã ngắt (F5 / đóng tab) thì server vẫn lưu dự phòng.
-    if (result && Array.isArray(result.details) && result.details.length > 0 && !(clientSavesLog && !clientGone)) {
+    // Trình duyệt chủ động dừng (đủ KPI) cũng ngắt kết nối → không coi là "mất kết nối", tránh ghi trùng.
+    const stoppedByClient = Boolean((activeLiveBuffSessions.get(sessionKey) || {}).stoppedByClient);
+    if (result && Array.isArray(result.details) && result.details.length > 0 && !(clientSavesLog && (!clientGone || stoppedByClient))) {
       db.saveBuffLogs({
         id: 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
         createdAt: new Date().toISOString(),
