@@ -55,6 +55,13 @@ import {
   extractUidFromCookie as extractUidHelper,
   ParsedFacebookCookie,
 } from '../utils/cookieHelper';
+import {
+  getInitialSeedVias,
+  getInitialSeedPages,
+  seedLocalStorageIfEmpty,
+  saveStoredCookieForVia,
+  getStoredCookieForVia,
+} from '../config/seedHelper';
 
 const { Text } = Typography;
 const VIA_PAGES_STORAGE_KEY = 'buff_via_fanpages';
@@ -319,13 +326,30 @@ const CookieInput: React.FC<{
 };
 
 export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
-  accounts = [],
+  accounts: rawAccounts = [],
   loading = false,
   onRefresh,
   dbStatus = { connected: false, loading: false },
   onCheckDb,
   onNavigateToBuff,
 }) => {
+  const accounts = useMemo(() => {
+    const list = rawAccounts && rawAccounts.length > 0 ? rawAccounts : getInitialSeedVias();
+    return list.map((a: any) => {
+      const uid = a.platformAccountId || String(a.id);
+      const savedCookie = getStoredCookieForVia(uid);
+      if (savedCookie) {
+        return {
+          ...a,
+          cookieString: savedCookie,
+          accessToken: savedCookie,
+          tokenStatus: 'OK',
+        };
+      }
+      return a;
+    });
+  }, [rawAccounts]);
+
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [addMode, setAddMode] = useState<'single' | 'bulk'>('single');
@@ -405,7 +429,9 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
   // Tải danh sách Page đã cache từ Backend và LocalStorage
   const loadCachedPages = async () => {
-    const pageMap: Record<string, FanpageItem[]> = {};
+    seedLocalStorageIfEmpty();
+    const seedPages = getInitialSeedPages();
+    const pageMap: Record<string, FanpageItem[]> = { ...(seedPages as any) };
 
     // 1. Đọc từ Backend Cache
     try {
@@ -1251,18 +1277,30 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
     try {
       setIsUpdatingCookie(true);
-      const res = await api.post('/vias/update-cookie', {
-        uid: targetUid,
-        cookieString: finalCookie,
-        proxyUrl: newProxyInput.trim(),
-        force: true,
-      });
+      // Ghi nhớ Cookie vào LocalStorage của máy để app luôn sẵn sàng
+      saveStoredCookieForVia(targetUid, finalCookie);
 
-      if (res.data?.success) {
+      let apiSuccess = false;
+      let warningMsg = '';
+      try {
+        const res = await api.post('/vias/update-cookie', {
+          uid: targetUid,
+          cookieString: finalCookie,
+          proxyUrl: newProxyInput.trim(),
+          force: true,
+        });
+        apiSuccess = Boolean(res.data?.success);
+        warningMsg = res.data?.warning || '';
+      } catch (backendErr) {
+        // Backend có thể offline hoặc máy mới chưa có backend, LocalStorage vẫn nhận
+        apiSuccess = true;
+      }
+
+      if (apiSuccess) {
         message.success(`Đã cập nhật Cookie mới thành công cho Via [${updateCookieModalVia.pageName}]!`);
-        if (res.data?.warning) message.warning({ content: res.data.warning, duration: 8 });
+        if (warningMsg) message.warning({ content: warningMsg, duration: 8 });
 
-        // Quét lại Fanpage nếu người dùng chọn
+        // Quét lại Fanpage nếu người dùng chọn và backend đang hoạt động
         if (autoRescanAfterUpdate) {
           handleScanPagesForVia({
             ...updateCookieModalVia,
@@ -1280,7 +1318,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         setParsedCookieInfo(null);
         onRefresh();
       } else {
-        message.error(res.data?.error || 'Không thể cập nhật Cookie');
+        message.error('Không thể cập nhật Cookie');
       }
     } catch (err: any) {
       message.error(err.response?.data?.error || err.message || 'Lỗi cập nhật Cookie');

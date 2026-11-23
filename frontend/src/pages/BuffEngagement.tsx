@@ -78,6 +78,7 @@ import PasteLinkInput from '../components/common/PasteLinkInput';
 import { triggerCookieExpiredAlert, useCookieAlert } from '../components/common/CookieAlertManager';
 import { TableSkeleton, PageSkeleton, CardSkeleton } from '../components/common/SaaSLoadingSkeleton';
 import { parseFacebookCookie } from '../utils/cookieHelper';
+import { getInitialSeedVias, seedLocalStorageIfEmpty, getStoredCookieForVia } from '../config/seedHelper';
 
 const formatDuration = (totalSec: number): string => {
   const sec = Math.max(0, Math.round(totalSec));
@@ -2148,33 +2149,48 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [bulkPagesText, setBulkPagesText] = useState<string>('');
 
   // Fetch accounts from backend with staleTime 0 so newly added Vias appear instantly
-  const { data: accounts = [], isLoading: loadingAccounts, refetch: refetchAccounts } = useQuery({
+  const { data: accountsData = [], isLoading: loadingAccounts, refetch: refetchAccounts } = useQuery({
     queryKey: ['socialAccounts'],
-    queryFn: async () => (await api.get('/connections')).data || [],
+    queryFn: async () => {
+      try {
+        const res = await api.get('/connections');
+        if (Array.isArray(res.data) && res.data.length > 0) return res.data;
+      } catch (e) {}
+      return getInitialSeedVias();
+    },
     staleTime: 0,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
   });
 
+  const accounts = accountsData && accountsData.length > 0 ? accountsData : getInitialSeedVias();
+
   // Deduplicate mother account by c_user
   const fbAccounts = useMemo(() => {
+    const list = accounts && accounts.length > 0 ? accounts : getInitialSeedVias();
     const byCUser = new Map<string, any>();
-    for (const account of accounts as any[]) {
+    for (const account of list as any[]) {
       if (!isPersonalCookieAccount(account) || account.platform === 'FACEBOOK_GROUP') continue;
-      const cUser = extractCUser(account.cookieString || account.accessToken);
+      const cUser = extractCUser(account.cookieString || account.accessToken) || String(account.platformAccountId || account.id);
       if (!cUser) continue;
+      const savedCookie = getStoredCookieForVia(cUser);
+      const effectiveAccount = {
+        ...account,
+        cookieString: account.cookieString || account.accessToken || savedCookie || '',
+        accessToken: account.cookieString || account.accessToken || savedCookie || '',
+      };
       const existing = byCUser.get(cUser);
       const accountIsProfile =
-        account.platform === 'FACEBOOK_PROFILE' || account.accountType === 'PERSONAL_PROFILE_COOKIE';
+        effectiveAccount.platform === 'FACEBOOK_PROFILE' || effectiveAccount.accountType === 'PERSONAL_PROFILE_COOKIE';
       const existingIsProfile =
         existing?.platform === 'FACEBOOK_PROFILE' || existing?.accountType === 'PERSONAL_PROFILE_COOKIE';
       if (
         !existing ||
         (accountIsProfile && !existingIsProfile) ||
-        (accountIsProfile === existingIsProfile && existing.tokenStatus !== 'OK' && account.tokenStatus === 'OK') ||
-        (accountIsProfile === existingIsProfile && existing.tokenStatus === account.tokenStatus && account.id > existing.id)
+        (accountIsProfile === existingIsProfile && existing.tokenStatus !== 'OK' && effectiveAccount.tokenStatus === 'OK') ||
+        (accountIsProfile === existingIsProfile && existing.tokenStatus === effectiveAccount.tokenStatus && effectiveAccount.id > existing.id)
       ) {
-        byCUser.set(cUser, account);
+        byCUser.set(cUser, effectiveAccount);
       }
     }
 
@@ -2235,6 +2251,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
   // Đồng bộ Fanpage từ Backend Cache vào LocalStorage khi khởi động
   useEffect(() => {
+    seedLocalStorageIfEmpty();
     api.get('/buff-cached-pages').then((res) => {
       if (res.data?.success && res.data.cache) {
         const raw = localStorage.getItem(VIA_PAGES_STORAGE_KEY);

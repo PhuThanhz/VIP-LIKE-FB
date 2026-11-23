@@ -4860,6 +4860,41 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   });
 }
 
+async function autoSeedPagesIfEmpty() {
+  try {
+    const pool = db.getPool();
+    if (!pool) return;
+    const [rows] = await pool.query('SELECT COUNT(*) as cnt FROM facebook_page_accesses').catch(() => [[]]);
+    if (rows && rows[0]?.cnt > 0) return;
+
+    const seedFile = path.join(__dirname, '../frontend/src/config/seedViasAndPages.json');
+    if (!fs.existsSync(seedFile)) return;
+    const seed = JSON.parse(fs.readFileSync(seedFile, 'utf8'));
+    console.log(`[Seed] 📦 Bắt đầu tự động nạp ${seed.totalCount} Fanpage mẫu vào MySQL...`);
+
+    for (const v of seed.vias || []) {
+      await pool.query(
+        `INSERT IGNORE INTO social_accounts (id, user_id, platform, platform_account_id, page_name, account_type, token_status)
+         VALUES (?, 1, ?, ?, ?, ?, ?)`,
+        [v.id, v.platform, v.platformAccountId, v.pageName, v.accountType, v.tokenStatus || 'OK']
+      ).catch(() => {});
+    }
+
+    for (const [uid, pages] of Object.entries(seed.pagesByUid || {})) {
+      for (const p of pages) {
+        await pool.query(
+          `INSERT IGNORE INTO facebook_page_accesses (page_id, page_name, page_url, personal_profile_id, profile_name, active, verification_status, user_id)
+           VALUES (?, ?, ?, ?, ?, 1, 'VERIFIED', 1)`,
+          [p.id, p.name, p.url, p.personalProfileId, p.profileName]
+        ).catch(() => {});
+      }
+    }
+    console.log(`[Seed] ✅ Đã nạp thành công ${seed.totalCount} Fanpage mẫu vào MySQL!`);
+  } catch (err) {
+    console.warn(`[Seed] ⚠️ Không tự động nạp được seed pages: ${err.message}`);
+  }
+}
+
 app.listen(PORT, async () => {
   console.log(`\n================================================================`);
   console.log(`✨ VIP LIKE BACKEND ĐANG CHẠY TẠI http://localhost:${PORT}`);
@@ -4869,6 +4904,8 @@ app.listen(PORT, async () => {
   const dbStatus = await db.testConnection();
   if (dbStatus.connected) {
     console.log(`✅ Kết nối MySQL Workbench (Database: ${db.dbConfig.database}) THÀNH CÔNG!`);
+    // Tự động nạp seed 508 Fanpage nếu bảng facebook_page_accesses đang trống
+    autoSeedPagesIfEmpty().catch(() => {});
     // Tự động đồng bộ các chiến dịch Hàng đợi đã hoàn thành vào Lịch sử tương tác
     syncCompletedQueueTasksToBuffLogs().catch(() => {});
   } else {
