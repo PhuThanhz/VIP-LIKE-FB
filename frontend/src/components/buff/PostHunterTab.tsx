@@ -21,8 +21,15 @@ export interface HunterMonitor {
   targetUrl: string;
   targetType: 'PAGE' | 'GROUP' | 'PROFILE';
   checkIntervalMinutes: number;
+  expiresAt?: string | null;
+  dailyPostsCount?: number;
+  dailyStatsDate?: string | null;
   buffConfig: {
     targetLikes: number | 'ALL';
+    variancePercent?: number;
+    maxPostsPerDay?: number;
+    enableDripFeed?: boolean;
+    dripDurationMinutes?: number;
     reactionType: string;
     enableComment: boolean;
     delayMinutes: number;
@@ -41,6 +48,8 @@ interface PostHunterTabProps {
   workerBaseUrl: string;
   monitors: HunterMonitor[];
   queueItems: any[];
+  postHunterPaused?: boolean;
+  onTogglePostHunterPaused?: (paused: boolean) => Promise<void> | void;
   autoBuffOwnPosts: boolean;
   maxPagesPerPost: number;
   onRefresh: () => void;
@@ -123,6 +132,9 @@ function renderTaskStatus(task: any) {
   }
   if (task.status === 'COMPLETED') return <Badge status="success" text="Hoàn tất" />;
   if (task.status === 'FAILED') return <Badge status="error" text="Thất bại" />;
+  if (task.status === 'CANCELLED' || task.status === 'STOPPED') return <Badge status="default" text="Đã hủy" />;
+  if (task.status === 'NEEDS_REVIEW') return <Badge status="warning" text="Cần đối soát" />;
+  if (task.status === 'PARTIAL') return <Badge status="warning" text="Xong một phần" />;
   return <Badge status="warning" text="Chờ buff" />;
 }
 
@@ -130,6 +142,8 @@ export default function PostHunterTab({
   workerBaseUrl,
   monitors,
   queueItems,
+  postHunterPaused = false,
+  onTogglePostHunterPaused,
   autoBuffOwnPosts,
   maxPagesPerPost,
   onRefresh,
@@ -147,6 +161,7 @@ export default function PostHunterTab({
   const [search, setSearch] = useState('');
   const [scanningId, setScanningId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [togglingGlobalPause, setTogglingGlobalPause] = useState(false);
 
   const [testOpen, setTestOpen] = useState(false);
   const [testUrl, setTestUrl] = useState('');
@@ -193,6 +208,16 @@ export default function PostHunterTab({
       await onScanNow(id);
     } finally {
       setScanningId(null);
+    }
+  };
+
+  const handleGlobalPauseSwitch = async (enabled: boolean) => {
+    if (!onTogglePostHunterPaused) return;
+    setTogglingGlobalPause(true);
+    try {
+      await onTogglePostHunterPaused(!enabled);
+    } finally {
+      setTogglingGlobalPause(false);
     }
   };
 
@@ -247,18 +272,34 @@ export default function PostHunterTab({
     {
       title: 'Mục tiêu',
       key: 'target',
-      render: (_, mon) => (
-        <div className="min-w-0">
-          <div className="text-[13px] font-semibold text-slate-100 truncate">{mon.targetName}</div>
-          <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5 min-w-0">
-            <span className="shrink-0">{TYPE_LABELS[mon.targetType] || 'Fanpage'}</span>
-            <span className="shrink-0">·</span>
-            <a href={mon.targetUrl} target="_blank" rel="noopener noreferrer" className="truncate text-slate-400 hover:text-blue-400">
-              {shortUrl(mon.targetUrl)}
-            </a>
+      render: (_, mon) => {
+        const daysLeft = mon.expiresAt ? Math.ceil((new Date(mon.expiresAt).getTime() - now) / DAY_MS) : null;
+        return (
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[13px] font-semibold text-slate-100 truncate">{mon.targetName}</span>
+              {daysLeft !== null && (
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${daysLeft > 5 ? 'bg-amber-950/60 text-amber-300 border border-amber-600/40' : daysLeft > 0 ? 'bg-rose-950/60 text-rose-300 border border-rose-600/40' : 'bg-slate-800 text-slate-400'}`}>
+                  {daysLeft > 0 ? `Gói VIP: ${daysLeft} ngày` : 'Hết hạn'}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5 min-w-0">
+              <span className="shrink-0">{TYPE_LABELS[mon.targetType] || 'Fanpage'}</span>
+              <span className="shrink-0">·</span>
+              <a href={mon.targetUrl} target="_blank" rel="noopener noreferrer" className="truncate text-slate-400 hover:text-blue-400">
+                {shortUrl(mon.targetUrl)}
+              </a>
+              {mon.buffConfig?.maxPostsPerDay && (
+                <>
+                  <span className="shrink-0">·</span>
+                  <span className="text-slate-400 font-mono text-[10px]">Hôm nay: {mon.dailyPostsCount || 0}/{mon.buffConfig.maxPostsPerDay} bài</span>
+                </>
+              )}
+            </div>
           </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       title: 'Trạng thái',
@@ -274,19 +315,24 @@ export default function PostHunterTab({
       title: 'Cách buff',
       key: 'buff',
       width: 170,
-      render: (_, mon) => (
-        <div className="text-xs whitespace-nowrap">
-          <div className="text-slate-200">
-            {mon.buffConfig?.targetLikes === 'ALL' ? `Xoay vòng ≤${maxPagesPerPost} page` : `${mon.buffConfig?.targetLikes || 30} lượt`}
+      render: (_, mon) => {
+        const varianceText = mon.buffConfig?.variancePercent ? ` (±${mon.buffConfig.variancePercent}%)` : '';
+        const dripText = mon.buffConfig?.enableDripFeed ? ` · rải ${mon.buffConfig.dripDurationMinutes || 20}p` : '';
+        return (
+          <div className="text-xs whitespace-nowrap">
+            <div className="text-slate-200">
+              {mon.buffConfig?.targetLikes === 'ALL' ? `Xoay vòng ≤${maxPagesPerPost} page` : `${mon.buffConfig?.targetLikes || 30} lượt${varianceText}`}
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+              {REACTION_LABELS[mon.buffConfig?.reactionType] || mon.buffConfig?.reactionType}
+              {' · '}
+              {mon.buffConfig?.delayMinutes ? `chờ ${mon.buffConfig.delayMinutes} phút` : 'buff ngay'}
+              {mon.buffConfig?.enableComment ? ' · bình luận' : ''}
+              {dripText}
+            </div>
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5 truncate">
-            {REACTION_LABELS[mon.buffConfig?.reactionType] || mon.buffConfig?.reactionType}
-            {' · '}
-            {mon.buffConfig?.delayMinutes ? `chờ ${mon.buffConfig.delayMinutes} phút` : 'buff ngay'}
-            {mon.buffConfig?.enableComment ? ' · bình luận' : ''}
-          </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       title: 'Quét gần nhất',
@@ -375,25 +421,53 @@ export default function PostHunterTab({
   return (
     <div className="space-y-4">
       {/* Tiêu đề + thao tác chính */}
-      <div className="app-surface p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div>
-          <div className="text-[15px] font-semibold text-slate-100">Tự săn bài mới</div>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-            Theo dõi Fanpage và Group. Khi có bài mới, hệ thống chờ một khoảng ngắn rồi buff bằng các page của via, xoay vòng để page nào cũng được dùng đều.
-            Lần quét đầu chỉ lấy mốc nên bài cũ không bị buff.
-          </p>
+      <div className="app-surface p-4 space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <span className="text-[15px] font-semibold text-slate-100">Tự săn bài mới</span>
+              <Badge
+                status={postHunterPaused ? 'warning' : 'success'}
+                text={
+                  <span className={`text-xs font-medium ${postHunterPaused ? 'text-amber-300' : 'text-emerald-300'}`}>
+                    {postHunterPaused ? 'Đang tạm dừng' : 'Đang hoạt động'}
+                  </span>
+                }
+              />
+            </div>
+            <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+              Theo dõi Fanpage và Group. Khi có bài mới, hệ thống chờ một khoảng ngắn rồi buff bằng các page của via, xoay vòng để page nào cũng được dùng đều.
+              Lần quét đầu chỉ lấy mốc nên bài cũ không bị buff.
+            </p>
+          </div>
+          <Space className="shrink-0" wrap>
+            {onTogglePostHunterPaused && (
+              <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-900/80 border border-slate-800">
+                <span className="text-xs text-slate-300">Săn bài tự động</span>
+                <Switch
+                  size="small"
+                  checked={!postHunterPaused}
+                  loading={togglingGlobalPause}
+                  onChange={handleGlobalPauseSwitch}
+                />
+              </div>
+            )}
+            <Tooltip title="Làm mới">
+              <Button icon={<ReloadOutlined />} onClick={onRefresh} aria-label="Làm mới" />
+            </Tooltip>
+            <Button icon={<SearchOutlined />} onClick={() => setTestOpen(true)}>
+              Quét thử link
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => onAdd()}>
+              Thêm mục tiêu
+            </Button>
+          </Space>
         </div>
-        <Space className="shrink-0">
-          <Tooltip title="Làm mới">
-            <Button icon={<ReloadOutlined />} onClick={onRefresh} aria-label="Làm mới" />
-          </Tooltip>
-          <Button icon={<SearchOutlined />} onClick={() => setTestOpen(true)}>
-            Quét thử link
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => onAdd()}>
-            Thêm mục tiêu
-          </Button>
-        </Space>
+        {postHunterPaused && (
+          <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex items-center justify-between gap-2">
+            <span>Tính năng Săn bài tự động đang tạm dừng. Hệ thống sẽ không quét bài mới hay tự buff bài Post Hunter; các đơn chạy tay trong Hàng đợi vẫn hoạt động bình thường.</span>
+          </div>
+        )}
       </div>
 
       {/* Số liệu vận hành */}

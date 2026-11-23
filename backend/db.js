@@ -754,6 +754,7 @@ async function ensureBuffLogsTable(p) {
       engagement_mode VARCHAR(32),
       account_name VARCHAR(255),
       total_pages INT DEFAULT 0,
+      target_likes INT DEFAULT NULL,
       success_count INT DEFAULT 0,
       already_liked_count INT DEFAULT 0,
       failed_count INT DEFAULT 0,
@@ -810,6 +811,7 @@ function normalizeBuffLog(log) {
     engagementMode: log.engagementMode ? String(log.engagementMode).slice(0, 32) : undefined,
     accountName: log.accountName ? String(log.accountName).slice(0, 255) : undefined,
     totalPages: toInt(log.totalPages),
+    targetLikes: log.targetLikes !== undefined && log.targetLikes !== null ? toInt(log.targetLikes) : null,
     successCount: toInt(log.successCount),
     alreadyLikedCount: toInt(log.alreadyLikedCount),
     failedCount: toInt(log.failedCount),
@@ -836,6 +838,7 @@ function rowToBuffLog(row) {
     engagementMode: row.engagementMode || undefined,
     accountName: row.accountName || undefined,
     totalPages: row.totalPages,
+    targetLikes: row.targetLikes ?? undefined,
     successCount: row.successCount,
     alreadyLikedCount: row.alreadyLikedCount,
     failedCount: row.failedCount,
@@ -847,7 +850,7 @@ function rowToBuffLog(row) {
 async function upsertBuffLogsToMysql(p, logs) {
   if (logs.length === 0) return;
   await ensureBuffLogsTable(p);
-  const placeholders = logs.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+  const placeholders = logs.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
   const params = logs.flatMap((l) => [
     l.id,
     l.type,
@@ -856,6 +859,7 @@ async function upsertBuffLogsToMysql(p, logs) {
     l.engagementMode || null,
     l.accountName || null,
     l.totalPages,
+    l.targetLikes !== undefined && l.targetLikes !== null ? l.targetLikes : null,
     l.successCount,
     l.alreadyLikedCount,
     l.failedCount,
@@ -865,15 +869,15 @@ async function upsertBuffLogsToMysql(p, logs) {
   ]);
   await p.query(
     `INSERT INTO buff_logs
-      (id, run_type, target_url, reaction_type, engagement_mode, account_name, total_pages,
+      (id, run_type, target_url, reaction_type, engagement_mode, account_name, total_pages, target_likes,
        success_count, already_liked_count, failed_count, comment_count, details, created_at)
      VALUES ${placeholders}
      ON DUPLICATE KEY UPDATE
        run_type = VALUES(run_type), target_url = VALUES(target_url), reaction_type = VALUES(reaction_type),
        engagement_mode = VALUES(engagement_mode), account_name = VALUES(account_name),
-       total_pages = VALUES(total_pages), success_count = VALUES(success_count),
+       total_pages = VALUES(total_pages), target_likes = VALUES(target_likes), success_count = VALUES(success_count),
        already_liked_count = VALUES(already_liked_count), failed_count = VALUES(failed_count),
-       comment_count = VALUES(comment_count), details = VALUES(details)`,
+       comment_count = VALUES(comment_count), details = VALUES(details), created_at = VALUES(created_at)`,
     params
   );
 }
@@ -916,11 +920,11 @@ async function getBuffLogs(optionsOrLimit = 500, summaryOnlyArg = false) {
     await flushPendingBuffLogs(p);
     const selectCols = summaryOnly
       ? `id, run_type as type, target_url as targetUrl, reaction_type as reactionType,
-         engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages,
+         engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages, target_likes as targetLikes,
          success_count as successCount, already_liked_count as alreadyLikedCount,
          failed_count as failedCount, comment_count as commentCount, created_at as createdAt`
       : `id, run_type as type, target_url as targetUrl, reaction_type as reactionType,
-         engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages,
+         engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages, target_likes as targetLikes,
          success_count as successCount, already_liked_count as alreadyLikedCount,
          failed_count as failedCount, comment_count as commentCount, details, created_at as createdAt`;
 
@@ -971,7 +975,7 @@ async function getBuffLogById(id) {
     await ensureBuffLogsTable(p);
     const [rows] = await p.query(
       `SELECT id, run_type as type, target_url as targetUrl, reaction_type as reactionType,
-        engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages,
+        engagement_mode as engagementMode, account_name as accountName, total_pages as totalPages, target_likes as targetLikes,
         success_count as successCount, already_liked_count as alreadyLikedCount,
         failed_count as failedCount, comment_count as commentCount, details, created_at as createdAt
        FROM buff_logs WHERE id = ? LIMIT 1`,
@@ -1267,6 +1271,7 @@ async function getFacebookPageAccesses(userId = 1, personalProfileId = null) {
 
 /**
  * Lưu danh sách Fanpage vào bảng facebook_page_accesses trên MySQL
+ * Giữ nguyên trạng thái cách ly (active = 0, UNSWITCHABLE) nếu chưa được xác thực lại từ switcher.
  */
 async function saveFacebookPageAccesses(pages = [], personalProfileId = '', profileName = '', userId = 1) {
   if (!Array.isArray(pages) || pages.length === 0) return { success: true, count: 0 };
@@ -1277,24 +1282,82 @@ async function saveFacebookPageAccesses(pages = [], personalProfileId = '', prof
       const pageId = String(pg.id || pg.pageId || '');
       const pageName = String(pg.name || pg.pageName || `Fanpage ${pageId}`).trim();
       if (!pageId) continue;
+      const isSwitcherVerified = pg.verified === true || pg.source === 'SWITCHER';
+      const initialStatus = isSwitcherVerified ? 'VERIFIED' : 'UNVERIFIED';
       await p.execute(
         `INSERT INTO facebook_page_accesses (
           user_id, personal_profile_id, page_id, page_name, profile_name,
           verification_status, active, last_seen_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'VERIFIED', 1, NOW(), NOW(), NOW())
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW(), NOW())
         ON DUPLICATE KEY UPDATE
           page_name = VALUES(page_name),
           profile_name = COALESCE(VALUES(profile_name), profile_name),
-          active = 1,
+          verification_status = CASE
+            WHEN ? = 1 THEN 'VERIFIED'
+            WHEN facebook_page_accesses.verification_status = 'UNSWITCHABLE' THEN 'UNSWITCHABLE'
+            ELSE facebook_page_accesses.verification_status
+          END,
+          active = CASE
+            WHEN ? = 1 THEN 1
+            WHEN facebook_page_accesses.verification_status = 'UNSWITCHABLE' THEN 0
+            ELSE 1
+          END,
           last_seen_at = NOW(),
           updated_at = NOW()`,
-        [userId, String(personalProfileId || ''), pageId, pageName, String(profileName || '')]
+        [
+          userId,
+          String(personalProfileId || ''),
+          pageId,
+          pageName,
+          String(profileName || ''),
+          initialStatus,
+          isSwitcherVerified ? 1 : 0,
+          isSwitcherVerified ? 1 : 0,
+        ]
       );
       saved++;
     }
     return { success: true, count: saved };
   } catch (err) {
     console.warn('[MySQL Workbench] ⚠️ Lỗi lưu facebook_page_accesses:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Cập nhật trạng thái cách ly / xác thực cho các cặp (personalProfileId, pageId) trong facebook_page_accesses
+ */
+async function markFacebookPageAccessesStatus(entries = [], verificationStatus = 'UNSWITCHABLE', active = 0, reason = '') {
+  if (!Array.isArray(entries) || entries.length === 0) return { success: true, updated: 0 };
+  try {
+    const p = getPool();
+    let updated = 0;
+    for (const item of entries) {
+      const pageId = String(item.pageId || item.id || '').trim();
+      const viaUid = String(item.personalProfileId || item.viaUid || '').trim();
+      if (!pageId) continue;
+
+      if (viaUid) {
+        const [res] = await p.execute(
+          `UPDATE facebook_page_accesses
+           SET active = ?, verification_status = ?, verification_message = ?, updated_at = NOW()
+           WHERE personal_profile_id = ? AND page_id = ?`,
+          [active ? 1 : 0, verificationStatus, String(reason || ''), viaUid, pageId]
+        );
+        updated += Number(res?.affectedRows || 0);
+      } else {
+        const [res] = await p.execute(
+          `UPDATE facebook_page_accesses
+           SET active = ?, verification_status = ?, verification_message = ?, updated_at = NOW()
+           WHERE page_id = ?`,
+          [active ? 1 : 0, verificationStatus, String(reason || ''), pageId]
+        );
+        updated += Number(res?.affectedRows || 0);
+      }
+    }
+    return { success: true, updated };
+  } catch (err) {
+    console.warn('[MySQL Workbench] ⚠️ Lỗi cập nhật trạng thái facebook_page_accesses:', err.message);
     return { success: false, error: err.message };
   }
 }
@@ -1356,6 +1419,7 @@ module.exports = {
   syncTelegramSettingsToDb,
   getFacebookPageAccesses,
   saveFacebookPageAccesses,
+  markFacebookPageAccessesStatus,
   syncUsersToDb,
   ensureAppStateTable,
   getAppState,

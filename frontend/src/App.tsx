@@ -10,6 +10,7 @@ import { DARK_THEME } from './theme/antdTheme';
 import { WallpaperProvider } from './theme/WallpaperContext';
 import type { DbStatus } from './types/dbStatus';
 import CookieAlertProvider, { CookieAlertBanner, useCookieAlert } from './components/common/CookieAlertManager';
+import { AutoUpdateModal } from './components/AutoUpdateModal';
 import {
   AUTH_EXPIRED_EVENT,
   CurrentUser,
@@ -246,6 +247,7 @@ const ThemedApp: React.FC = () => {
 
   return (
     <AntdApp>
+      <AutoUpdateModal />
       {!currentUser ? (
         <Suspense fallback={<div className="min-h-screen bg-[#090d16] flex items-center justify-center"><Spin size="large" /></div>}>
           <LoginPage onLoginSuccess={setCurrentUser} />

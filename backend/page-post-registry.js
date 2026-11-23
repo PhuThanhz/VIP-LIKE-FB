@@ -19,7 +19,7 @@ function normalizeFbPostUrl(rawUrl) {
       parsed.hostname = 'www.facebook.com';
     }
     const trackingParams = [
-      'fbclid', 'mibextid', 'rdid', 'ref', 'ref_src', 'ref_url', 'paipv', 'eav', 'sfnsn', 'locale',
+      'fbclid', 'mibextid', 'rdid', 'share_url', 'ref', 'ref_src', 'ref_url', 'paipv', 'eav', 'sfnsn', 'locale',
       '__cft__', '__tn__', 'notif_t', 'notif_id', 'comment_id', 'reply_comment_id', 'extid', 'idorvanity',
     ];
     for (const key of Array.from(parsed.searchParams.keys())) {
@@ -66,23 +66,202 @@ function loadRegistry() {
 }
 
 // Ghi được gộp theo thời gian trong state-store (nhiều via chạy song song không làm mỗi like ghi lại cả sổ)
-function scheduleSaveRegistry() {
-  store.write('page_post_registry', loadRegistry());
+function scheduleSaveRegistry(reg) {
+  store.write('page_post_registry', reg || loadRegistry());
 }
 
 function flushRegistry() {
   store.flush().catch((err) => console.error(`[PagePostRegistry] ❌ Lỗi flush sổ chống trùng: ${err.message}`));
 }
 
+function isFacebookShareUrl(rawUrl) {
+  return /^https?:\/\/([^/]+\.)?(facebook|fb)\.com\/share\//i.test(String(rawUrl || '').trim());
+}
+
+function isValidCanonicalFbPostUrl(rawUrl) {
+  const norm = normalizeFbPostUrl(rawUrl);
+  if (!norm) return false;
+  try {
+    const parsed = new URL(norm);
+    if (!/(^|\.)facebook\.com$/i.test(parsed.hostname)) return false;
+    const p = parsed.pathname || '/';
+    if (p === '/' || p === '') return false;
+    if (/\/(share|login|checkpoint|home\.php|forced_account_switch)/i.test(p)) return false;
+    if (norm.includes('forced_account_switch')) return false;
+    return /(\/posts\/|\/permalink|\/reel\/|\/watch|\/videos\/|\/photo|pfbid|story_fbid=|fbid=|multi_permalinks=|v=\d+)/i.test(norm);
+  } catch {
+    return false;
+  }
+}
+
+function loadAliases() {
+  let aliases = store.read('post_url_aliases');
+  if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases)) {
+    aliases = store.write('post_url_aliases', {});
+  }
+  return aliases;
+}
+
+function scheduleSaveAliases(aliases) {
+  store.write('post_url_aliases', aliases || loadAliases());
+}
+
 /**
- * Kiểm tra xem Page này đã từng Like/Comment trên bài viết này chưa
+ * Liên kết 2 URL cùng trỏ về 1 bài viết (ví dụ: /share/p/... <-> canonical URL)
+ */
+function registerPostUrlAlias(rawUrlA, rawUrlB) {
+  const normA = normalizeFbPostUrl(rawUrlA);
+  const normB = normalizeFbPostUrl(rawUrlB);
+  if (!normA || !normB || normA === normB) return normA || normB || '';
+
+  const aliases = loadAliases();
+  const mappedA = aliases[normA];
+  const mappedB = aliases[normB];
+
+  let canonical = '';
+  if (isValidCanonicalFbPostUrl(normB) && !isFacebookShareUrl(normB)) {
+    canonical = normB;
+  } else if (isValidCanonicalFbPostUrl(normA) && !isFacebookShareUrl(normA)) {
+    canonical = normA;
+  } else if (mappedB && isValidCanonicalFbPostUrl(mappedB)) {
+    canonical = mappedB;
+  } else if (mappedA && isValidCanonicalFbPostUrl(mappedA)) {
+    canonical = mappedA;
+  }
+
+  if (!canonical) return normA;
+
+  let changed = false;
+  for (const key of [normA, normB, mappedA, mappedB]) {
+    if (key && key !== canonical && aliases[key] !== canonical) {
+      aliases[key] = canonical;
+      changed = true;
+    }
+  }
+  // Cập nhật các khóa cũ trỏ về normA/normB nếu có
+  for (const [k, v] of Object.entries(aliases)) {
+    if ((v === normA || v === normB) && v !== canonical) {
+      aliases[k] = canonical;
+      changed = true;
+    }
+  }
+
+  if (changed) scheduleSaveAliases(aliases);
+  return canonical;
+}
+
+/**
+ * Trả về tập hợp tất cả URL tương đương (chính nó + canonical + các share alias cùng trỏ về canonical)
+ */
+function getEquivalentPostUrls(normalizedPostUrl) {
+  const urls = new Set();
+  if (!normalizedPostUrl) return urls;
+  const key = normalizeFbPostUrl(normalizedPostUrl) || normalizedPostUrl;
+  urls.add(key);
+  if (normalizedPostUrl !== key) urls.add(normalizedPostUrl);
+
+  const aliases = loadAliases();
+  const canonical = aliases[key] || (isValidCanonicalFbPostUrl(key) ? key : '');
+  if (canonical) {
+    urls.add(canonical);
+    for (const [aliasUrl, targetCanon] of Object.entries(aliases)) {
+      if (targetCanon === canonical) {
+        urls.add(aliasUrl);
+      }
+    }
+  }
+  return urls;
+}
+
+/**
+ * Phân giải nhanh link /share/... sang canonical post URL qua HTTP redirect (không cần mở trình duyệt)
+ */
+async function resolvePostUrlCanonical(rawUrl, { timeoutMs = 2500 } = {}) {
+  const normUrl = normalizeFbPostUrl(rawUrl);
+  if (!normUrl) return '';
+  const aliases = loadAliases();
+  if (aliases[normUrl]) return aliases[normUrl];
+  if (!isFacebookShareUrl(normUrl)) return normUrl;
+
+  const tryFetch = async (method, customUa) => {
+    const headers = customUa ? { 'User-Agent': customUa } : undefined;
+    const res = await fetch(normUrl, {
+      method,
+      redirect: 'manual',
+      ...(headers ? { headers } : {}),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const loc = res.headers.get('location');
+    if (res.body && typeof res.body.cancel === 'function') {
+      res.body.cancel().catch(() => {});
+    }
+    return { status: res.status, location: loc };
+  };
+
+  try {
+    // Lưu ý: KHÔNG gửi Chrome User-Agent giả (Facebook trả 400 nếu thiếu sec-ch-ua/cookies);
+    // UA mặc định của Node/curl được Facebook trả 302 Location trực tiếp.
+    let result = await tryFetch('HEAD');
+    if (!result.location && (result.status === 405 || result.status === 403 || result.status === 400)) {
+      result = await tryFetch('GET');
+    }
+    if (!result.location) {
+      result = await tryFetch('HEAD', 'curl/8.7.1');
+    }
+    if (result.location) {
+      const resolved = new URL(result.location, normUrl).toString();
+      const canonNorm = normalizeFbPostUrl(resolved);
+      if (isValidCanonicalFbPostUrl(canonNorm)) {
+        registerPostUrlAlias(normUrl, canonNorm);
+        return canonNorm;
+      }
+    }
+  } catch (_) {}
+
+  return normUrl;
+}
+
+/**
+ * Đồng bộ ngầm các link /share/ cũ đã có trong registry sang canonical URL
+ */
+async function backfillShareAliases({ concurrency = 4 } = {}) {
+  const reg = loadRegistry();
+  const aliases = loadAliases();
+  const shareKeys = Object.keys(reg).filter((k) => isFacebookShareUrl(k) && !aliases[k]);
+  if (shareKeys.length === 0) return 0;
+
+  let resolvedCount = 0;
+  let idx = 0;
+  const worker = async () => {
+    while (idx < shareKeys.length) {
+      const key = shareKeys[idx++];
+      const canon = await resolvePostUrlCanonical(key, { timeoutMs: 3000 });
+      if (canon && canon !== key) resolvedCount++;
+    }
+  };
+
+  const workers = Array.from({ length: Math.min(concurrency, shareKeys.length) }, () => worker());
+  await Promise.all(workers);
+
+  if (resolvedCount > 0) {
+    console.log(`[PagePostRegistry] 🔗 Đã liên kết ${resolvedCount}/${shareKeys.length} link /share/ về URL bài viết gốc.`);
+    flushRegistry();
+  }
+  return resolvedCount;
+}
+
+/**
+ * Kiểm tra xem Page này đã từng Like/Comment trên bài viết này chưa (bao gồm cả alias)
  */
 function hasPageInteractedWithPost(normalizedPostUrl, pageId) {
   if (!normalizedPostUrl || !pageId) return false;
   const reg = loadRegistry();
-  const postRecord = reg[normalizedPostUrl];
-  if (!postRecord) return false;
-  return Boolean(postRecord[String(pageId)]);
+  const pid = String(pageId);
+  for (const urlKey of getEquivalentPostUrls(normalizedPostUrl)) {
+    const postRecord = reg[urlKey];
+    if (postRecord && postRecord[pid]) return true;
+  }
+  return false;
 }
 
 /**
@@ -101,7 +280,13 @@ function recordPagePostInteraction(normalizedPostUrl, pageId, details = {}) {
     status: details.status || 'SUCCESS',
     reactedAt: new Date().toISOString(),
   };
-  scheduleSaveRegistry();
+  if (details.canonicalUrl) {
+    const canonNorm = normalizeFbPostUrl(details.canonicalUrl);
+    if (isValidCanonicalFbPostUrl(canonNorm) && canonNorm !== normalizedPostUrl) {
+      registerPostUrlAlias(normalizedPostUrl, canonNorm);
+    }
+  }
+  scheduleSaveRegistry(reg);
 }
 
 /**
@@ -110,14 +295,13 @@ function recordPagePostInteraction(normalizedPostUrl, pageId, details = {}) {
  */
 function filterAvailablePagesForPost(normalizedPostUrl, pages = []) {
   if (!normalizedPostUrl || !Array.isArray(pages)) return pages;
-  const reg = loadRegistry();
-  const postRecord = reg[normalizedPostUrl] || {};
+  const interactedIds = getPostInteractedPageIds(normalizedPostUrl);
 
   const available = [];
   let skippedCount = 0;
 
   for (const page of pages) {
-    if (page && page.id && postRecord[String(page.id)]) {
+    if (page && page.id && interactedIds.has(String(page.id))) {
       skippedCount++;
     } else {
       available.push(page);
@@ -134,13 +318,19 @@ function filterAvailablePagesForPost(normalizedPostUrl, pages = []) {
 }
 
 /**
- * Lấy danh sách ID các Page đã từng tương tác bài viết
+ * Lấy danh sách ID các Page đã từng tương tác bài viết (gộp cả các URL alias cùng bài viết)
  */
 function getPostInteractedPageIds(normalizedPostUrl) {
-  if (!normalizedPostUrl) return new Set();
+  const result = new Set();
+  if (!normalizedPostUrl) return result;
   const reg = loadRegistry();
-  const postRecord = reg[normalizedPostUrl] || {};
-  return new Set(Object.keys(postRecord));
+  for (const urlKey of getEquivalentPostUrls(normalizedPostUrl)) {
+    const postRecord = reg[urlKey] || {};
+    for (const pid of Object.keys(postRecord)) {
+      result.add(pid);
+    }
+  }
+  return result;
 }
 
 /**
@@ -164,8 +354,15 @@ function getGlobalRegistryStats() {
  */
 function clearPostInteractions(normalizedPostUrl) {
   const reg = loadRegistry();
-  if (reg[normalizedPostUrl]) {
-    delete reg[normalizedPostUrl];
+  let deleted = false;
+  for (const urlKey of getEquivalentPostUrls(normalizedPostUrl)) {
+    if (reg[urlKey]) {
+      delete reg[urlKey];
+      deleted = true;
+    }
+  }
+  if (deleted) {
+    scheduleSaveRegistry(reg);
     flushRegistry();
     return true;
   }
@@ -174,6 +371,12 @@ function clearPostInteractions(normalizedPostUrl) {
 
 module.exports = {
   normalizeFbPostUrl,
+  isFacebookShareUrl,
+  isValidCanonicalFbPostUrl,
+  registerPostUrlAlias,
+  getEquivalentPostUrls,
+  resolvePostUrlCanonical,
+  backfillShareAliases,
   hasPageInteractedWithPost,
   recordPagePostInteraction,
   filterAvailablePagesForPost,

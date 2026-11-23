@@ -9,6 +9,8 @@ node_modules/
 backend/.env
 backend/.env.*
 !backend/.env.example
+*.key
+tauri.key*
 
 # Build Outputs
 dist/
@@ -40,12 +42,14 @@ backend/data/page_usage.json
 
 
 # Dữ liệu runtime của backend (tài khoản, cài đặt, cache, khoá JWT)
+backend/soak_test_results.json
 backend/data/*.json
 backend/data/.jwt_secret
 backend/data/temp_avatars/
 backend/data/custom_avatars/
 backend/data/_obsolete/
 backend/data/debug_screens/
+backend/data/screenshots/
 backend/data/*.bak*
 
 # IDE settings

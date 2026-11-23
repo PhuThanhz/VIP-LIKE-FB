@@ -29,7 +29,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis",
+      "dmg",
+      "app"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,6 +43,15 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkxNkZGOUU3MjkzRTkzREUKUldUZWt6NHA1L2x2a1RjNzhXUTMycStHNm1YSTVsOHpBOStsSm1sNTluajZvRnJoOEdaUW1ZblkK",
+      "endpoints": [
+        "https://github.com/PhuThanhz/VIP-LIKE-FB/releases/latest/download/latest.json"
+      ]
     }
   }
 }

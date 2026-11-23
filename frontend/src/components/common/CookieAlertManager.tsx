@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { Modal, Tabs, Alert, Input, Button, Tag, Space, Typography, Table, Badge, App } from 'antd';
+import { Modal, Tabs, Alert, Input, Button, Tag, Space, Typography, Table, Badge, App, message } from 'antd';
 import {
   WarningFilled,
   AlertOutlined,
@@ -13,6 +13,7 @@ import {
   LinkOutlined,
 } from '@ant-design/icons';
 import api from '../../config/axios';
+import { parseFacebookCookie } from '../../utils/cookieHelper';
 
 const { Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -494,10 +495,21 @@ export const CookieAlertModal: React.FC<{
     if (!targetUid.trim()) {
       return;
     }
-    const payloadCookie = cookieInputMode === 'xs_only' ? xsOnlyInput.trim() : newCookie.trim();
-    if (!payloadCookie) {
+    const rawVal = cookieInputMode === 'xs_only' ? xsOnlyInput.trim() : newCookie.trim();
+    if (!rawVal) {
       return;
     }
+    const parsed = parseFacebookCookie(rawVal);
+    let payloadCookie = '';
+    if (parsed.isJson || parsed.valid) {
+      payloadCookie = parsed.cookieString;
+    } else if (cookieInputMode === 'xs_only') {
+      const cleanXs = rawVal.replace(/^xs=/i, '').replace(/;$/, '').trim();
+      payloadCookie = `c_user=${targetUid.trim()}; xs=${cleanXs};`;
+    } else {
+      payloadCookie = rawVal;
+    }
+
     setUpdating(true);
     try {
       const success = await quickUpdateCookie(targetUid.trim(), payloadCookie, newProxy.trim());
@@ -773,19 +785,28 @@ export const CookieAlertModal: React.FC<{
                         value={xsOnlyInput}
                         onChange={(e) => {
                           const val = e.target.value.trim();
-                          const xsMatch = val.match(/(?:^|;\s*)xs=([^;]+)/)?.[1];
-                          if (xsMatch) {
-                            setXsOnlyInput(xsMatch);
+                          const parsed = parseFacebookCookie(val);
+                          if (parsed.isJson && parsed.xs) {
+                            setXsOnlyInput(parsed.xs);
+                            if (parsed.c_user && parsed.c_user !== targetUid) {
+                              setTargetUid(parsed.c_user);
+                            }
+                            message.success(`Đã tự động trích xuất xs từ JSON Cookie: UID ${parsed.c_user || targetUid}`);
                           } else {
-                            setXsOnlyInput(val.replace(/^xs=/i, '').replace(/;$/, '').trim());
+                            const xsMatch = val.match(/(?:^|;\s*)xs=([^;]+)/)?.[1];
+                            if (xsMatch) {
+                              setXsOnlyInput(xsMatch);
+                            } else {
+                              setXsOnlyInput(val.replace(/^xs=/i, '').replace(/;$/, '').trim());
+                            }
                           }
                         }}
-                        placeholder="Ví dụ: 2%3A0UeZEJylLU5ccA%3A2%3A1793101411%3A-1%3A-1... (hoặc xs=2%3A...)"
+                        placeholder="Ví dụ: 2%3A0UeZEJylLU5ccA%3A2%3A1793101411%3A-1%3A-1... (hoặc dán cả JSON Cookie vào đây)"
                         className="font-mono text-xs bg-slate-950 border-slate-700 text-slate-100 rounded-xl hover:border-cyan-500 focus:border-cyan-500"
                       />
                       <div className="mt-1.5 text-[11px] text-slate-400 flex items-start gap-1.5">
                         <span className="text-amber-400 font-bold shrink-0">💡 Gợi ý:</span>
-                        <span>UID <b>({targetUid || 'Via'})</b> đã cố định sẵn. Bạn chỉ cần copy mỗi giá trị cookie <b>xs</b> từ trình duyệt dán vào đây, hệ thống sẽ tự động ghép với UID và khôi phục hoạt động ngay!</span>
+                        <span>UID <b>({targetUid || 'Via'})</b> đã cố định sẵn. Bạn có thể copy mã <b>xs</b> hoặc quăng nguyên khối JSON Cookie vào đây, hệ thống sẽ tự động bóc tách và khôi phục hoạt động ngay!</span>
                       </div>
                     </div>
                   ) : (
@@ -795,14 +816,26 @@ export const CookieAlertModal: React.FC<{
                           Chuỗi Cookie Facebook mới:
                         </label>
                         <span className="text-[11px] text-slate-500">
-                          c_user=...; xs=...; (hoặc dạng UID|PASS|2FA|COOKIE)
+                          Hỗ trợ chuỗi chuẩn hoặc JSON Cookie-Editor
                         </span>
                       </div>
                       <TextArea
                         rows={4}
                         value={newCookie}
-                        onChange={(e) => setNewCookie(e.target.value)}
-                        placeholder="Dán chuỗi Cookie mới vào đây (c_user=...; xs=...; fr=...; datr=...)"
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const parsed = parseFacebookCookie(val);
+                          if (parsed.isJson) {
+                            setNewCookie(parsed.cookieString);
+                            if (parsed.c_user && parsed.c_user !== targetUid) {
+                              setTargetUid(parsed.c_user);
+                            }
+                            message.success(`Đã nhận diện JSON Cookie (${parsed.cookieCount} cookies): UID ${parsed.c_user || targetUid}`);
+                          } else {
+                            setNewCookie(val);
+                          }
+                        }}
+                        placeholder="Dán chuỗi Cookie mới hoặc quăng nguyên khối JSON Cookie-Editor vào đây"
                         className="font-mono text-xs bg-slate-950 border-slate-700 text-slate-100 rounded-xl"
                       />
                     </div>
@@ -852,7 +885,7 @@ export const CookieAlertModal: React.FC<{
               children: (
                 <div className="space-y-4 pt-1">
                   <div className="text-xs text-slate-400 leading-relaxed bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-                    💡 <strong>Kiểm tra tức thì:</strong> Dán chuỗi Cookie Facebook vào khung bên dưới để hệ thống mở phiên ẩn danh test xem Cookie còn hạn hoạt động (LIVE), đã hết hạn (EXPIRED) hay bị Checkpoint mà không làm ảnh hưởng hay lưu vào database.
+                    💡 <strong>Kiểm tra tức thì:</strong> Dán chuỗi Cookie Facebook (hoặc nguyên khối JSON Cookie-Editor) vào khung bên dưới để hệ thống mở phiên ẩn danh test xem Cookie còn hạn hoạt động (LIVE), đã hết hạn (EXPIRED) hay bị Checkpoint mà không làm ảnh hưởng hay lưu vào database.
                   </div>
 
                   <div>
@@ -862,8 +895,17 @@ export const CookieAlertModal: React.FC<{
                     <TextArea
                       rows={4}
                       value={testCookieInput}
-                      onChange={(e) => setTestCookieInput(e.target.value)}
-                      placeholder="Dán chuỗi Cookie Facebook vào đây (c_user=...; xs=...)"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const parsed = parseFacebookCookie(val);
+                        if (parsed.isJson) {
+                          setTestCookieInput(parsed.cookieString);
+                          message.success(`Đã nhận diện JSON Cookie (${parsed.cookieCount} cookies)`);
+                        } else {
+                          setTestCookieInput(val);
+                        }
+                      }}
+                      placeholder="Dán chuỗi Cookie Facebook hoặc JSON Cookie-Editor vào đây"
                       className="font-mono text-xs"
                     />
                   </div>

@@ -147,7 +147,7 @@ export const LicenseManagementPage: React.FC = () => {
         hardwareHwid,
       });
       if (res.data?.success) {
-        message.success('🎉 Kích hoạt Bản Quyền VIPLIKE RADIANT thành công!');
+        message.success('🎉 Kích hoạt Bản Quyền VIP LIKE thành công!');
         setLicenseInput('');
         refreshAll();
       }

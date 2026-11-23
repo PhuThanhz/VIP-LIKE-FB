@@ -45,9 +45,16 @@ import {
   AppstoreOutlined,
   TeamOutlined,
   FileTextOutlined,
+  InfoCircleOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import api from '../config/axios';
+import {
+  parseFacebookCookie,
+  extractUidFromCookie as extractUidHelper,
+  ParsedFacebookCookie,
+} from '../utils/cookieHelper';
 
 const { Text } = Typography;
 const VIA_PAGES_STORAGE_KEY = 'buff_via_fanpages';
@@ -116,18 +123,7 @@ export interface ViaManagementPageProps {
 }
 
 function extractUidFromCookie(cookieStr?: string): string {
-  if (!cookieStr) return '';
-  const match = cookieStr.match(/(?:^|;\s*)c_user=([^;]+)/);
-  if (match) return match[1];
-
-  // Hỗ trợ chuỗi UID|PASS|2FA|COOKIE...
-  if (cookieStr.includes('|')) {
-    const parts = cookieStr.split('|');
-    if (/^[0-9]{6,}$/.test(parts[0].trim())) {
-      return parts[0].trim();
-    }
-  }
-  return '';
+  return extractUidHelper(cookieStr);
 }
 
 function extractUidFromLink(inputStr?: string): string {
@@ -242,10 +238,17 @@ const COOKIE_FIELDS: { key: string; label: string; required?: boolean; hint: str
 ];
 
 const parseCookieParts = (cookie: string): Record<string, string> => {
+  const parsed = parseFacebookCookie(cookie);
   const out: Record<string, string> = {};
+  if (parsed.c_user) out['c_user'] = parsed.c_user;
+  if (parsed.xs) out['xs'] = parsed.xs;
+  if (parsed.extraInfo?.datr) out['datr'] = parsed.extraInfo.datr;
+  if (parsed.extraInfo?.sb) out['sb'] = parsed.extraInfo.sb;
   for (const f of COOKIE_FIELDS) {
-    const m = new RegExp(`(?:^|;\\s*)${f.key}=([^;]*)`).exec(cookie || '');
-    if (m) out[f.key] = m[1].trim();
+    if (!out[f.key]) {
+      const m = new RegExp(`(?:^|;\\s*)${f.key}=([^;]*)`).exec(cookie || '');
+      if (m) out[f.key] = m[1].trim();
+    }
   }
   return out;
 };
@@ -266,8 +269,17 @@ const CookieInput: React.FC<{
       <Input.TextArea
         rows={3}
         value={value}
-        onChange={(e) => onChange?.(e.target.value)}
-        placeholder="Dán Cookie vào đây"
+        onChange={(e) => {
+          const val = e.target.value;
+          const parsed = parseFacebookCookie(val);
+          if (parsed.isJson) {
+            onChange?.(parsed.cookieString);
+            message.success(`Đã nhận diện JSON Cookie (${parsed.cookieCount} cookies): UID ${parsed.c_user || 'N/A'}`);
+          } else {
+            onChange?.(val);
+          }
+        }}
+        placeholder="Dán Cookie vào đây (hỗ trợ chuỗi c_user=...; xs=... hoặc dán nguyên khối JSON Cookie-Editor)"
         className="font-mono text-xs"
       />
     );
@@ -286,7 +298,16 @@ const CookieInput: React.FC<{
           </div>
           <Input
             value={parts[f.key] || ''}
-            onChange={(e) => onChange?.(composeCookie({ ...parts, [f.key]: e.target.value }))}
+            onChange={(e) => {
+              const val = e.target.value;
+              const parsed = parseFacebookCookie(val);
+              if (parsed.isJson) {
+                onChange?.(parsed.cookieString);
+                message.success(`Đã nhận diện JSON Cookie: UID ${parsed.c_user || 'N/A'}`);
+              } else {
+                onChange?.(composeCookie({ ...parts, [f.key]: val }));
+              }
+            }}
             placeholder={f.key}
             className="font-mono text-xs h-10"
             autoComplete="off"
@@ -310,6 +331,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   const [addMode, setAddMode] = useState<'single' | 'bulk'>('single');
 
   // Input states
+  const [isAddViaModalOpen, setIsAddViaModalOpen] = useState(false);
   const [linkOrUidInput, setLinkOrUidInput] = useState('');
   const [cookieInputVal, setCookieInputVal] = useState('');
   const [cookieMode, setCookieMode] = useState<'paste' | 'fields'>('paste');
@@ -359,6 +381,8 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   const [newProxyInput, setNewProxyInput] = useState('');
   const [autoRescanAfterUpdate, setAutoRescanAfterUpdate] = useState(true);
   const [isUpdatingCookie, setIsUpdatingCookie] = useState(false);
+  const [parsedCookieInfo, setParsedCookieInfo] = useState<ParsedFacebookCookie | null>(null);
+  const [updateCookieTab, setUpdateCookieTab] = useState<'blob' | 'manual'>('blob');
 
   // Search filter
   const [searchText, setSearchText] = useState('');
@@ -765,15 +789,18 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   const handleAddSingleVia = async (values: any) => {
     try {
       setSubmitting(true);
-      const cookieStr = (values.cookieString || '').trim();
-      if (!cookieStr) {
+      const rawCookieStr = (values.cookieString || '').trim();
+      if (!rawCookieStr) {
         message.error('Vui lòng dán chuỗi Cookie Facebook của Via!');
         return;
       }
 
+      const parsed = parseFacebookCookie(rawCookieStr);
+      const finalCookieStr = parsed.cookieString || rawCookieStr;
+
       // Trích xuất UID từ Link/UID input hoặc từ Cookie
       const uidFromLink = extractUidFromLink(values.profileUrl);
-      const uidFromCookie = extractUidFromCookie(cookieStr);
+      const uidFromCookie = parsed.c_user || extractUidFromCookie(rawCookieStr);
       const finalUid = uidFromLink || uidFromCookie || `via_${Date.now()}`;
 
       // Tên Via Mẹ
@@ -782,7 +809,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       const addRes = await api.post('/connections', {
         pageName: finalPageName,
         platformAccountId: finalUid,
-        cookieString: cookieStr,
+        cookieString: finalCookieStr,
         proxyUrl: values.proxyUrl ? values.proxyUrl.trim() : '',
         platform: 'FACEBOOK_PROFILE',
         accountType: 'PERSONAL_PROFILE_COOKIE',
@@ -793,6 +820,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       form.resetFields();
       setLinkOrUidInput('');
       setCookieInputVal('');
+      setIsAddViaModalOpen(false);
       onRefresh();
     } catch (err: any) {
       message.error(err.response?.data?.error || err.message);
@@ -803,9 +831,53 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
   // 2. THÊM HÀNG LOẠT NHIỀU VIA MẸ (BULK IMPORT)
   const handleAddBulkVias = async () => {
-    if (!bulkInputText.trim()) {
+    const rawAll = bulkInputText.trim();
+    if (!rawAll) {
       message.warning('Vui lòng dán danh sách Via vào ô bên dưới!');
       return;
+    }
+
+    // Kiểm tra nếu người dùng dán nguyên một khối JSON (Cookie-Editor / J2TEAM)
+    const wholeParsed = parseFacebookCookie(rawAll);
+    if (wholeParsed.valid && wholeParsed.isJson) {
+      try {
+        setSubmitting(true);
+        message.loading({ content: 'Đang xử lý nạp Via từ JSON Cookie...', key: 'bulkAdd' });
+        const uid = wholeParsed.c_user;
+        const name = `Via ${uid}`;
+        const bulkRes = await api.post('/connections', {
+          pageName: name,
+          platformAccountId: uid || `via_${Date.now()}`,
+          cookieString: wholeParsed.cookieString,
+          proxyUrl: '',
+          platform: 'FACEBOOK_PROFILE',
+          accountType: 'PERSONAL_PROFILE_COOKIE',
+        });
+        setSubmitting(false);
+        setBulkInputText('');
+        setIsAddViaModalOpen(false);
+        onRefresh();
+        message.success({
+          content: `Đã nạp thành công Via [${name}] từ JSON Cookie (${wholeParsed.cookieCount} cookies)!`,
+          key: 'bulkAdd',
+          duration: 4,
+        });
+        if (bulkRes.data?.warning) {
+          message.warning({
+            content: 'Chưa lưu được vào MySQL, dữ liệu mới chỉ lưu tạm trên máy này.',
+            duration: 8,
+          });
+        }
+        return;
+      } catch (e: any) {
+        setSubmitting(false);
+        if (e?.response?.status === 409) {
+          message.info({ content: 'Via này đã có sẵn trong hệ thống, không thêm mới.', key: 'bulkAdd' });
+        } else {
+          message.error({ content: e?.response?.data?.error || e.message || 'Lỗi thêm Via', key: 'bulkAdd' });
+        }
+        return;
+      }
     }
 
     const lines = bulkInputText.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -829,12 +901,18 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         let proxy = '';
         let uid = '';
 
-        if (line.includes('|')) {
+        const parsedLine = parseFacebookCookie(line);
+        if (parsedLine.valid) {
+          cookie = parsedLine.cookieString;
+          uid = parsedLine.c_user;
+          name = `Via ${uid}`;
+        } else if (line.includes('|')) {
           const parts = line.split('|').map((p) => p.trim());
-          const cookieIdx = parts.findIndex((p) => p.includes('c_user='));
+          const cookieIdx = parts.findIndex((p) => p.includes('c_user=') || p.startsWith('{') || p.startsWith('['));
           if (cookieIdx !== -1) {
-            cookie = parts[cookieIdx];
-            uid = extractUidFromCookie(cookie) || parts[0];
+            const pCookie = parseFacebookCookie(parts[cookieIdx]);
+            cookie = pCookie.cookieString || parts[cookieIdx];
+            uid = pCookie.c_user || extractUidFromCookie(cookie) || parts[0];
             name = parts[1] && !parts[1].includes('=') && !parts[1].includes('http') ? parts[1] : `Via ${uid}`;
             const proxyPart = parts.find((p) => p.includes(':') && (p.includes('.') || p.includes('http')));
             if (proxyPart && proxyPart !== cookie) proxy = proxyPart;
@@ -847,8 +925,9 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
           }
         } else {
           // Chỉ có cookie
-          cookie = line;
-          uid = extractUidFromCookie(line);
+          const pCookie = parseFacebookCookie(line);
+          cookie = pCookie.cookieString || line;
+          uid = pCookie.c_user || extractUidFromCookie(line);
           name = uid ? `Via ${uid}` : 'Via Facebook';
         }
 
@@ -875,6 +954,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     onRefresh();
 
     if (successCount > 0) {
+      setIsAddViaModalOpen(false);
       message.success({
         content: `Đã nạp thành công ${successCount} Via vào hệ thống!${duplicateCount > 0 ? ` ${duplicateCount} Via đã có sẵn nên bỏ qua.` : ''}${failCount > 0 ? ` (${failCount} lỗi)` : ''}`,
         key: 'bulkAdd',
@@ -1032,85 +1112,150 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   const handleOpenUpdateCookieModal = (record: MotherViaAccount) => {
     setUpdateCookieModalVia(record);
     const existingCookie = record.cookieString || '';
-    const matchCUser = existingCookie.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1] || record.uid || '';
-    const matchXs = existingCookie.match(/(?:^|;\s*)xs=([^;]+)/)?.[1] || '';
+    const parsed = parseFacebookCookie(existingCookie);
+    const matchCUser = parsed.c_user || record.uid || '';
+    const matchXs = parsed.xs || '';
 
     // NẾU VIA ĐÃ HẾT HẠN HOẶC CHECKPOINT: TỰ ĐỘNG XÓA TRỐNG Ô XS ĐỂ NGƯỜI DÙNG DÁN COOKIE MỚI VÀO NGAY LẬP TỨC
     const isDead = record.tokenStatus === 'EXPIRED' || record.tokenStatus === 'CHECKPOINT' || record.tokenStatus === 'INVALID';
     setCookieCUser(matchCUser);
     setCookieXs(isDead ? '' : matchXs);
     setRawCookieInput(isDead ? '' : existingCookie);
+    setParsedCookieInfo(isDead ? null : (parsed.valid ? parsed : null));
     setShowRawCookieInput(false);
     setNewProxyInput(record.proxyUrl || '');
     setAutoRescanAfterUpdate(true);
+    setUpdateCookieTab('blob');
   };
 
-  // Tự động phân tích khi gõ/dán vào dòng c_user
-  const handleCUserChange = (val: string) => {
-    let raw = val.trim();
-    if (raw.includes('xs=') || raw.includes(';')) {
-      const cMatch = raw.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1];
-      const xsMatch = raw.match(/(?:^|;\s*)xs=([^;]+)/)?.[1];
-      if (cMatch) setCookieCUser(cMatch);
-      if (xsMatch) setCookieXs(xsMatch);
-      if (!cMatch && !xsMatch) setCookieCUser(raw);
-    } else {
-      raw = raw.replace(/^c_user=/i, '').replace(/;$/, '').trim();
-      setCookieCUser(raw);
+  // Hàm xử lý chung khi người dùng dán hoặc gõ vào bất kỳ ô nào (c_user, xs, raw hoặc dán nhanh JSON)
+  const applyParsedCookie = (val: string, source: 'c_user' | 'xs' | 'raw') => {
+    const trimmed = val.trim();
+    if (!trimmed) {
+      if (source === 'c_user') setCookieCUser('');
+      if (source === 'xs') setCookieXs('');
+      if (source === 'raw') {
+        setRawCookieInput('');
+        setParsedCookieInfo(null);
+      }
+      return;
     }
-  };
 
-  // Tự động phân tích khi gõ/dán vào dòng xs
-  const handleXsChange = (val: string) => {
-    let raw = val.trim();
-    if (raw.includes('c_user=') || raw.includes(';')) {
-      const cMatch = raw.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1];
-      const xsMatch = raw.match(/(?:^|;\s*)xs=([^;]+)/)?.[1];
-      if (cMatch) setCookieCUser(cMatch);
-      if (xsMatch) setCookieXs(xsMatch);
-      if (!cMatch && !xsMatch) setCookieXs(raw);
-    } else {
-      raw = raw.replace(/^xs=/i, '').replace(/;$/, '').trim();
-      setCookieXs(raw);
+    const parsed = parseFacebookCookie(trimmed);
+
+    // 1. Nếu là định dạng JSON (Cookie-Editor, J2TEAM, DevTools export...)
+    if (parsed.isJson) {
+      if (parsed.c_user) setCookieCUser(parsed.c_user);
+      if (parsed.xs) setCookieXs(parsed.xs);
+      setRawCookieInput(parsed.cookieString);
+      setParsedCookieInfo(parsed);
+      message.success(`⚡ Đã tự động nhận diện JSON Cookie (${parsed.cookieCount} cookies): UID ${parsed.c_user || 'N/A'}`);
+      return;
     }
+
+    // 2. Nếu là chuỗi cookie gộp có chứa cả c_user và xs (hoặc dạng pipe UID|PASS|2FA|COOKIE)
+    if (parsed.valid || (trimmed.includes('c_user=') && trimmed.includes('xs='))) {
+      if (parsed.c_user) setCookieCUser(parsed.c_user);
+      if (parsed.xs) setCookieXs(parsed.xs);
+      setRawCookieInput(parsed.cookieString || trimmed);
+      setParsedCookieInfo(parsed);
+      message.info(`✨ Đã tự động bóc tách c_user (${parsed.c_user}) và xs!`);
+      return;
+    }
+
+    // 3. Nếu là nhập riêng ô c_user
+    if (source === 'c_user') {
+      if (trimmed.includes('xs=')) {
+        const xsMatch = trimmed.match(/(?:^|;\s*)xs=([^;]+)/)?.[1];
+        if (xsMatch) setCookieXs(xsMatch);
+      }
+      const cleanC = trimmed.replace(/^c_user=/i, '').replace(/;$/, '').trim();
+      setCookieCUser(cleanC);
+      return;
+    }
+
+    // 4. Nếu là nhập riêng ô xs
+    if (source === 'xs') {
+      if (trimmed.includes('c_user=')) {
+        const cMatch = trimmed.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1];
+        if (cMatch) setCookieCUser(cMatch);
+      }
+      const cleanX = trimmed.replace(/^xs=/i, '').replace(/;$/, '').trim();
+      setCookieXs(cleanX);
+      return;
+    }
+
+    // 5. Ô raw/chuỗi gộp
+    setRawCookieInput(trimmed);
+    if (parsed.c_user) setCookieCUser(parsed.c_user);
+    if (parsed.xs) setCookieXs(parsed.xs);
+    if (parsed.valid) setParsedCookieInfo(parsed);
   };
 
-  // Khi dán toàn bộ chuỗi gộp
-  const handleRawCookieChange = (val: string) => {
-    setRawCookieInput(val);
-    const cMatch = val.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1];
-    const xsMatch = val.match(/(?:^|;\s*)xs=([^;]+)/)?.[1];
-    if (cMatch) setCookieCUser(cMatch);
-    if (xsMatch) setCookieXs(xsMatch);
-  };
-
-  // Lưu Cookie mới cho Via (ghép từ 2 dòng c_user & xs)
-  const handleSaveNewCookie = async () => {
+  // Lưu Cookie mới cho Via (ghép từ 2 dòng c_user & xs và giữ toàn bộ cookies đầy đủ)
+  const handleSaveNewCookie = async (forceOverwriteUid = false) => {
     if (!updateCookieModalVia) return;
 
     let finalCookie = '';
     const cleanCUser = cookieCUser.trim() || updateCookieModalVia.uid || '';
     const cleanXs = cookieXs.trim();
 
-    if (cleanCUser && cleanXs) {
-      finalCookie = `c_user=${cleanCUser}; xs=${cleanXs};`;
-    } else if (rawCookieInput.trim()) {
-      finalCookie = rawCookieInput.trim();
-    } else if (cleanXs) {
-      finalCookie = `c_user=${updateCookieModalVia.uid}; xs=${cleanXs};`;
+    if (!cleanXs) {
+      message.error('Vui lòng điền mã phiên xs!');
+      return;
     }
 
-    if (!finalCookie || !cleanXs) {
-      message.error('Vui lòng điền mã phiên xs!');
+    // Ưu tiên chuỗi cookie đầy đủ nếu có (giữ sb, datr, pas, locale, fr, ...)
+    if (rawCookieInput.trim() && (rawCookieInput.includes('c_user=') || rawCookieInput.includes('xs='))) {
+      let updated = rawCookieInput.trim();
+      if (cleanCUser) {
+        if (/c_user=/.test(updated)) {
+          updated = updated.replace(/(?:^|;\s*)c_user=([^;]+)/, `; c_user=${cleanCUser}`);
+        } else {
+          updated = `c_user=${cleanCUser}; ${updated}`;
+        }
+      }
+      if (cleanXs) {
+        if (/xs=/.test(updated)) {
+          updated = updated.replace(/(?:^|;\s*)xs=([^;]+)/, `; xs=${cleanXs}`);
+        } else {
+          updated = `${updated}; xs=${cleanXs}`;
+        }
+      }
+      finalCookie = updated.replace(/^;\s*/, '').replace(/;\s*$/, '') + ';';
+    } else {
+      finalCookie = `c_user=${cleanCUser}; xs=${cleanXs};`;
+    }
+
+    // Kiểm tra nếu UID trong cookie khác với UID của Via hiện tại
+    const targetUid = cleanCUser || updateCookieModalVia.uid;
+    if (updateCookieModalVia.uid && cleanCUser && updateCookieModalVia.uid !== cleanCUser && !forceOverwriteUid) {
+      Modal.confirm({
+        title: 'Xác nhận cập nhật Cookie cho UID mới',
+        icon: <SyncOutlined className="text-amber-400" />,
+        content: (
+          <div className="space-y-2 text-xs text-slate-300">
+            <p>
+              UID trích xuất từ Cookie vừa dán là <code className="text-cyan-300 font-bold">{cleanCUser}</code>, 
+              khác với UID hiện tại của Via là <code className="text-amber-300 font-bold">{updateCookieModalVia.uid}</code>.
+            </p>
+            <p>Bạn có chắc chắn muốn cập nhật Cookie này cho Via <b className="text-white">{updateCookieModalVia.pageName}</b> không?</p>
+          </div>
+        ),
+        okText: 'Đồng ý cập nhật',
+        cancelText: 'Xem lại',
+        onOk: () => handleSaveNewCookie(true),
+      });
       return;
     }
 
     try {
       setIsUpdatingCookie(true);
       const res = await api.post('/vias/update-cookie', {
-        uid: cleanCUser || updateCookieModalVia.uid,
+        uid: targetUid,
         cookieString: finalCookie,
         proxyUrl: newProxyInput.trim(),
+        force: true,
       });
 
       if (res.data?.success) {
@@ -1121,7 +1266,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         if (autoRescanAfterUpdate) {
           handleScanPagesForVia({
             ...updateCookieModalVia,
-            uid: cleanCUser || updateCookieModalVia.uid,
+            uid: targetUid,
             cookieString: finalCookie,
             proxyUrl: newProxyInput.trim(),
           });
@@ -1132,6 +1277,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         setCookieXs('');
         setRawCookieInput('');
         setNewProxyInput('');
+        setParsedCookieInfo(null);
         onRefresh();
       } else {
         message.error(res.data?.error || 'Không thể cập nhật Cookie');
@@ -1500,7 +1646,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
           <Button
             type="primary"
             icon={<PlusOutlined />}
-            onClick={() => document.getElementById('add-via-section')?.scrollIntoView({ behavior: 'smooth' })}
+            onClick={() => setIsAddViaModalOpen(true)}
           >
             Thêm Via
           </Button>
@@ -1546,27 +1692,40 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         </button>
       </div>
 
-      {/* 2. BƯỚC 1: NHẬP & KÍCH HOẠT VIA MỚI (CHUYÊN BIỆT ADD VIA MẸ - KHÔNG LẪN LỘN FANPAGE) */}
-      <div id="add-via-section" className="app-surface p-5 rounded-2xl">
+      {/* 2. MODAL: NHẬP & KÍCH HOẠT VIA MỚI (CHỈ HIỂN THỊ KHI BẤM NÚT "THÊM VIA") */}
+      <Modal
+        title={
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pr-6 pb-3 border-b border-slate-800/80">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-base font-semibold text-slate-100 m-0">Thêm Via</h3>
+              {recognizedUid && (
+                <span className="text-xs text-slate-400 tabular-nums">UID: <span className="text-cyan-400 font-mono font-bold">{recognizedUid}</span></span>
+              )}
+            </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-800/80">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-base font-semibold text-slate-100 m-0">Thêm Via</h3>
-            {recognizedUid && (
-              <span className="text-xs text-slate-400 tabular-nums">UID: <span className="text-slate-200">{recognizedUid}</span></span>
-            )}
+            {/* Chọn chế độ: Nhập 1 Via vs Nhập Hàng Loạt */}
+            <Segmented
+              value={addMode}
+              onChange={(val) => setAddMode(val as 'single' | 'bulk')}
+              options={[
+                { label: 'Từng tài khoản', value: 'single' },
+                { label: 'Hàng loạt', value: 'bulk' },
+              ]}
+            />
           </div>
-
-          {/* Chọn chế độ: Nhập 1 Via vs Nhập Hàng Loạt */}
-          <Segmented
-            value={addMode}
-            onChange={(val) => setAddMode(val as 'single' | 'bulk')}
-            options={[
-              { label: 'Từng tài khoản', value: 'single' },
-              { label: 'Hàng loạt', value: 'bulk' },
-            ]}
-          />
-        </div>
+        }
+        open={isAddViaModalOpen}
+        onCancel={() => {
+          setIsAddViaModalOpen(false);
+          form.resetFields();
+          setLinkOrUidInput('');
+          setCookieInputVal('');
+        }}
+        footer={null}
+        width={780}
+        destroyOnClose={false}
+      >
+        <div className="pt-3">
 
         {/* CHẾ ĐỘ 1: NHẬP TỪNG VIA THEO TỪNG CỘT RÕ RÀNG */}
         {addMode === 'single' ? (
@@ -1764,9 +1923,10 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             </div>
           </div>
         )}
-      </div>
+        </div>
+      </Modal>
 
-      {/* 3. BƯỚC 2: BẢNG QUẢN LÝ VIA MẸ & DÀN FANPAGE TRỰC THUỘC */}
+      {/* 3. BẢNG QUẢN LÝ VIA MẸ & DÀN FANPAGE TRỰC THUỘC */}
       <div className="app-surface p-5 space-y-4 rounded-2xl shadow-xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
           <div className="flex items-center gap-2">
@@ -1813,8 +1973,16 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                 </div>
                 <div className="text-slate-300 font-bold text-sm">Chưa có tài khoản Via nào</div>
                 <p className="text-slate-500 text-xs max-w-sm text-center">
-                  Hãy nhập Cookie hoặc dán danh sách nick vào khung <b>"1. Nhập & Thêm Via Mới"</b> ở trên để bắt đầu!
+                  Bấm nút <b>"Thêm Via"</b> ở góc trên để nạp tài khoản vào hệ thống!
                 </p>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setIsAddViaModalOpen(true)}
+                  className="mt-1"
+                >
+                  Thêm Via ngay
+                </Button>
               </div>
             ),
           }}
@@ -2203,8 +2371,9 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   ),
                   children: (
                     <div className="space-y-3 mt-2">
-                      <div className="text-[11px] text-slate-400 bg-slate-900/90 p-2.5 rounded-xl border border-slate-800">
-                        💡 Danh sách Page &amp; Nhóm trực thuộc Via này đã được đồng bộ và lưu trữ an toàn. Bạn có thể quản lý hoặc gỡ bỏ từng mục con mà không ảnh hưởng tới Via.
+                      <div className="text-[11px] text-slate-400 bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 flex items-start gap-1.5">
+                        <InfoCircleOutlined className="text-cyan-400 mt-0.5 shrink-0" />
+                        <span>Danh sách Page &amp; Nhóm trực thuộc Via này đã được đồng bộ và lưu trữ an toàn. Bạn có thể quản lý hoặc gỡ bỏ từng mục con mà không ảnh hưởng tới Via.</span>
                       </div>
 
                       {/* Danh sách Pages trong DB */}
@@ -2369,6 +2538,8 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
           </div>
         }
         open={Boolean(updateCookieModalVia)}
+        width={760}
+        centered
         onCancel={() => {
           if (!isUpdatingCookie) {
             setUpdateCookieModalVia(null);
@@ -2376,6 +2547,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             setCookieXs('');
             setRawCookieInput('');
             setNewProxyInput('');
+            setParsedCookieInfo(null);
           }
         }}
         footer={[
@@ -2387,6 +2559,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
               setCookieXs('');
               setRawCookieInput('');
               setNewProxyInput('');
+              setParsedCookieInfo(null);
             }}
             disabled={isUpdatingCookie}
             className="bg-slate-900 border-slate-700 text-slate-300 rounded-xl"
@@ -2398,7 +2571,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             type="primary"
             icon={<SyncOutlined spin={isUpdatingCookie} />}
             loading={isUpdatingCookie}
-            onClick={handleSaveNewCookie}
+            onClick={() => handleSaveNewCookie(false)}
             className="bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl"
           >
             Lưu & Kích Hoạt Lại
@@ -2406,131 +2579,163 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         ]}
         className="dark-modal"
       >
-        <div className="space-y-4 pt-2">
-          <div className="p-3 rounded-xl bg-sky-950/40 border border-sky-500/30 text-xs text-slate-300 flex items-start gap-2">
-            <span className="text-sky-400 text-sm">💡</span>
-            <span>
-              Nhập tách biệt <b>c_user</b> và <b>xs</b> vào 2 dòng bên dưới. Nếu bạn dán cả chuỗi cookie vào bất kỳ ô nào, hệ thống sẽ <b>tự động phân tích và điền đúng vị trí</b>.
-            </span>
-          </div>
+        <div className="space-y-3 pt-1">
+          {/* 2 TAB: 1 TAB DÁN NGUYÊN KHỐI, 1 TAB NHẬP THỦ CÔNG */}
+          <Tabs
+            activeKey={updateCookieTab}
+            onChange={(k) => setUpdateCookieTab(k as 'blob' | 'manual')}
+            items={[
+              {
+                key: 'blob',
+                label: (
+                  <span className="flex items-center gap-1.5 font-semibold text-xs px-1">
+                    <ThunderboltOutlined className="text-amber-400" />
+                    Quăng nguyên cục (JSON Cookie / Chuỗi gộp)
+                  </span>
+                ),
+                children: (
+                  <div className="space-y-2 pt-1">
+                    <div className="p-3.5 rounded-xl bg-gradient-to-r from-sky-950/60 via-slate-900 to-indigo-950/60 border border-sky-500/40 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-sky-300">
+                          Quăng 1 đống JSON hoặc chuỗi Cookie vào đây:
+                        </span>
+                        {parsedCookieInfo && (
+                          <Tag color={parsedCookieInfo.isJson ? 'cyan' : 'blue'} className="font-mono text-[11px] !m-0">
+                            {parsedCookieInfo.isJson ? `JSON (${parsedCookieInfo.cookieCount} cookies)` : 'Chuỗi Cookie'}
+                          </Tag>
+                        )}
+                      </div>
+                      <Input.TextArea
+                        rows={4}
+                        allowClear
+                        placeholder={`Quăng 1 đống {"url":"...","cookies":[...]} hoặc [{name:"c_user",...}] hoặc chuỗi c_user=...; xs=... vào đây...`}
+                        value={rawCookieInput}
+                        onChange={(e) => applyParsedCookie(e.target.value, 'raw')}
+                        className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl hover:border-cyan-500 focus:border-cyan-500"
+                      />
+                      {parsedCookieInfo && parsedCookieInfo.valid && (
+                        <div className="text-[11px] text-emerald-400 flex items-center gap-2 bg-emerald-950/40 border border-emerald-800/40 px-2.5 py-1 rounded-lg">
+                          <CheckCircleFilled />
+                          <span>
+                            Đã bóc tách thành công: <b>c_user = {parsedCookieInfo.c_user}</b> | <b>xs = {parsedCookieInfo.xs.slice(0, 18)}...</b>
+                          </span>
+                        </div>
+                      )}
+                      {updateCookieModalVia?.uid && parsedCookieInfo?.c_user && updateCookieModalVia.uid !== parsedCookieInfo.c_user && (
+                        <div className="text-[11px] text-amber-300 flex items-center gap-1.5 bg-amber-950/40 border border-amber-800/40 px-2.5 py-1 rounded-lg">
+                          <ExclamationCircleOutlined className="text-amber-400 shrink-0" />
+                          <span>
+                            Lưu ý: UID trong Cookie (<b>{parsedCookieInfo.c_user}</b>) khác với UID của Via (<b>{updateCookieModalVia.uid}</b>). Khi bấm Lưu, hệ thống sẽ đồng bộ theo UID mới này!
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-slate-400 flex items-center gap-1.5 px-1">
+                      <InfoCircleOutlined className="text-sky-400 shrink-0" />
+                      <span>Hỗ trợ JSON Cookie-Editor, J2TEAM, mảng cookies hoặc chuỗi <code>c_user=...; xs=...</code>. Hệ thống sẽ tự động bóc tách và đồng bộ sang tab thủ công!</span>
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: 'manual',
+                label: (
+                  <span className="flex items-center gap-1.5 font-semibold text-xs px-1">
+                    <KeyOutlined className="text-cyan-400" />
+                    Nhập thủ công từng cái (c_user & xs)
+                  </span>
+                ),
+                children: (
+                  <div className="space-y-3 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      {/* DÒNG 1: c_user */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-xs font-semibold text-slate-200">
+                            1. Dòng 1: <code className="text-cyan-300 font-bold">c_user</code> (UID) <span className="text-rose-400">*</span>
+                          </label>
+                          <span className="text-[11px] text-slate-400 font-mono">Dãy số UID nick</span>
+                        </div>
+                        <Input
+                          placeholder="Ví dụ: 100023403136194"
+                          value={cookieCUser}
+                          onChange={(e) => applyParsedCookie(e.target.value, 'c_user')}
+                          prefix={<UserOutlined className="text-slate-500" />}
+                          className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl h-10 hover:border-cyan-500 focus:border-cyan-500"
+                        />
+                        <div className="mt-1 text-[11px] text-slate-400 flex items-center gap-1">
+                          <InfoCircleOutlined className="text-slate-500" />
+                          <span>Tự động điền theo UID của Via hoặc trích xuất từ tab dán nguyên cục.</span>
+                        </div>
+                      </div>
 
-          {/* DÒNG 1: c_user */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-semibold text-slate-200">
-                1. Dòng 1: <code className="text-cyan-300 font-bold">c_user</code> (UID Facebook) <span className="text-rose-400">*</span>
+                      {/* DÒNG 2: xs */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                          <label className="text-xs font-semibold text-slate-200">
+                            2. Dòng 2: <code className="text-cyan-300 font-bold">xs</code> (Token phiên) <span className="text-rose-400">*</span>
+                          </label>
+                          <div className="flex items-center gap-2">
+                            {cookieXs && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCookieXs('');
+                                  setRawCookieInput('');
+                                  setParsedCookieInfo(null);
+                                }}
+                                className="text-[11px] text-rose-400 hover:text-rose-300 bg-rose-950/40 border border-rose-800/50 px-2 py-0.5 rounded cursor-pointer transition-colors"
+                              >
+                                Xóa mã xs
+                              </button>
+                            )}
+                            <span className="text-[11px] text-cyan-400 font-mono">Chỉ cần mã xs</span>
+                          </div>
+                        </div>
+                        <Input
+                          placeholder="Dán mã xs mới vào đây (Ví dụ: 2%3A0UeZEJylLU5ccA%3A2...)"
+                          value={cookieXs}
+                          onChange={(e) => applyParsedCookie(e.target.value, 'xs')}
+                          className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl h-10 hover:border-cyan-500 focus:border-cyan-500"
+                        />
+                        <div className="mt-1 text-[11px] text-slate-400">
+                          Chỉ cần copy giá trị <b className="text-slate-300">xs</b> mới dán vào đây rồi bấm Lưu.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          />
+
+          {/* HÀNG DÙNG CHUNG PHÍA DƯỚI: PROXY VÀ TÙY CHỌN QUÉT LẠI (2 CỘT) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-end pt-2 border-t border-slate-800/80">
+            <div>
+              <label className="block text-xs font-semibold text-slate-200 mb-1.5">
+                Proxy riêng cho Via <span className="text-slate-500 font-normal">(Tùy chọn)</span>
               </label>
-              <span className="text-[11px] text-slate-400 font-mono">Dãy số UID nick</span>
-            </div>
-            <Input
-              placeholder="Ví dụ: 100023403136194"
-              value={cookieCUser}
-              onChange={(e) => handleCUserChange(e.target.value)}
-              prefix={<UserOutlined className="text-slate-500" />}
-              className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl h-10 hover:border-cyan-500 focus:border-cyan-500"
-            />
-          </div>
-
-          {/* DÒNG 2: xs */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
-              <label className="text-xs font-semibold text-slate-200">
-                2. Dòng 2: <code className="text-cyan-300 font-bold">xs</code> (Mã phiên đăng nhập / Token Session) <span className="text-rose-400">*</span>
-              </label>
-              <div className="flex items-center gap-2">
-                {cookieXs && (
-                  <button
-                    type="button"
-                    onClick={() => setCookieXs('')}
-                    className="text-[11px] text-rose-400 hover:text-rose-300 bg-rose-950/40 border border-rose-800/50 px-2 py-0.5 rounded cursor-pointer transition-colors"
-                  >
-                    🗑️ Xóa Cookie cũ
-                  </button>
-                )}
-                <span className="text-[11px] text-cyan-400 font-mono">⚡ Chỉ cần nhập mã xs này là đủ</span>
-              </div>
-            </div>
-            <Input.TextArea
-              rows={3}
-              allowClear
-              placeholder="Dán mã xs mới vào đây (Ví dụ: 2%3A0UeZEJylLU5ccA%3A2...)"
-              value={cookieXs}
-              onChange={(e) => handleXsChange(e.target.value)}
-              className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl hover:border-cyan-500 focus:border-cyan-500"
-            />
-            {updateCookieModalVia?.tokenStatus === 'EXPIRED' || updateCookieModalVia?.tokenStatus === 'CHECKPOINT' ? (
-              <div className="mt-1.5 text-[11px] text-amber-300 flex items-center gap-1.5 bg-amber-950/40 border border-amber-800/40 px-2.5 py-1.5 rounded-lg">
-                <span>✨</span>
-                <span>Hệ thống đã tự động dọn sạch Cookie cũ đã hết hạn. Bạn chỉ cần copy giá trị <b className="text-white">xs</b> mới rồi dán (Ctrl+V) vào đây!</span>
-              </div>
-            ) : (
-              <div className="mt-1 text-[11px] text-slate-400">
-                💡 Dòng 1 (<span className="text-cyan-400 font-mono">c_user</span>) đã được tự động điền sẵn theo UID của Via. Bạn chỉ cần copy mỗi giá trị cookie <b className="text-white">xs</b> dán vào đây rồi bấm Lưu!
-              </div>
-            )}
-          </div>
-
-          {/* TÙY CHỌN DÁN CẢ CHUỖI TOÀN BỘ (NẾU MUỐN) */}
-          <div className="pt-0.5">
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setShowRawCookieInput(!showRawCookieInput)}
-                className="text-xs text-sky-400 hover:text-sky-300 underline bg-transparent border-0 p-0 cursor-pointer flex items-center gap-1"
-              >
-                <span>{showRawCookieInput ? '▲ Thu gọn ô dán chuỗi gộp' : '▼ Hoặc bấm vào đây để dán nguyên chuỗi Cookie gộp'}</span>
-              </button>
-              {showRawCookieInput && rawCookieInput && (
-                <button
-                  type="button"
-                  onClick={() => setRawCookieInput('')}
-                  className="text-[11px] text-rose-400 hover:text-rose-300 bg-transparent border-0 cursor-pointer"
-                >
-                  🗑️ Xóa chuỗi gộp
-                </button>
-              )}
-            </div>
-
-            {showRawCookieInput && (
-              <div className="mt-2 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-1.5">
-                <span className="text-[11px] text-slate-400">Dán chuỗi gộp (tự động phân tích vào 2 ô trên):</span>
-                <Input.TextArea
-                  rows={2}
-                  allowClear
-                  placeholder="c_user=...; xs=... hoặc UID|PASS|2FA|COOKIE..."
-                  value={rawCookieInput}
-                  onChange={(e) => handleRawCookieChange(e.target.value)}
-                  className="bg-slate-900 border-slate-700 text-slate-100 font-mono text-xs rounded-lg"
-                />
-              </div>
-            )}
-          </div>
-
-          {/* PROXY */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-200 mb-1.5">
-              Proxy riêng cho Via <span className="text-slate-500 font-normal">(Tùy chọn, để trống dùng IP máy)</span>
-            </label>
-            <Input
-              placeholder="ip:port:user:pass hoặc http://user:pass@ip:port"
-              value={newProxyInput}
-              onChange={(e) => setNewProxyInput(e.target.value)}
-              prefix={<GlobalOutlined className="text-slate-500" />}
-              className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl h-10 focus:border-cyan-500"
-            />
-          </div>
-
-          {/* QUÉT LẠI PAGE */}
-          <div className="pt-1">
-            <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
-              <input
-                type="checkbox"
-                checked={autoRescanAfterUpdate}
-                onChange={(e) => setAutoRescanAfterUpdate(e.target.checked)}
-                className="rounded border-slate-700 text-cyan-600 focus:ring-cyan-500"
+              <Input
+                placeholder="ip:port:user:pass hoặc http://user:pass@ip:port"
+                value={newProxyInput}
+                onChange={(e) => setNewProxyInput(e.target.value)}
+                prefix={<GlobalOutlined className="text-slate-500" />}
+                className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl h-10 focus:border-cyan-500"
               />
-              <span>Tự động quét lại toàn bộ Fanpage con ngay sau khi lưu</span>
-            </label>
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center h-10">
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300 m-0">
+                <input
+                  type="checkbox"
+                  checked={autoRescanAfterUpdate}
+                  onChange={(e) => setAutoRescanAfterUpdate(e.target.checked)}
+                  className="rounded border-slate-700 text-cyan-600 focus:ring-cyan-500"
+                />
+                <span className="font-medium">Tự động quét lại Fanpage con sau khi lưu</span>
+              </label>
+            </div>
           </div>
         </div>
       </Modal>

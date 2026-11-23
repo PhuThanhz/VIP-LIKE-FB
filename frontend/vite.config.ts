@@ -1,8 +1,19 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { readFileSync } from 'fs';
 
-export default defineConfig({
+let tauriVersion = 'dev';
+try {
+  const tauriConf = JSON.parse(readFileSync(path.resolve(__dirname, 'src-tauri/tauri.conf.json'), 'utf-8'));
+  tauriVersion = tauriConf.version || '2.0.0';
+} catch {}
+
+export default defineConfig(({ command }) => ({
+  define: {
+    __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || (command === 'build' ? tauriVersion : 'dev')),
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [react()],
   resolve: {
     alias: {
@@ -36,5 +47,5 @@ export default defineConfig({
       },
     },
   },
-});
+}));
 

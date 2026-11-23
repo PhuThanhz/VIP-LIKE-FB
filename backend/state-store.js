@@ -18,6 +18,7 @@ const KEYS = {
   buff_history: { file: 'buff_history.json', default: () => ({}), flushMs: 1500 },
   buff_monitors: { file: 'buff_monitors.json', default: () => ({ monitors: [] }), flushMs: 800 },
   page_post_registry: { file: 'page_post_registry.json', default: () => ({}), flushMs: 5000 },
+  post_url_aliases: { file: 'post_url_aliases.json', default: () => ({}), flushMs: 5000 },
   pages_cache: { file: 'pages_cache.json', default: () => ({}), flushMs: 1500 },
   page_usage: { file: 'page_usage.json', default: () => ({}), flushMs: 5000 },
 };

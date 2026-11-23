@@ -101,7 +101,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           </div>
           <div>
             <div className="font-extrabold text-sm tracking-wider uppercase bg-gradient-to-r from-cyan-500 to-blue-600 bg-clip-text text-transparent">
-              VIPLIKE RADIANT
+              VIP LIKE
             </div>
             <div className="text-[10px] text-slate-400">Hệ Thống Tăng Tương Tác & Săn Bài Meta</div>
           </div>
@@ -245,7 +245,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
       {/* Footer */}
       <footer className="py-3 px-6 text-center text-xs text-slate-400 border-t border-slate-800/60">
-        VIPLIKE RADIANT v2.0 • Bản Quyền Thuộc Về Hệ Sinh Thái VIPLIKE SaaS • Bảo Vệ Bằng Mã Hóa HWID
+        VIP LIKE v2.0 • Bản Quyền Thuộc Về Hệ Sinh Thái VIPLIKE SaaS • Bảo Vệ Bằng Mã Hóa HWID
       </footer>
     </div>
   );

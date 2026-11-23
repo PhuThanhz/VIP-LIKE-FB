@@ -37,6 +37,9 @@ const {
   getGlobalRegistryStats,
   normalizeFbPostUrl,
   clearPostInteractions,
+  getPostInteractedPageIds,
+  resolvePostUrlCanonical,
+  backfillShareAliases,
 } = require('./page-post-registry');
 const { generateSeedingComments } = require('./ai-seeding');
 const avatarTool = require('./avatar-tool');
@@ -96,6 +99,9 @@ async function syncBuffQueueToMysql(queueData) {
       else if (it.status === 'RUNNING') status = 'RUNNING';
       else if (it.status === 'FAILED') status = 'FAILED';
       else if (it.status === 'PAUSED') status = 'PAUSED';
+      else if (['CANCELLED', 'STOPPED', 'PARTIAL', 'NEEDS_REVIEW', 'DEAD_LETTER'].includes(it.status)) {
+        status = it.status;
+      }
 
       const progressLikes = Number(it.progress?.done ?? it.result?.success ?? 0);
       const progressComments = 0;
@@ -133,22 +139,68 @@ async function syncBuffQueueToMysql(queueData) {
   } catch (_) {}
 }
 
+// Tập hợp taskId bị yêu cầu hủy chủ động (ví dụ: tắt tính năng Săn bài tự động)
+const cancelledTaskIds = new Set();
+
+function isPostHunterTask(task) {
+  const src = String(task?.source || '');
+  return src.startsWith('POST_HUNTER') || src === 'AUTO_OWN_POST';
+}
+
+function isPostHunterPaused() {
+  return Boolean(loadBuffSettings().postHunterPaused);
+}
+
+/** Hủy toàn bộ tác vụ Săn bài tự động đang chờ hoặc đang chạy mà không chạm vào đơn chạy tay */
+function cancelPendingPostHunterTasks(reason = 'Đã hủy do tạm dừng tính năng Săn bài tự động') {
+  const qd = loadBuffQueue();
+  const cancelledIds = [];
+  const nowIso = new Date().toISOString();
+
+  for (const it of qd.items || []) {
+    if (!isPostHunterTask(it)) continue;
+    if (it.status === 'QUEUED' || it.status === 'RUNNING') {
+      it.status = 'CANCELLED';
+      it.executionStage = 'CANCELLED';
+      it.finishedAt = nowIso;
+      it.error = reason;
+      cancelledTaskIds.add(it.id);
+      cancelledIds.push(it.id);
+    }
+  }
+
+  if (cancelledIds.length > 0) {
+    saveBuffQueue(qd);
+  }
+  return cancelledIds;
+}
+
 function recoverStaleRunningQueueTasks() {
   try {
     const qd = loadBuffQueue();
+    const hunterPaused = isPostHunterPaused();
     let recoveredCount = 0;
     let reviewCount = 0;
     let completedCount = 0;
+    let cancelledHunterCount = 0;
 
     for (const it of qd.items || []) {
+      if (hunterPaused && isPostHunterTask(it) && (it.status === 'RUNNING' || it.status === 'QUEUED')) {
+        it.status = 'CANCELLED';
+        it.executionStage = 'CANCELLED';
+        it.finishedAt = it.finishedAt || new Date().toISOString();
+        it.error = 'Đã hủy do tính năng Săn bài tự động đang tạm dừng.';
+        cancelledHunterCount++;
+        continue;
+      }
+
       if (it.status === 'RUNNING') {
         const hasExternalSideEffects =
           it.executionStage === 'INTERACTING' ||
           Number(it.progress?.done || 0) > 0 ||
           Number(it.progress?.success || 0) > 0 ||
           Number(it.progressLikes || 0) > 0 ||
-          (Array.isArray(it.pageDetails) && it.pageDetails.length > 0) ||
-          Boolean(it.dispatchedAt);
+          (Array.isArray(it.pageDetails) && it.pageDetails.length > 0);
 
         if (it.executionStage === 'SYNCING') {
           // Đã hoàn thành tương tác, chỉ chưa kịp sync log -> hoàn tất an toàn
@@ -172,9 +224,9 @@ function recoverStaleRunningQueueTasks() {
         }
       }
     }
-    if (recoveredCount > 0 || reviewCount > 0 || completedCount > 0) {
+    if (recoveredCount > 0 || reviewCount > 0 || completedCount > 0 || cancelledHunterCount > 0) {
       saveBuffQueue(qd);
-      console.log(`[Queue Recovery] 🔄 Phục hồi sau restart/crash: ${recoveredCount} task về QUEUED, ${completedCount} task sync xong về COMPLETED, ${reviewCount} task chuyển sang NEEDS_REVIEW để bảo vệ chống trùng.`);
+      console.log(`[Queue Recovery] 🔄 Phục hồi sau restart/crash: ${recoveredCount} task về QUEUED, ${completedCount} task sync xong về COMPLETED, ${reviewCount} task chuyển sang NEEDS_REVIEW, ${cancelledHunterCount} task Post Hunter đã hủy.`);
     }
   } catch (e) {
     console.warn('[Queue Recovery] ⚠️ Lỗi kiểm tra phục hồi task:', e.message);
@@ -182,55 +234,55 @@ function recoverStaleRunningQueueTasks() {
 }
 
 let lastQueueSyncTime = 0;
-async function syncCompletedQueueTasksToBuffLogs() {
+async function syncCompletedQueueTasksToBuffLogs(force = false) {
   const now = Date.now();
-  if (now - lastQueueSyncTime < 30000) return; // Chỉ kiểm tra tối đa 1 lần mỗi 30 giây để tránh nghẽn I/O
+  if (!force && now - lastQueueSyncTime < 10000) return;
   lastQueueSyncTime = now;
   try {
     const qd = loadBuffQueue();
     if (!qd || !Array.isArray(qd.items)) return;
-    const completedTasks = qd.items.filter((it) => it.status === 'COMPLETED' && it.targetUrl);
-    if (completedTasks.length === 0) return;
-
-    // Tối ưu hóa siêu tốc: Chỉ truy vấn danh sách ID thay vì load toàn bộ JSON details nặng nề
-    const p = db.getPool();
-    const [existingRows] = await p.execute("SELECT id FROM buff_logs WHERE id LIKE 'log_task_%'").catch(() => [[]]);
-    const existingLogIds = new Set(existingRows.map((r) => r.id));
+    // Đồng bộ toàn bộ các task hàng đợi đã hoàn tất hoặc kết thúc (COMPLETED, PARTIAL, FAILED, STOPPED)
+    const finishedTasks = qd.items.filter((it) => 
+      (it.status === 'COMPLETED' || it.status === 'PARTIAL' || it.status === 'FAILED' || it.status === 'STOPPED' || it.status === 'DEAD_LETTER') && it.targetUrl
+    );
+    if (finishedTasks.length === 0) return;
 
     const newLogs = [];
-    for (const t of completedTasks) {
+    for (const t of finishedTasks) {
       const logId = 'log_' + t.id;
-      if (!existingLogIds.has(logId)) {
-        const res = t.result || {};
-        const successCount = typeof res.success === 'number' ? res.success : (Number(t.progressLikes) || 0);
-        const failedCount = typeof res.failed === 'number' ? res.failed : 0;
-        const totalPages = typeof res.targetKpi === 'number' ? res.targetKpi : (t.targetLikes === 'ALL' ? (successCount + failedCount) : (Number(t.targetLikes) || 30));
-        const alreadyLikedCount = Array.isArray(t.pageDetails)
-          ? t.pageDetails.filter((d) => d.status === 'ALREADY_LIKED').length
-          : 0;
+      const res = t.result || {};
+      const successCount = typeof res.success === 'number' ? res.success : (Number(t.progress?.success ?? t.progressLikes) || 0);
+      const failedCount = typeof res.failed === 'number' ? res.failed : (Number(t.progress?.failed) || 0);
+      const totalPages = typeof res.targetKpi === 'number' ? res.targetKpi : (t.targetLikes === 'ALL' ? (successCount + failedCount) : (Number(t.targetLikes) || 30));
+      const alreadyLikedCount = Array.isArray(t.pageDetails)
+        ? t.pageDetails.filter((d) => d.status === 'ALREADY_LIKED').length
+        : 0;
 
-        newLogs.push({
-          id: logId,
-          createdAt: t.finishedAt || t.addedAt || new Date().toISOString(),
-          type: 'QUEUE',
-          targetUrl: t.targetUrl,
-          reactionType: t.reactionType || 'LIKE',
-          engagementMode: t.enableComment ? 'BOTH' : 'LIKE_ONLY',
-          accountName: t.accountName || 'Hàng Đợi VIP LIKE',
-          totalPages,
-          successCount,
-          alreadyLikedCount,
-          failedCount,
-          commentCount: 0,
-          details: Array.isArray(t.pageDetails) ? t.pageDetails : [],
-        });
-      }
+      newLogs.push({
+        id: logId,
+        createdAt: t.finishedAt || t.addedAt || new Date().toISOString(),
+        type: 'QUEUE',
+        targetUrl: t.targetUrl,
+        reactionType: t.reactionType || 'LIKE',
+        engagementMode: t.enableComment ? 'BOTH' : 'LIKE_ONLY',
+        accountName: t.accountName || (t.status === 'FAILED' ? 'Hàng Đợi VIP LIKE (Thất bại)' : 'Hàng Đợi VIP LIKE'),
+        totalPages,
+        targetLikes: typeof t.targetLikes === 'number' ? t.targetLikes : undefined,
+        successCount,
+        alreadyLikedCount,
+        failedCount,
+        commentCount: 0,
+        details: Array.isArray(t.pageDetails) && t.pageDetails.length > 0 ? t.pageDetails : (t.error ? [{
+          pageName: 'Hệ thống hàng đợi',
+          status: 'FAILED',
+          error: t.error,
+          time: new Date().toLocaleTimeString(),
+        }] : []),
+      });
     }
 
     if (newLogs.length > 0) {
-      console.log(`[BuffLogs] 🔄 Đang đồng bộ ${newLogs.length} chiến dịch Hàng đợi đã hoàn thành vào Lịch sử tương tác...`);
       await db.saveBuffLogs(newLogs);
-      console.log(`[BuffLogs] ✅ Đã đồng bộ thành công ${newLogs.length} chiến dịch vào Lịch sử!`);
     }
   } catch (err) {
     console.warn('[BuffLogs] ⚠️ Lỗi đồng bộ completed queue sang buff_logs:', err.message);
@@ -318,12 +370,35 @@ function getNextFencingToken() {
   return ++currentFenceEpoch;
 }
 
-const LANE_LEASE_TIMEOUT_MS = 8 * 60 * 1000; // 8 phút tối đa cho 1 lượt chiếm lane
-const WAITER_TIMEOUT_MS = 60 * 1000; // 60 giây chờ tối đa trong hàng chờ
+const LANE_INACTIVITY_TIMEOUT_MS = 6 * 60 * 1000; // 6 phút không có tiến trình/heartbeat mới coi là deadlock
+const LANE_MAX_TIMEOUT_MS = 120 * 60 * 1000; // 120 phút tối đa cho toàn bộ chiến dịch lớn (200-500 like)
+const WAITER_TIMEOUT_MS = 30 * 60 * 1000; // 30 phút chờ tối đa trong hàng chờ (chờ bài khác xong)
 
 function getBuffParallelVias() {
   const n = parseInt(loadBuffSettings().buffParallelVias, 10);
-  return Number.isFinite(n) && n > 0 ? Math.min(n, 12) : 4;
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 12) : 2;
+}
+
+/**
+ * Giới hạn số luồng chạy song song trên cùng 1 Via và số Via chạy đồng thời theo Proxy thực tế.
+ * Không có Proxy riêng => chạy tuần tự 1 luồng/Via để tránh Meta phát hiện nhiều phiên cùng lúc.
+ */
+function resolveSafeParallelVias(viaGroups, requestedParallel, sysSettings = {}) {
+  const proxyPool = Array.isArray(sysSettings.proxyPool) ? sysSettings.proxyPool : [];
+  const hasPerViaProxy = viaGroups.every((g) => Boolean(g.proxyUrl));
+  if (proxyPool.length === 0 && !hasPerViaProxy) {
+    const capFromSettings = parseInt(sysSettings.buffParallelVias, 10) || 2;
+    return Math.min(viaGroups.length, Math.max(1, Math.min(capFromSettings, 2)));
+  }
+  return Math.min(viaGroups.length, Math.max(1, parseInt(requestedParallel, 10) || 2));
+}
+
+function resolveDefaultDelayForMode(speedMode = 'NORMAL') {
+  if (speedMode === 'TURBO') return 1200;
+  if (speedMode === 'FAST') return 1800;
+  if (speedMode === 'SAFE') return 4500;
+  if (speedMode === 'SMART') return 2500;
+  return 2200; // NORMAL
 }
 
 function getMaxPagesPerPost() {
@@ -348,26 +423,44 @@ function pumpBuffLanes() {
     // Cấp phát Fencing Token độc nhất và tăng dần (Monotonic Lease Token)
     const leaseToken = getNextFencingToken();
     const abortController = new AbortController();
+    const acquiredAt = Date.now();
 
-    // Thiết lập Watchdog Lease Timer chống deadlock & hủy bỏ an toàn (Safe Cancellation)
-    const leaseTimer = setTimeout(() => {
+    const scheduleInactivityTimer = () => {
+      let timerId;
+      timerId = setTimeout(() => {
+        const active = activeLaneLeases.get(waiter.uid);
+        if (active && active.leaseToken === leaseToken && active.leaseTimer === timerId) {
+          console.warn(`[LaneLocker] ⚠️ CẢNH BÁO: Lane "${waiter.uid}" (LeaseToken: ${leaseToken}) bất động quá ${LANE_INACTIVITY_TIMEOUT_MS / 1000}s không có tiến trình. Kích hoạt hủy bỏ an toàn (Safe Abort) trước khi thu hồi.`);
+          try {
+            abortController.abort(new Error(`Lane inactivity timeout expired (${LANE_INACTIVITY_TIMEOUT_MS / 1000}s)`));
+          } catch (_) {}
+          activeLaneLeases.delete(waiter.uid);
+          busyBuffLanes.delete(waiter.uid);
+          pumpBuffLanes();
+        }
+      }, LANE_INACTIVITY_TIMEOUT_MS);
+      return timerId;
+    };
+
+    let leaseTimer = scheduleInactivityTimer();
+
+    const touchHeartbeat = () => {
       const active = activeLaneLeases.get(waiter.uid);
-      if (active && active.leaseToken === leaseToken) {
-        console.warn(`[LaneLocker] ⚠️ CẢNH BÁO: Lane "${waiter.uid}" (LeaseToken: ${leaseToken}) chiếm dụng quá ${LANE_LEASE_TIMEOUT_MS / 1000}s. Kích hoạt hủy bỏ an toàn (Safe Abort) trước khi thu hồi.`);
-        try {
-          abortController.abort(new Error(`Lane lease timeout expired (${LANE_LEASE_TIMEOUT_MS / 1000}s)`));
-        } catch (_) {}
-        activeLaneLeases.delete(waiter.uid);
-        busyBuffLanes.delete(waiter.uid);
-        pumpBuffLanes();
+      if (active && active.leaseToken === leaseToken && !abortController.signal.aborted) {
+        if (Date.now() - acquiredAt < LANE_MAX_TIMEOUT_MS) {
+          clearTimeout(active.leaseTimer);
+          active.leaseTimer = scheduleInactivityTimer();
+          active.lastHeartbeat = Date.now();
+        }
       }
-    }, LANE_LEASE_TIMEOUT_MS);
+    };
 
     activeLaneLeases.set(waiter.uid, {
       leaseToken,
       abortController,
       leaseTimer,
-      acquiredAt: Date.now(),
+      acquiredAt,
+      touchHeartbeat,
     });
     busyBuffLanes.add(waiter.uid);
 
@@ -375,6 +468,8 @@ function pumpBuffLanes() {
       leaseToken,
       abortController,
       signal: abortController.signal,
+      touch: touchHeartbeat,
+      heartbeat: touchHeartbeat,
       isStale: () => {
         const cur = activeLaneLeases.get(waiter.uid);
         return !cur || cur.leaseToken !== leaseToken || abortController.signal.aborted;
@@ -400,10 +495,10 @@ async function withBuffLane(uid, fn) {
     pumpBuffLanes();
   });
 
-  const { leaseToken, signal, isStale } = leaseContext;
+  const { leaseToken } = leaseContext;
 
   try {
-    return await fn({ leaseToken, signal, isStale });
+    return await fn(leaseContext);
   } finally {
     const active = activeLaneLeases.get(key);
     // CHỈ giải phóng khoá nếu Fencing Token của tác vụ này trùng khớp với Token đang sở hữu làn
@@ -493,10 +588,17 @@ async function resolvePagesWithOwningVias(selectedPages = [], fallbackCookie = '
   const pageViaMap = new Map();
   try {
     const [rows] = await db.getPool().execute(
-      'SELECT page_id, personal_profile_id FROM facebook_page_accesses WHERE active = 1'
+      `SELECT page_id, personal_profile_id
+       FROM facebook_page_accesses
+       WHERE active = 1
+       ORDER BY CASE WHEN verification_status = 'VERIFIED' THEN 0 ELSE 1 END, id ASC`
     );
     for (const r of rows) {
-      pageViaMap.set(String(r.page_id), String(r.personal_profile_id));
+      const pid = String(r.page_id);
+      const viaUid = String(r.personal_profile_id);
+      if (!pageViaMap.has(pid) && viaByUid.has(viaUid)) {
+        pageViaMap.set(pid, viaUid);
+      }
     }
   } catch (_) {}
 
@@ -516,9 +618,17 @@ async function resolvePagesWithOwningVias(selectedPages = [], fallbackCookie = '
       }
     }
 
+    const resolvedCookie = viaCookie || fallbackCookie;
+    if (!viaName && resolvedCookie) {
+      const resolvedUid = fbBuffTool.getUserIdFromCookie(resolvedCookie);
+      if (resolvedUid && viaByUid.has(resolvedUid)) {
+        viaName = viaByUid.get(resolvedUid).viaName;
+      }
+    }
+
     return {
       ...p,
-      viaCookie: viaCookie || fallbackCookie,
+      viaCookie: resolvedCookie,
       viaName: viaName || 'Via',
       proxyUrl,
     };
@@ -532,10 +642,9 @@ async function resolvePagesWithOwningVias(selectedPages = [], fallbackCookie = '
 async function getAutoReplenishPages(targetUrl, excludePageIds = new Set(), count = 50) {
   if (count <= 0) return [];
   try {
-    const normUrl = fbBuffTool.normalizePostUrl ? fbBuffTool.normalizePostUrl(targetUrl) : targetUrl;
-    const interactedSet = typeof fbBuffTool.getPostInteractedPageIds === 'function'
-      ? fbBuffTool.getPostInteractedPageIds(normUrl)
-      : new Set();
+    const normUrl = normalizeFbPostUrl(targetUrl);
+    await resolvePostUrlCanonical(targetUrl).catch(() => normUrl);
+    const interactedSet = getPostInteractedPageIds(normUrl);
 
     const liveVias = await db.getLiveVias();
     if (!liveVias || liveVias.length === 0) return [];
@@ -548,7 +657,8 @@ async function getAutoReplenishPages(targetUrl, excludePageIds = new Set(), coun
     const [rows] = await db.getPool().execute(
       `SELECT page_id, page_name, personal_profile_id 
        FROM facebook_page_accesses 
-       WHERE active = 1 AND personal_profile_id IN (${placeholders})`,
+       WHERE active = 1 AND personal_profile_id IN (${placeholders})
+       ORDER BY CASE WHEN verification_status = 'VERIFIED' THEN 0 ELSE 1 END, id ASC`,
       liveUids
     );
 
@@ -971,6 +1081,10 @@ function authenticateJwt(req, res, next) {
     '/api/license/activate',
     '/api/license/status',
     '/api/buff-cached-pages',
+    '/api/buff-live/clear',
+    '/api/buff-live/status',
+    '/api/buff-live/active',
+    '/api/buff-live/stop',
   ];
 
   const currentPath = req.path.toLowerCase();
@@ -1105,18 +1219,73 @@ const MYSQL_SAVE_WARNING =
   'Chưa lưu được vào MySQL, dữ liệu mới chỉ được lưu tạm trên máy này. Hãy kiểm tra kết nối MySQL rồi thử lại.';
 
 /**
- * Nhận Cookie dạng chuỗi thường ("c_user=...; xs=...") hoặc "UID|PASS|2FA|COOKIE".
+ * Nhận Cookie dạng chuỗi thường ("c_user=...; xs=..."), JSON (Cookie-Editor / J2Team), hoặc "UID|PASS|2FA|COOKIE".
  * Trả về cookie đã tách sạch, UID, và valid=true khi có đủ c_user + xs.
  */
 function normalizeFbCookie(input) {
   let cookie = String(input || '').trim();
+  cookie = cookie.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // 1. Phân tích nếu là định dạng JSON (Cookie-Editor, J2Team, DevTools export...)
+  if ((cookie.startsWith('{') && cookie.endsWith('}')) || (cookie.startsWith('[') && cookie.endsWith(']'))) {
+    try {
+      const parsedJson = JSON.parse(cookie);
+      let list = [];
+      if (Array.isArray(parsedJson)) list = parsedJson;
+      else if (parsedJson && Array.isArray(parsedJson.cookies)) list = parsedJson.cookies;
+      else if (parsedJson && typeof parsedJson === 'object') {
+        list = Object.entries(parsedJson).map(([name, value]) => ({ name, value: String(value) }));
+      }
+      if (list.length > 0) {
+        let cUser = '';
+        let xs = '';
+        const pairs = [];
+        for (const item of list) {
+          if (!item || !item.name) continue;
+          const name = String(item.name).trim();
+          const val = item.value != null ? String(item.value).trim() : '';
+          const lowerName = name.toLowerCase();
+          if (lowerName === 'c_user') cUser = val;
+          if (lowerName === 'xs') xs = val;
+          pairs.push(`${name}=${val}`);
+        }
+        if (!cUser) {
+          const pasItem = list.find((it) => it.name && it.name.toLowerCase() === 'pas');
+          if (pasItem && pasItem.value) {
+            const m = String(pasItem.value).match(/([0-9]{6,})/);
+            if (m) cUser = m[1];
+          }
+        }
+        const fullCookieStr = pairs.join('; ') + ';';
+        return {
+          cookie: fullCookieStr,
+          uid: cUser,
+          valid: Boolean(cUser && xs),
+          isJson: true,
+          cookieList: list,
+        };
+      }
+    } catch (_) {}
+  }
+
+  // 2. Phân tích nếu là dạng pipe | (UID|PASS|2FA|COOKIE)
   if (cookie.includes('|')) {
     const parts = cookie.split('|').map((p) => p.trim());
-    const cookiePart = parts.find((p) => /c_user=/.test(p)) || parts.find((p) => /(?:^|;\s*)xs=/.test(p)) || '';
+    const cookiePart =
+      parts.find((p) => p.startsWith('{') || p.startsWith('[') || /c_user=/.test(p) || /(?:^|;\s*)xs=/.test(p)) || '';
     const uidPart = /^[0-9]{6,}$/.test(parts[0]) ? parts[0] : '';
-    cookie = cookiePart;
-    if (cookie && uidPart && !/c_user=/.test(cookie)) cookie = `c_user=${uidPart}; ${cookie}`;
+    if (cookiePart) {
+      const parsedPart = normalizeFbCookie(cookiePart);
+      if (parsedPart.valid) {
+        if (!parsedPart.uid && uidPart) {
+          parsedPart.uid = uidPart;
+          parsedPart.cookie = `c_user=${uidPart}; ${parsedPart.cookie}`;
+        }
+        return parsedPart;
+      }
+    }
   }
+
   const uid = cookie.match(/(?:^|;\s*)c_user=([^;\s]+)/)?.[1] || '';
   const hasXs = /(?:^|;\s*)xs=[^;\s]+/.test(cookie);
   return { cookie, uid, valid: Boolean(uid && hasXs) };
@@ -1232,7 +1401,7 @@ app.put('/api/connections/:id', requireAdmin, async (req, res) => {
 // Cập nhật Cookie mới cho Via (theo UID) — chỉ ADMIN
 app.post('/api/vias/update-cookie', requireAdmin, async (req, res) => {
   try {
-    const { uid, cookieString, proxyUrl } = req.body;
+    const { uid, cookieString, proxyUrl, force = false } = req.body;
     if (!cookieString || !String(cookieString).trim()) {
       return res.status(400).json({ success: false, error: 'Vui lòng cung cấp chuỗi Cookie Facebook mới!' });
     }
@@ -1242,10 +1411,12 @@ app.post('/api/vias/update-cookie', requireAdmin, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Cookie không hợp lệ: cần có đủ c_user và xs.' });
     }
     const targetUid = uid || norm.uid;
-    if (uid && /^[0-9]+$/.test(String(uid)) && norm.uid && String(uid) !== norm.uid) {
+    if (uid && /^[0-9]+$/.test(String(uid)) && norm.uid && String(uid) !== norm.uid && !force) {
       return res.status(400).json({
         success: false,
         error: `Cookie này thuộc tài khoản ${norm.uid}, không khớp với Via ${uid}. Hãy kiểm tra lại.`,
+        uidMismatch: true,
+        cookieUid: norm.uid,
       });
     }
 
@@ -1254,11 +1425,14 @@ app.post('/api/vias/update-cookie', requireAdmin, async (req, res) => {
 
     // 2. Gỡ bỏ khỏi danh sách đen deadBuffVias để hàng đợi tự động sử dụng lại
     deadBuffVias.delete(targetUid);
+    if (norm.uid) deadBuffVias.delete(norm.uid);
 
     console.log(`[ViaManager] 🔄 Đã cập nhật Cookie mới thành công cho Via UID: ${targetUid}`);
     return res.json({
       success: true,
       message: `Đã cập nhật Cookie mới cho Via UID ${targetUid}`,
+      detectedUid: norm.uid,
+      cookieString: norm.cookie,
       ...(result?.dbSaved === false ? { warning: MYSQL_SAVE_WARNING } : {}),
     });
   } catch (err) {
@@ -1280,7 +1454,7 @@ app.delete('/api/connections/:id', requireAdmin, async (req, res) => {
 // Lịch sử tương tác (mỗi lượt chạy một bản ghi) lưu trên MySQL Workbench
 app.get('/api/buff-logs', async (req, res) => {
   try {
-    await syncCompletedQueueTasksToBuffLogs().catch(() => {});
+    await syncCompletedQueueTasksToBuffLogs(true).catch(() => {});
     const summaryOnly = req.query.summary === 'true' || req.query.summary === '1';
     const limit = parseInt(req.query.limit, 10) || 50;
     const cursorCreatedAt = req.query.cursorCreatedAt || null;
@@ -1417,12 +1591,30 @@ app.get('/api/buff-cached-pages', async (req, res) => {
             id,
             name: p.name,
             url: p.url,
+            personalProfileId: p.personalProfileId || null,
+            profileName: p.profileName || '',
             hasAvatar: Boolean(av && av.hasAvatar && !av.isSilhouette),
             isSilhouette: Boolean(!av || av.isSilhouette || !av.hasAvatar),
             avatarUrl: av?.avatarUrl || '',
           };
         });
-        return res.json({ success: true, count: enrichedList.length, pages: enrichedList });
+
+        const cacheGrouped = {};
+        for (const p of enrichedList) {
+          const vUid = p.personalProfileId || 'default';
+          if (!cacheGrouped[vUid]) {
+            cacheGrouped[vUid] = {
+              uid: vUid,
+              viaName: p.profileName || `Via_${vUid}`,
+              count: 0,
+              pages: [],
+            };
+          }
+          cacheGrouped[vUid].pages.push(p);
+          cacheGrouped[vUid].count++;
+        }
+
+        return res.json({ success: true, count: enrichedList.length, cache: cacheGrouped, pages: enrichedList });
       }
     } catch (e) {}
 
@@ -1488,15 +1680,15 @@ app.post('/api/buff-like', async (req, res) => {
     targetUrl,
     reactionType = 'LIKE',
     selectedPages = [],
-    delayMs = 2200,
-    speedMode = 'FAST',
+    delayMs = 2500,
+    speedMode = 'NORMAL',
     enableLike = true,
     enableComment = false,
     enableShare = false,
     enableHumanBehavior = true,
     fastSwitch = true,
-    cooldownEvery = 30,
-    cooldownDurationMs = 12000,
+    cooldownEvery = 25,
+    cooldownDurationMs = 20000,
     comments = [],
     proxyUrl: explicitProxy = '',
     concurrency = 1,
@@ -1553,7 +1745,8 @@ app.post('/api/buff-like', async (req, res) => {
 
     const allDetails = [];
     const viaGroups = Array.from(viaGroupsMap.values());
-    const parallelVias = Math.min(viaGroups.length, Math.max(1, parseInt(concurrency, 10) || 2));
+    const parallelVias = resolveSafeParallelVias(viaGroups, concurrency, sysSettings);
+    const hasProxyPool = proxyPool.length >= 2;
 
     await runWithConcurrency(viaGroups, parallelVias, async (group) => {
       const grpProxy = await resolveViaProxy(group.cookieString, group.proxyUrl || explicitProxy);
@@ -1573,13 +1766,25 @@ app.post('/api/buff-like', async (req, res) => {
           comments,
           proxyUrl: grpProxy,
           proxyPool,
-          concurrency: Math.max(1, Math.min(3, Math.ceil((parseInt(concurrency, 10) || 2) / parallelVias) || 1)),
+          concurrency: hasProxyPool && !enableComment && !dripFeedMode && group.pages.length >= 15
+            ? Math.max(1, Math.min(3, parseInt(concurrency, 10) || 1))
+            : 1,
           dripFeedMode: Boolean(dripFeedMode),
           dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
+          fence,
+          touch: fence?.touch,
           shouldStop: () => fence?.isStale() || isEmergencyStopped(),
         })
       );
-      if (subResult?.details) allDetails.push(...subResult.details);
+      if (subResult?.details) {
+        allDetails.push(
+          ...subResult.details.map((d) => ({
+            ...d,
+            viaName: d.viaName || group.viaName,
+            viaUid: d.viaUid || group.laneUid,
+          }))
+        );
+      }
     });
     const result = { details: allDetails, total: selectedPages.length };
 
@@ -1621,6 +1826,7 @@ app.post('/api/buff-like', async (req, res) => {
         targetUrl,
         reactionType,
         totalPages: totalCount,
+        targetLikes: (kpiTarget && kpiTarget > 0) ? kpiTarget : totalCount,
         successCount,
         alreadyLikedCount: result.details.filter((d) => d.status === 'ALREADY_LIKED').length,
         failedCount,
@@ -1790,18 +1996,18 @@ app.post('/api/buff-like-stream', async (req, res) => {
     targetUrl,
     reactionType = 'LIKE',
     selectedPages = [],
-    delayMs = 2200,
-    speedMode = 'FAST',
+    delayMs = 2500,
+    speedMode = 'NORMAL',
     enableLike = true,
     enableComment = false,
     enableShare = false,
     enableHumanBehavior = true,
     fastSwitch = true,
-    cooldownEvery = 30,
-    cooldownDurationMs = 12000,
+    cooldownEvery = 25,
+    cooldownDurationMs = 20000,
     comments = [],
     proxyUrl: explicitProxy = '',
-    concurrency = 2,
+    concurrency = 1,
     dripFeedMode = false,
     dripDurationMinutes = 30,
   } = req.body;
@@ -1895,13 +2101,47 @@ app.post('/api/buff-like-stream', async (req, res) => {
       total: Math.max(targetKpi, selectedPages.length),
       reactionType,
       speedMode,
-      concurrency: Math.max(1, Math.min(5, parseInt(concurrency, 10) || 2)),
+      concurrency: Math.max(1, Math.min(5, parseInt(concurrency, 10) || 1)),
       accountName: 'Via ' + (laneUid || 'FB'),
     }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo stream bắt đầu:', err.message));
 
+    const normStreamUrl = normalizeFbPostUrl(targetUrl);
+    await resolvePostUrlCanonical(targetUrl).catch(() => normStreamUrl);
+    const knownInteractedIds = getPostInteractedPageIds(normStreamUrl);
+
     const resolvedPages = await resolvePagesWithOwningVias(selectedPages, cookieString);
-    let allPages = [...resolvedPages];
-    const excludeIds = new Set(allPages.map((p) => String(p.id)));
+    const allPages = [];
+    const excludeIds = new Set();
+    for (const p of resolvedPages) {
+      const pid = String(p.id || '');
+      if (pid) excludeIds.add(pid);
+      if (pid && knownInteractedIds.has(pid)) {
+        const curSess = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
+        if (curSess) {
+          curSess.done = (curSess.done || 0) + 1;
+          curSess.alreadyLiked = (curSess.alreadyLiked || 0) + 1;
+          curSess.details.push({
+            pageId: p.id,
+            pageName: p.name,
+            viaName: p.viaName,
+            status: 'ALREADY_LIKED',
+            likeStatus: 'ALREADY_LIKED',
+            message: 'Đã like trước đó (bỏ qua tự động từ dữ liệu đã lưu)',
+          });
+        }
+        sendEvent('progress', {
+          type: 'PAGE_FINISH',
+          pageId: p.id,
+          pageName: p.name,
+          viaName: p.viaName,
+          status: 'ALREADY_LIKED',
+          likeStatus: 'ALREADY_LIKED',
+          message: 'Đã like trước đó (bỏ qua tự động từ dữ liệu đã lưu)',
+        });
+        continue;
+      }
+      allPages.push(p);
+    }
 
     // Smart Auto-Replenish: Nếu số Page hiện tại ít hơn mục tiêu KPI, tự động bù thêm từ kho Via LIVE
     if (autoReplenish !== false && targetKpi > allPages.length) {
@@ -1935,8 +2175,9 @@ app.post('/api/buff-like-stream', async (req, res) => {
     }
 
     const viaGroups = Array.from(viaGroupsMap.values());
-    const parallelVias = Math.min(viaGroups.length, Math.max(1, parseInt(concurrency, 10) || 2));
-    console.log(`[BuffStream] 🚀 Kích hoạt Multi-Via Parallel Engine: Chạy đồng thời ${parallelVias} Via song song trên tổng ${viaGroups.length} nhóm Via (${allPages.length} Pages)`);
+    const parallelVias = resolveSafeParallelVias(viaGroups, concurrency, sysSettings);
+    const hasProxyPool = proxyPool.length >= 2;
+    console.log(`[BuffStream] 🚀 Điều phối an toàn: Chạy đồng thời ${parallelVias} Via (1 luồng/Via) trên tổng ${viaGroups.length} nhóm Via (${allPages.length} Pages)`);
 
     const allStreamDetails = [];
     await runWithConcurrency(viaGroups, parallelVias, async (group, gIdx) => {
@@ -1949,14 +2190,19 @@ app.post('/api/buff-like-stream', async (req, res) => {
         return;
       }
       if (Boolean(curSession?.stopRequested)) return;
-      if (targetKpi > 0 && (curSession?.success || 0) >= targetKpi) return;
+      const currentDone = curSession?.success || 0;
+      if (targetKpi > 0 && currentDone >= targetKpi) {
+        if (curSession) curSession.stopRequested = true;
+        return;
+      }
 
+      const remainingForGroup = targetKpi > 0 ? Math.max(1, targetKpi - currentDone) : 0;
       const grpProxy = await resolveViaProxy(group.cookieString, group.proxyUrl || explicitProxy);
       const subResult = await withBuffLane(group.laneUid, async (fence) => {
         return await fbBuffTool.buffLikesWithPages(group.cookieString, targetUrl, {
           reactionType,
           selectedPages: group.pages,
-          kpiTarget: targetKpi,
+          kpiTarget: remainingForGroup,
           delayMs,
           speedMode,
           enableLike,
@@ -1969,20 +2215,26 @@ app.post('/api/buff-like-stream', async (req, res) => {
           comments,
           proxyUrl: grpProxy,
           proxyPool,
-          concurrency: Math.max(1, Math.min(3, Math.ceil((parseInt(concurrency, 10) || 2) / parallelVias) || 1)),
+          concurrency: hasProxyPool && !enableComment && !dripFeedMode && group.pages.length >= 15
+            ? Math.max(1, Math.min(3, parseInt(concurrency, 10) || 1))
+            : 1,
           dripFeedMode: Boolean(dripFeedMode),
           dripDurationMinutes: parseInt(dripDurationMinutes, 10) || 30,
+          fence,
+          touch: fence?.touch,
           // CHỈ DỪNG KHI NGƯỜI DÙNG BẤM NÚT DỪNG, DỪNG KHẨN CẤP, HẾT HẠN LEASE HOẶC ĐẠT ĐỦ KPI
           shouldStop: () => {
             const liveSess = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
+            const liveDone = liveSess?.success || 0;
             return (
               Boolean(fence?.isStale()) ||
               Boolean(liveSess?.stopRequested) ||
               isEmergencyStopped() ||
-              (targetKpi > 0 && (liveSess?.success || 0) >= targetKpi)
+              (targetKpi > 0 && liveDone >= targetKpi)
             );
           },
           onProgress: (evt) => {
+            fence?.touch?.();
             const curSession = activeLiveBuffSessions.get(sessionKey) || activeLiveBuffSession;
             if (curSession) {
               curSession.updatedAt = new Date().toISOString();
@@ -2025,7 +2277,8 @@ app.post('/api/buff-like-stream', async (req, res) => {
                   curSession.details.push(detailItem);
                 }
 
-                if (targetKpi > 0 && curSession.success >= targetKpi) {
+                const curTotalDone = curSession.success || 0;
+                if (targetKpi > 0 && curTotalDone >= targetKpi) {
                   curSession.stopRequested = true;
                   sendEvent('progress', {
                     type: 'KPI_REACHED',
@@ -2058,11 +2311,23 @@ app.post('/api/buff-like-stream', async (req, res) => {
                 }
               }
             }
-            sendEvent('progress', evt);
+            sendEvent('progress', {
+              ...evt,
+              viaName: evt.viaName || group.viaName,
+              viaUid: evt.viaUid || group.laneUid,
+            });
           },
         });
       });
-      if (subResult?.details) allStreamDetails.push(...subResult.details);
+      if (subResult?.details) {
+        allStreamDetails.push(
+          ...subResult.details.map((d) => ({
+            ...d,
+            viaName: d.viaName || group.viaName,
+            viaUid: d.viaUid || group.laneUid,
+          }))
+        );
+      }
     });
     const result = { details: allStreamDetails, total: selectedPages.length };
 
@@ -2121,6 +2386,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
         targetUrl,
         reactionType,
         totalPages: totalCount,
+        targetLikes: (kpiTarget && kpiTarget > 0) ? kpiTarget : totalCount,
         successCount,
         alreadyLikedCount: result.details.filter((d) => d.status === 'ALREADY_LIKED').length,
         failedCount,
@@ -2377,9 +2643,29 @@ app.get('/api/buff-queue/list', (req, res) => {
   try {
     const queueData = loadBuffQueue();
     const history = loadBuffHistory();
+    const getTaskTimestamp = (t) => {
+      if (t.addedAt) {
+        const ms = new Date(t.addedAt).getTime();
+        if (!isNaN(ms)) return ms;
+      }
+      if (t.startedAt) {
+        const ms = new Date(t.startedAt).getTime();
+        if (!isNaN(ms)) return ms;
+      }
+      if (t.finishedAt) {
+        const ms = new Date(t.finishedAt).getTime();
+        if (!isNaN(ms)) return ms;
+      }
+      if (t.id && t.id.startsWith('task_')) {
+        const ts = parseInt(t.id.split('_')[1], 10);
+        if (!isNaN(ts)) return ts;
+      }
+      return 0;
+    };
+    const sortedQueue = [...(queueData.items || [])].sort((a, b) => getTaskTimestamp(b) - getTaskTimestamp(a));
     return res.json({
       success: true,
-      queue: queueData.items || [],
+      queue: sortedQueue,
       historyCount: Object.keys(history).length,
     });
   } catch (err) {
@@ -2390,11 +2676,48 @@ app.get('/api/buff-queue/list', (req, res) => {
 app.delete('/api/buff-queue/remove/:id', (req, res) => {
   try {
     const { id } = req.params;
+    cancelledTaskIds.add(id);
     const queueData = loadBuffQueue();
     const prevLen = queueData.items.length;
     queueData.items = queueData.items.filter((it) => it.id !== id);
     saveBuffQueue(queueData);
     return res.json({ success: true, deleted: queueData.items.length < prevLen });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/buff-queue/stop/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const queueData = loadBuffQueue();
+    const task = queueData.items.find((it) => it.id === id);
+    if (!task) return res.status(404).json({ success: false, error: 'Không tìm thấy tác vụ trong hàng đợi' });
+
+    if (task.status !== 'RUNNING' && task.status !== 'QUEUED') {
+      return res.status(400).json({ success: false, error: `Tác vụ đang ở trạng thái ${task.status}, không cần dừng.` });
+    }
+
+    task.stopReason = 'USER_STOP';
+    if (task.status === 'RUNNING') {
+      cancelledTaskIds.add(id);
+      task.stopRequested = true;
+      task.error = 'Đang dừng tác vụ theo yêu cầu người dùng...';
+      saveBuffQueue(queueData);
+      return res.json({
+        success: true,
+        message: 'Đã gửi lệnh dừng riêng cho bài này. Worker sẽ dừng sau lượt Page hiện tại.',
+        task,
+      });
+    }
+
+    task.status = 'STOPPED';
+    task.executionStage = 'STOPPED';
+    task.finishedAt = new Date().toISOString();
+    task.stopRequested = false;
+    task.error = 'Đã dừng theo yêu cầu người dùng.';
+    saveBuffQueue(queueData);
+    return res.json({ success: true, message: 'Đã dừng tác vụ đang chờ trong hàng đợi.', task });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -2407,6 +2730,9 @@ app.post('/api/buff-queue/run-now/:id', (req, res) => {
     const task = queueData.items.find((it) => it.id === id);
     if (!task) return res.status(404).json({ success: false, error: 'Không tìm thấy task' });
 
+    cancelledTaskIds.delete(id);
+    delete task.stopReason;
+    delete task.stopRequested;
     task.runAfter = new Date().toISOString();
     task.status = 'QUEUED';
     saveBuffQueue(queueData);
@@ -2426,9 +2752,13 @@ app.post('/api/buff-queue/retry/:id', (req, res) => {
     const task = queueData.items.find((it) => it.id === id);
     if (!task) return res.status(404).json({ success: false, error: 'Không tìm thấy task' });
 
+    cancelledTaskIds.delete(id);
+    delete task.stopReason;
+    delete task.stopRequested;
     task.runAfter = new Date().toISOString();
     task.status = 'QUEUED';
     task.error = null;
+    task.attempts = 0;
     saveBuffQueue(queueData);
 
     setImmediate(runQueueWorker);
@@ -2457,13 +2787,15 @@ app.post('/api/buff-queue/review-resolve/:id', (req, res) => {
       const originalTarget = parseTargetLikes(task.targetLikes, 30);
       const remainingTarget = originalTarget === 'ALL' ? 'ALL' : Math.max(1, originalTarget - currentSuccess);
 
-      task.targetLikes = remainingTarget;
       task.status = 'QUEUED';
       task.executionStage = 'INITIALIZED';
       task.error = null;
       task.runAfter = new Date().toISOString();
       task.reviewResolvedAt = new Date().toISOString();
-      task.reviewResolution = `Tiếp tục chạy nốt ${remainingTarget} like còn thiếu (đã trừ ${currentSuccess} like đã like trước đó).`;
+      task.reviewResolution =
+        originalTarget === 'ALL'
+          ? `Tiếp tục chạy nốt toàn bộ page còn lại (đã hoàn thành ${currentSuccess} like trước đó).`
+          : `Tiếp tục chạy nốt ${remainingTarget} like còn thiếu để đủ KPI ${originalTarget} (đã hoàn thành ${currentSuccess} like trước đó).`;
       saveBuffQueue(queueData);
       setImmediate(runQueueWorker);
       return res.json({ success: true, message: `Đã đưa task trở lại hàng đợi để chạy tiếp ${remainingTarget} like còn thiếu`, task });
@@ -2508,6 +2840,8 @@ async function executeQueueTask(task) {
   currentTask.status = 'RUNNING';
   currentTask.executionStage = 'PREPARING';
   currentTask.startedAt = new Date().toISOString();
+  currentTask.error = null;
+  currentTask.finishedAt = null;
   saveBuffQueue(queueData);
 
   const startTime = Date.now();
@@ -2567,7 +2901,7 @@ async function executeQueueTask(task) {
     for (const via of targetVias) {
       if (isEmergencyStopped()) break;
       const uid = via.uid || fbBuffTool.getUserIdFromCookie(via.cookieString);
-      let pages = fbBuffTool.getCachedPages(uid);
+      let pages = await fbBuffTool.mergeCachedAndDbPages(uid, via.viaName);
       if (!pages || pages.length === 0) {
         try {
           pages = await fbBuffTool.getManagedPages(via.cookieString, {
@@ -2594,6 +2928,7 @@ async function executeQueueTask(task) {
     }
 
     const normUrl = normalizeFbPostUrl(task.targetUrl);
+    await resolvePostUrlCanonical(task.targetUrl).catch(() => normUrl);
     allAvailablePages = filterAvailablePagesForPost(normUrl, allAvailablePages);
 
     if (allAvailablePages.length === 0) {
@@ -2609,11 +2944,16 @@ async function executeQueueTask(task) {
       return;
     }
 
+    let totalSuccess = Number(currentTask?.progress?.success ?? currentTask?.progress_likes ?? currentTask?.progressLikes ?? task?.progress_likes ?? 0);
+    let totalDone = Number(currentTask?.progress?.done ?? totalSuccess);
+    let totalFailed = Number(currentTask?.progress?.failed ?? 0);
+
     const maxPages = getMaxPagesPerPost();
     const desiredLikes =
       task.targetLikes === 'ALL'
-        ? Math.min(allAvailablePages.length, maxPages)
-        : Math.min(task.targetLikes || 30, allAvailablePages.length);
+        ? Math.min(totalSuccess + allAvailablePages.length, maxPages)
+        : Math.min(task.targetLikes || 30, totalSuccess + allAvailablePages.length);
+    const remainingDesired = Math.max(1, desiredLikes - totalSuccess);
 
     // Phân bổ Page cân bằng giữa các Via theo cơ chế Round-Robin (tránh dồn việc lên 1 Via duy nhất)
     const pagesByVia = new Map();
@@ -2637,8 +2977,11 @@ async function executeQueueTask(task) {
       round++;
     }
 
-    // Chuẩn bị danh sách Page: Nếu có mục tiêu KPI cụ thể, lấy thêm 30% Page dự phòng để tự động bù nếu có Page lỗi
-    const reserveCount = task.targetLikes === 'ALL' ? desiredLikes : Math.min(balancedPages.length, Math.ceil(desiredLikes * 1.3));
+    // Chuẩn bị danh sách Page: Nếu có mục tiêu KPI cụ thể, lấy thêm dự phòng (+50% hoặc tối thiểu +40 Page) để tự động bù nếu có Page lỗi
+    const reserveCount =
+      task.targetLikes === 'ALL'
+        ? remainingDesired
+        : Math.min(balancedPages.length, Math.max(Math.ceil(remainingDesired * 1.5), remainingDesired + 40));
     const pagesToBuff = balancedPages.slice(0, reserveCount);
 
     const viaGroupsMap = new Map();
@@ -2660,23 +3003,19 @@ async function executeQueueTask(task) {
       });
     }
 
-    let totalSuccess = Number(currentTask?.progress?.success ?? currentTask?.progress_likes ?? currentTask?.progressLikes ?? task?.progress_likes ?? 0);
-    let totalDone = Number(currentTask?.progress?.done ?? totalSuccess);
-    let totalFailed = Number(currentTask?.progress?.failed ?? 0);
+    const viaGroups = Array.from(viaGroupsMap.values());
+    const sysSettings = loadBuffSettings();
+    const proxyPool = Array.isArray(sysSettings.proxyPool) ? sysSettings.proxyPool : [];
+    const maxViaParallel = resolveSafeParallelVias(viaGroups, getMaxParallelBuff(), sysSettings);
 
     notifyBuffStarted({
       targetUrl: task.targetUrl,
       total: pagesToBuff.length,
       reactionType: task.reactionType || 'RANDOM_POSITIVE',
-      speedMode: task.speedMode || 'SMART',
-      concurrency: 2,
+      speedMode: task.speedMode || sysSettings.defaultSpeedMode || 'NORMAL',
+      concurrency: maxViaParallel,
       accountName: 'Queue Worker Auto',
     }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi thông báo queue worker bắt đầu:', err.message));
-
-    const viaGroups = Array.from(viaGroupsMap.values());
-    const sysSettings = loadBuffSettings();
-    const proxyPool = Array.isArray(sysSettings.proxyPool) ? sysSettings.proxyPool : [];
-    const maxViaParallel = Math.min(viaGroups.length, getMaxParallelBuff());
 
     const qdDispatch = loadBuffQueue();
     const tDispatch = qdDispatch.items.find((it) => it.id === task.id);
@@ -2686,72 +3025,94 @@ async function executeQueueTask(task) {
       saveBuffQueue(qdDispatch);
     }
 
-    // Chạy song song các Via độc lập (Multi-Via Concurrency) để tăng tốc độ x2 - x3 lần
+    const isTaskCancelled = () => cancelledTaskIds.has(task.id) || (isPostHunterPaused() && isPostHunterTask(task));
+    const laneErrors = [];
+
+    // Chạy tuần tự 1 luồng/Via (tránh cảnh báo "sử dụng quá nhanh") và cho phép chạy song song tối đa 2 Via khác nhau
     await runWithConcurrency(viaGroups, maxViaParallel, async (group) => {
-      if (isEmergencyStopped()) return;
+      if (isEmergencyStopped() || isTaskCancelled()) return;
       if (task.targetLikes !== 'ALL' && totalSuccess >= desiredLikes) return;
 
       const laneUid = fbBuffTool.getUserIdFromCookie(group.cookieString);
-      await withBuffLane(laneUid, (fence) =>
-        fbBuffTool.buffLikesWithPages(group.cookieString, task.targetUrl, {
-          reactionType: task.reactionType || 'RANDOM_POSITIVE',
-          speedMode: task.speedMode || 'FAST',
-          selectedPages: group.pages,
-          kpiTarget: desiredLikes,
-          delayMs: task.speedMode === 'TURBO' ? 1200 : task.speedMode === 'SAFE' ? 5000 : 1800,
-          enableLike: task.enableLike !== false,
-          enableComment: Boolean(task.enableComment),
-          enableShare: Boolean(task.enableShare),
-          enableHumanBehavior: true,
-          fastSwitch: true,
-          cooldownEvery: sysSettings.cooldownEveryPages || 25,
-          cooldownDurationMs: (sysSettings.cooldownDurationSec || 12) * 1000,
-          comments: task.comments || [],
-          proxyUrl: group.proxyUrl,
-          proxyPool,
-          shouldStop: () => fence?.isStale() || isEmergencyStopped() || (task.targetLikes !== 'ALL' && totalSuccess >= desiredLikes),
-          onProgress: (ev) => {
-            if (ev.actionBlocked) {
-              console.warn(`[QueueWorker] 🛑 Phát hiện Via bị Facebook hạn chế tốc độ (Action Blocked) trên task ${task.id}. Tự động ngắt task bảo vệ Via!`);
-              notifyActionBlocked({
-                viaName: group.viaName || 'Via',
-                viaUid: laneUid,
-                postUrl: task.targetUrl,
-                reason: 'Facebook tạm thời chặn do thao tác nhanh (Action Blocked)',
-              }).catch(() => {});
-            }
-            if (ev.type === 'PAGE_FINISH') {
-              totalDone++;
-              if (ev.status === 'SUCCESS' || ev.status === 'ALREADY_LIKED') totalSuccess++;
-              else if (ev.status === 'ERROR' || ev.status === 'FAILED') totalFailed++;
-
-              const qd = loadBuffQueue();
-              const t = qd.items.find((it) => it.id === task.id);
-              if (t) {
-                t.executionStage = 'INTERACTING';
-                t.progress = { done: totalDone, total: desiredLikes, success: totalSuccess };
-                t.pageDetails = t.pageDetails || [];
-                t.pageDetails.push({
-                  pageId: ev.pageId,
-                  pageName: ev.pageName,
-                  status: ev.status,
-                  likeStatus: ev.likeStatus,
-                  commentStatus: ev.commentStatus,
-                  shareStatus: ev.shareStatus,
-                  reaction: ev.reaction || task.reactionType,
-                  comment: ev.comment || '',
-                  error: ev.error || null,
-                  time: new Date().toLocaleTimeString(),
-                });
-                saveBuffQueue(qd);
+      const effectiveSpeedMode = task.speedMode || sysSettings.defaultSpeedMode || 'NORMAL';
+      const workerConcurrency =
+        proxyPool.length >= 2 && !task.enableComment && !task.dripFeedMode && group.pages.length >= 15
+          ? (effectiveSpeedMode === 'TURBO' ? 3 : 2)
+          : 1;
+      try {
+        await withBuffLane(laneUid, (fence) =>
+          fbBuffTool.buffLikesWithPages(group.cookieString, task.targetUrl, {
+            reactionType: task.reactionType || 'RANDOM_POSITIVE',
+            speedMode: effectiveSpeedMode,
+            concurrency: workerConcurrency,
+            selectedPages: group.pages,
+            kpiTarget: remainingDesired,
+            delayMs: resolveDefaultDelayForMode(effectiveSpeedMode),
+            enableLike: task.enableLike !== false,
+            enableComment: Boolean(task.enableComment),
+            enableShare: Boolean(task.enableShare),
+            dripFeedMode: Boolean(task.dripFeedMode),
+            dripDurationMinutes: Number(task.dripDurationMinutes) || 20,
+            enableHumanBehavior: true,
+            fastSwitch: true,
+            cooldownEvery: sysSettings.cooldownEveryPages || 25,
+            cooldownDurationMs: (sysSettings.cooldownDurationSec || 20) * 1000,
+            comments: task.comments || [],
+            proxyUrl: group.proxyUrl,
+            proxyPool,
+            shouldStop: () => fence?.isStale() || isEmergencyStopped() || isTaskCancelled() || (task.targetLikes !== 'ALL' && totalSuccess >= desiredLikes),
+            onProgress: (ev) => {
+              fence?.touch?.();
+              if (ev.actionBlocked) {
+                console.warn(`[QueueWorker] 🛑 Phát hiện Via bị Facebook hạn chế tốc độ (Action Blocked) trên task ${task.id}. Tự động ngắt task bảo vệ Via!`);
+                notifyActionBlocked({
+                  viaName: group.viaName || 'Via',
+                  viaUid: laneUid,
+                  postUrl: task.targetUrl,
+                  reason: 'Facebook tạm thời chặn do thao tác nhanh (Action Blocked)',
+                }).catch(() => {});
               }
-            }
-          },
-        })
-      );
+              if (ev.type === 'PAGE_FINISH') {
+                fence?.touch?.();
+                totalDone++;
+                if (ev.status === 'SUCCESS') totalSuccess++;
+                else if (ev.status === 'ERROR' || ev.status === 'FAILED') totalFailed++;
+
+                const qd = loadBuffQueue();
+                const t = qd.items.find((it) => it.id === task.id);
+                if (t) {
+                  t.executionStage = 'INTERACTING';
+                  t.progress = { done: totalDone, total: desiredLikes, success: totalSuccess, failed: totalFailed, kpiTarget: desiredLikes };
+                  t.pageDetails = t.pageDetails || [];
+                  t.pageDetails.push({
+                    pageId: ev.pageId,
+                    pageName: ev.pageName,
+                    viaName: ev.viaName || group.viaName || 'Via',
+                    status: ev.status,
+                    likeStatus: ev.likeStatus,
+                    commentStatus: ev.commentStatus,
+                    shareStatus: ev.shareStatus,
+                    reaction: ev.reaction || task.reactionType,
+                    comment: ev.comment || '',
+                    error: ev.error || null,
+                    time: new Date().toLocaleTimeString(),
+                  });
+                  saveBuffQueue(qd);
+                }
+              }
+            },
+          })
+        );
+      } catch (laneErr) {
+        const errMsg = laneErr?.message || String(laneErr);
+        laneErrors.push(`${group.viaName || laneUid}: ${errMsg}`);
+        console.warn(`[QueueWorker] ⚠️ Via ${group.viaName || laneUid} không thể chạy lượt này (${errMsg}). Tiếp tục các Via khác...`);
+      }
     });
 
     const durationSec = Math.round((Date.now() - startTime) / 1000);
+    const cancelled = isTaskCancelled();
+    cancelledTaskIds.delete(task.id);
 
     const qd = loadBuffQueue();
     const t = qd.items.find((it) => it.id === task.id);
@@ -2759,10 +3120,20 @@ async function executeQueueTask(task) {
       const finalSuccess = (t.pageDetails || []).filter((d) => d.status === 'SUCCESS' || d.status === 'ALREADY_LIKED').length;
       const finalFailed = (t.pageDetails || []).filter((d) => d.status === 'ERROR' || d.status === 'FAILED').length;
       const autoRefilledCount = Math.max(0, (finalSuccess + finalFailed) - desiredLikes);
+      const isTargetMet = task.targetLikes === 'ALL' || finalSuccess >= desiredLikes;
 
-      t.status = isEmergencyStopped() ? 'STOPPED' : 'COMPLETED';
-      t.executionStage = isEmergencyStopped() ? 'STOPPED' : 'COMPLETED';
+      const userStopped = cancelled && t.stopReason === 'USER_STOP';
+      t.status = userStopped ? 'STOPPED' : cancelled ? 'CANCELLED' : isEmergencyStopped() ? 'STOPPED' : isTargetMet ? 'COMPLETED' : 'PARTIAL';
+      t.executionStage = userStopped ? 'STOPPED' : cancelled ? 'CANCELLED' : isEmergencyStopped() ? 'STOPPED' : isTargetMet ? 'COMPLETED' : 'PARTIAL';
+      t.stopRequested = false;
       t.finishedAt = new Date().toISOString();
+      if (userStopped) {
+        t.error = 'Đã dừng theo yêu cầu người dùng.';
+      } else if (cancelled) {
+        t.error = t.error || 'Đã hủy do tạm dừng tính năng Săn bài tự động.';
+      } else if (finalSuccess === 0 && laneErrors.length > 0) {
+        t.error = `Lỗi luồng chạy: ${laneErrors.join(' | ')}`;
+      }
       t.result = {
         total: desiredLikes,
         targetKpi: desiredLikes,
@@ -2770,6 +3141,15 @@ async function executeQueueTask(task) {
         success: finalSuccess,
         failed: finalFailed,
         durationSec,
+        note: userStopped
+          ? `Đã dừng tác vụ giữa chừng theo yêu cầu (${finalSuccess} like đã thực hiện).`
+          : cancelled
+          ? `Đã hủy tác vụ giữa chừng (${finalSuccess} like đã thực hiện trước khi hủy).`
+          : !isTargetMet && laneErrors.length > 0 && finalSuccess === 0
+          ? `Tác vụ dừng do lỗi: ${laneErrors.join(' | ')}`
+          : !isTargetMet
+          ? `Đã hoàn thành ${finalSuccess}/${desiredLikes} like (${desiredLikes - finalSuccess} like chưa đạt do hết Fanpage khả dụng hoặc Via bị ngắt kết nối).`
+          : undefined,
       };
       saveBuffQueue(qd);
 
@@ -2785,12 +3165,18 @@ async function executeQueueTask(task) {
         engagementMode: task.enableComment ? 'BOTH' : 'LIKE_ONLY',
         accountName: displayAccountName,
         totalPages: pagesToBuff.length,
+        targetLikes: task.targetLikes !== 'ALL' && typeof task.targetLikes === 'number' ? task.targetLikes : (desiredLikes || pagesToBuff.length),
         successCount: finalSuccess,
         alreadyLikedCount,
         failedCount: finalFailed,
         commentCount: 0,
         details: t.pageDetails || [],
       }).catch((e) => console.warn('[BuffQueue Worker] ⚠️ Lỗi lưu buff_logs từ queue:', e.message));
+    }
+
+    if (cancelled) {
+      console.log(`[BuffQueue Worker] 🛑 Đã hủy Task ${task.id} (${task.targetUrl}) sau ${durationSec}s.`);
+      return;
     }
 
     const history = loadBuffHistory();
@@ -2824,6 +3210,8 @@ async function executeQueueTask(task) {
       targetUrl: task.targetUrl,
       success: totalSuccess,
       total: pagesToBuff.length,
+      originalTarget: task.targetLikes !== 'ALL' && typeof task.targetLikes === 'number' ? task.targetLikes : pagesToBuff.length,
+      autoRefilled: Math.max(0, (totalSuccess + totalFailed) - desiredLikes),
       failed: totalFailed,
       durationSec,
       reactionType: task.reactionType,
@@ -2860,6 +3248,29 @@ async function executeQueueTask(task) {
         console.warn(`[BuffQueue Worker] ☠️ Task ${task.id} chuyển sang trạng thái DEAD_LETTER.`);
       }
       saveBuffQueue(qd);
+
+      // Lưu trạng thái lỗi vào buff_logs để người dùng kiểm tra được ngay trong Lịch sử
+      db.saveBuffLogs({
+        id: 'log_' + task.id,
+        createdAt: t.finishedAt,
+        type: 'QUEUE',
+        targetUrl: task.targetUrl,
+        reactionType: task.reactionType || 'LIKE',
+        engagementMode: task.enableComment ? 'BOTH' : 'LIKE_ONLY',
+        accountName: 'Hàng Đợi VIP LIKE (Gặp lỗi)',
+        totalPages: typeof task.targetLikes === 'number' ? task.targetLikes : 30,
+        targetLikes: typeof task.targetLikes === 'number' ? task.targetLikes : 30,
+        successCount: Number(t.progress?.success || 0),
+        alreadyLikedCount: 0,
+        failedCount: Math.max(1, Number(t.progress?.failed || 1)),
+        commentCount: 0,
+        details: Array.isArray(t.pageDetails) && t.pageDetails.length > 0 ? t.pageDetails : [{
+          pageName: 'Hệ thống hàng đợi',
+          status: 'FAILED',
+          error: err.message,
+          time: new Date().toLocaleTimeString(),
+        }],
+      }).catch(() => {});
     }
     consecutiveQueueFailures += 1;
     if (consecutiveQueueFailures === 3) {
@@ -2903,8 +3314,9 @@ async function runQueueWorker() {
   // Sắp xếp ưu tiên: HIGH (3) > NORMAL (2) > LOW (1) kết hợp FIFO
   const priorityWeight = { HIGH: 3, NORMAL: 2, LOW: 1 };
   const availableSlots = maxParallel - activeBuffTaskIds.size;
+  const hunterPaused = isPostHunterPaused();
   const tasksToRun = (queueData.items || [])
-    .filter((it) => it.status === 'QUEUED' && new Date(it.runAfter || 0) <= now && !activeBuffTaskIds.has(it.id))
+    .filter((it) => it.status === 'QUEUED' && new Date(it.runAfter || 0) <= now && !activeBuffTaskIds.has(it.id) && !(hunterPaused && isPostHunterTask(it)))
     .sort((a, b) => {
       const pA = priorityWeight[a.priority] || 2;
       const pB = priorityWeight[b.priority] || 2;
@@ -2960,8 +3372,54 @@ app.get('/api/buff-monitors', (req, res) => {
     return res.json({
       success: true,
       monitors: data.monitors || [],
+      postHunterPaused: isPostHunterPaused(),
       queueCount: (queueData.items || []).filter((it) => it.status === 'QUEUED').length,
       historyCount: Object.keys(history).length,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/buff-hunter/pause', requireAdmin, (req, res) => {
+  try {
+    const paused = Boolean(req.body?.paused);
+    const pauseMonitors = req.body?.pauseMonitors !== false;
+    const cancelPendingTasks = req.body?.cancelPendingTasks !== false;
+
+    const updated = saveBuffSettings({ postHunterPaused: paused });
+    if (!updated) {
+      return res.status(500).json({ success: false, error: 'Không lưu được trạng thái Săn bài tự động' });
+    }
+
+    let pausedMonitors = 0;
+    let cancelledTaskList = [];
+
+    if (paused) {
+      if (pauseMonitors) {
+        const monData = loadBuffMonitors();
+        for (const mon of monData.monitors || []) {
+          if (mon.status === 'ACTIVE') {
+            mon.status = 'PAUSED';
+            pausedMonitors++;
+          }
+        }
+        if (pausedMonitors > 0) saveBuffMonitors(monData);
+      }
+      if (cancelPendingTasks) {
+        cancelledTaskList = cancelPendingPostHunterTasks('Đã hủy do tạm dừng tính năng Săn bài tự động');
+      }
+      console.log(`[PostHunter] ⏸️ Đã tạm dừng toàn bộ tính năng Săn bài tự động (tạm dừng ${pausedMonitors} mục tiêu, hủy ${cancelledTaskList.length} tác vụ).`);
+    } else {
+      console.log('[PostHunter] ▶️ Đã bật lại tính năng Săn bài tự động.');
+    }
+
+    return res.json({
+      success: true,
+      postHunterPaused: paused,
+      pausedMonitors,
+      cancelledTasks: cancelledTaskList.length,
+      cancelledTaskIds: cancelledTaskList,
     });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
@@ -2996,6 +3454,7 @@ app.post('/api/buff-monitors', (req, res) => {
           ...(urlChanged ? { baselineDone: false, seenPostUrls: [] } : {}),
           targetName: targetName ? String(targetName).trim() : data.monitors[idx].targetName,
           targetUrl: String(targetUrl).trim(),
+          expiresAt: req.body.expiresAt !== undefined ? req.body.expiresAt : data.monitors[idx].expiresAt,
           targetType,
           checkIntervalMinutes: parseInt(checkIntervalMinutes, 10) || 10,
           buffConfig: {
@@ -3016,18 +3475,24 @@ app.post('/api/buff-monitors', (req, res) => {
       targetName: targetName ? String(targetName).trim() : `Mục tiêu ${data.monitors.length + 1}`,
       targetUrl: String(targetUrl).trim(),
       targetType,
+      expiresAt: req.body.expiresAt || null,
       checkIntervalMinutes: parseInt(checkIntervalMinutes, 10) || 10,
       buffConfig: {
         targetLikes: parseTargetLikes(buffConfig.targetLikes, 'ALL'),
+        variancePercent: parseInt(buffConfig.variancePercent, 10) || 0,
+        maxPostsPerDay: parseInt(buffConfig.maxPostsPerDay, 10) || 5,
+        enableDripFeed: Boolean(buffConfig.enableDripFeed),
+        dripDurationMinutes: parseInt(buffConfig.dripDurationMinutes, 10) || 20,
         reactionType: buffConfig.reactionType || 'RANDOM_POSITIVE',
         enableLike: buffConfig.enableLike !== false,
         enableComment: Boolean(buffConfig.enableComment),
+        enableShare: Boolean(buffConfig.enableShare),
         comments: Array.isArray(buffConfig.comments) ? buffConfig.comments : [],
         delayMinutes: parseDelayMinutes(buffConfig.delayMinutes),
         viaMode: buffConfig.viaMode || 'ALL_VIAS',
         cookieString: buffConfig.cookieString || '',
       },
-      status: 'ACTIVE',
+      status: isPostHunterPaused() ? 'PAUSED' : 'ACTIVE',
       totalDetected: 0,
       lastCheckedAt: null,
       lastFoundPostUrl: null,
@@ -3061,6 +3526,12 @@ app.post('/api/buff-monitors/:id/toggle', (req, res) => {
     const data = loadBuffMonitors();
     const mon = data.monitors.find((m) => m.id === id);
     if (!mon) return res.status(404).json({ success: false, error: 'Không tìm thấy mục tiêu theo dõi' });
+    if (mon.status !== 'ACTIVE' && isPostHunterPaused()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Tính năng Săn bài tự động đang tạm dừng. Vui lòng bật lại trước khi kích hoạt mục tiêu.',
+      });
+    }
     mon.status = mon.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
     saveBuffMonitors(data);
     return res.json({ success: true, monitor: mon });
@@ -3076,8 +3547,21 @@ app.post('/api/buff-hunter/test-scan', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Thiếu link mục tiêu cần test quét' });
     }
 
+    let scanCookie = cookieString;
+    let scanProxy = '';
+    let scanViaName = null;
+    if (!scanCookie) {
+      const liveVias = await db.getLiveVias();
+      if (liveVias.length > 0) {
+        scanCookie = liveVias[0].cookieString;
+        scanProxy = liveVias[0].proxyUrl || '';
+        scanViaName = liveVias[0].viaName;
+      }
+    }
+
     const posts = await fbBuffTool.scanTargetForPosts(String(targetUrl).trim(), {
-      cookieStr: cookieString,
+      cookieStr: scanCookie,
+      proxyUrl: scanProxy,
       maxPosts: 8,
     });
 
@@ -3095,6 +3579,7 @@ app.post('/api/buff-hunter/test-scan', async (req, res) => {
 
     return res.json({
       success: true,
+      scanVia: scanViaName,
       total: annotatedPosts.length,
       posts: annotatedPosts,
     });
@@ -3104,20 +3589,39 @@ app.post('/api/buff-hunter/test-scan', async (req, res) => {
 });
 
 // Quét mục tiêu và nạp bài viết mới vào hàng đợi
-async function scanMonitorTarget(monitorId) {
+async function scanMonitorTarget(monitorId, options = {}) {
   const data = loadBuffMonitors();
   const mon = data.monitors.find((m) => m.id === monitorId);
   if (!mon) throw new Error('Không tìm thấy mục tiêu theo dõi');
+
+  // 1. Kiểm tra ngày hết hạn gói VIP
+  if (mon.expiresAt && new Date(mon.expiresAt).getTime() < Date.now()) {
+    mon.status = 'PAUSED';
+    mon.expiredReason = 'Gói VIP đã hết hạn sử dụng';
+    saveBuffMonitors(data);
+    console.warn(`[PostHunter] ⏸️ Mục tiêu ${mon.targetName} đã hết hạn gói VIP (${mon.expiresAt}). Tự động tạm dừng.`);
+    return { postsFound: 0, newPostsEnqueued: 0, expired: true };
+  }
+
+  // 2. Kiểm tra và làm mới giới hạn bài đăng trong ngày (Daily Posts Limit)
+  const todayDateKey = new Date().toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  if (mon.dailyStatsDate !== todayDateKey) {
+    mon.dailyStatsDate = todayDateKey;
+    mon.dailyPostsCount = 0;
+  }
+  const maxDaily = parseInt(mon.buffConfig?.maxPostsPerDay, 10) || 5;
 
   const history = loadBuffHistory();
 
   let cookieStr = mon.buffConfig?.cookieString || '';
   let proxyUrl = '';
+  let scanViaName = null;
   if (!cookieStr) {
     const liveVias = await db.getLiveVias();
     if (liveVias.length > 0) {
       cookieStr = liveVias[0].cookieString;
       proxyUrl = liveVias[0].proxyUrl || '';
+      scanViaName = liveVias[0].viaName;
     }
   }
 
@@ -3125,11 +3629,13 @@ async function scanMonitorTarget(monitorId) {
     cookieStr,
     proxyUrl,
     maxPosts: 8,
+    browser: options.browser || null,
   });
 
   const postsFound = posts.length;
   mon.lastCheckedAt = new Date().toISOString();
   mon.lastPostsFound = postsFound;
+  if (scanViaName) mon.lastScanVia = scanViaName;
 
   if (!Array.isArray(mon.seenPostUrls)) {
     mon.seenPostUrls = [];
@@ -3150,6 +3656,11 @@ async function scanMonitorTarget(monitorId) {
   const newPosts = [];
   for (const post of posts) {
     const normUrl = post.normalizedUrl || normalizeFbPostUrl(post.url);
+    if (post.isPinned) {
+      // Bài viết đã ghim cũ: ghi nhớ vào seenPostUrls để không bao giờ buff nhầm
+      if (!mon.seenPostUrls.includes(normUrl)) mon.seenPostUrls.push(normUrl);
+      continue;
+    }
     if (!mon.seenPostUrls.includes(normUrl) && !history[normUrl]) {
       newPosts.push(post);
       mon.seenPostUrls.push(normUrl);
@@ -3158,21 +3669,40 @@ async function scanMonitorTarget(monitorId) {
 
   let newPostsEnqueued = 0;
   for (const newPost of newPosts) {
+    if (mon.dailyPostsCount >= maxDaily) {
+      console.log(`[PostHunter] ⚠️ Mục tiêu ${mon.targetName} đã đạt hạn mức ${maxDaily} bài/ngày hôm nay. Tạm bỏ qua bài mới: ${newPost.url}`);
+      break;
+    }
+
+    // Tính toán số like có biên độ ngẫu nhiên tự nhiên (Random Likes Variance)
+    let finalTargetLikes = mon.buffConfig?.targetLikes || 30;
+    if (typeof finalTargetLikes === 'number' && mon.buffConfig?.variancePercent) {
+      const vPct = Math.min(30, Math.max(5, parseInt(mon.buffConfig.variancePercent, 10)));
+      const delta = Math.round(finalTargetLikes * (vPct / 100));
+      const jitter = Math.floor(Math.random() * (delta * 2 + 1)) - delta;
+      finalTargetLikes = Math.max(10, finalTargetLikes + jitter);
+    }
+
     const queuePayload = {
       source: `POST_HUNTER:${mon.targetName || mon.id}`,
       targetUrl: newPost.url,
-      targetLikes: mon.buffConfig?.targetLikes || 30,
+      targetLikes: finalTargetLikes,
       reactionType: mon.buffConfig?.reactionType || 'RANDOM_POSITIVE',
       enableLike: mon.buffConfig?.enableLike !== false,
       enableComment: Boolean(mon.buffConfig?.enableComment),
+      enableShare: Boolean(mon.buffConfig?.enableShare),
       comments: mon.buffConfig?.comments || [],
       delayMinutes: mon.buffConfig?.delayMinutes ?? 3,
+      speedMode: mon.buffConfig?.speedMode || 'SMART',
+      dripFeedMode: Boolean(mon.buffConfig?.enableDripFeed),
+      dripDurationMinutes: Number(mon.buffConfig?.dripDurationMinutes) || 20,
       cookieString: mon.buffConfig?.viaMode || 'ALL_VIAS',
     };
 
     const addRes = addBuffQueueTask(queuePayload);
     if (addRes.task) {
       newPostsEnqueued++;
+      mon.dailyPostsCount = (mon.dailyPostsCount || 0) + 1;
       mon.totalDetected = (mon.totalDetected || 0) + 1;
       mon.lastFoundPostUrl = newPost.url;
 
@@ -3199,6 +3729,12 @@ async function scanMonitorTarget(monitorId) {
 // API Quét thủ công ngay lập tức cho 1 mục tiêu theo dõi
 app.post('/api/buff-monitors/:id/scan-now', async (req, res) => {
   try {
+    if (isPostHunterPaused()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Tính năng Săn bài tự động đang tạm dừng. Vui lòng bật lại trước khi quét.',
+      });
+    }
     const { id } = req.params;
     const result = await scanMonitorTarget(id);
     return res.json({ success: true, ...result });
@@ -3208,37 +3744,79 @@ app.post('/api/buff-monitors/:id/scan-now', async (req, res) => {
   }
 });
 
-// Post Hunter Background Scheduler
+// Post Hunter Background Scheduler (Tối ưu hóa: Dùng chung 1 Browser cho cả mẻ quét để tiết kiệm 90% CPU & RAM)
 let isHunterScanning = false;
 async function runHunterScheduler() {
   if (!store.isReady()) return;
-  if (isHunterScanning || isEmergencyStopped()) return;
+  if (isHunterScanning || isEmergencyStopped() || isPostHunterPaused()) return;
   const data = loadBuffMonitors();
   const activeMonitors = (data.monitors || []).filter((m) => m.status === 'ACTIVE');
   if (activeMonitors.length === 0) return;
 
   const now = Date.now();
+  const dueMonitors = [];
   for (const mon of activeMonitors) {
-    if (isEmergencyStopped()) break;
     const intervalMs = Math.max(1, mon.checkIntervalMinutes || 10) * 60 * 1000;
     const lastChecked = mon.lastCheckedAt ? new Date(mon.lastCheckedAt).getTime() : 0;
     if (now - lastChecked >= intervalMs) {
-      isHunterScanning = true;
+      dueMonitors.push(mon);
+    }
+  }
+
+  if (dueMonitors.length === 0) return;
+
+  isHunterScanning = true;
+  let sharedBrowser = null;
+  try {
+    const { chromium } = require('playwright');
+    sharedBrowser = await chromium.launch({
+      headless: true,
+      args: fbBuffTool.OPTIMIZED_CHROMIUM_ARGS || [
+        '--disable-blink-features=AutomationControlled',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-notifications',
+        '--mute-audio',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--disable-extensions',
+        '--js-flags=--max-old-space-size=256',
+        '--renderer-process-limit=4',
+      ],
+    }).catch(() => null);
+
+    for (const mon of dueMonitors) {
+      if (isEmergencyStopped()) break;
       try {
         console.log(`[PostHunter Scheduler] ⏰ Đến lịch quét mục tiêu: ${mon.targetName} (${mon.targetUrl})`);
-        await scanMonitorTarget(mon.id);
+        await scanMonitorTarget(mon.id, { browser: sharedBrowser });
       } catch (err) {
         console.warn(`[PostHunter Scheduler] ⚠️ Quét mục tiêu ${mon.targetName} lỗi:`, err.message);
-      } finally {
-        isHunterScanning = false;
       }
-      await new Promise((r) => setTimeout(r, 4000));
+      await new Promise((r) => setTimeout(r, 2000));
     }
+  } finally {
+    if (sharedBrowser) await sharedBrowser.close().catch(() => { });
+    isHunterScanning = false;
   }
 }
 
 // Chạy Hunter Scheduler kiểm tra mỗi 30 giây
 setInterval(runHunterScheduler, 30000);
+
+// Bộ bảo vệ RAM tự động (Auto Memory Guard): giải phóng bộ nhớ định kỳ mỗi 15 phút
+setInterval(() => {
+  const mem = process.memoryUsage();
+  const rssMB = Math.round(mem.rss / 1024 / 1024);
+  const heapMB = Math.round(mem.heapUsed / 1024 / 1024);
+  if (global.gc && (rssMB > 350 || heapMB > 200)) {
+    try {
+      global.gc();
+      const afterMem = process.memoryUsage();
+      console.log(`[MemoryGuard] 🧹 Đã dọn RAM tự động: ${rssMB}MB -> ${Math.round(afterMem.rss / 1024 / 1024)}MB`);
+    } catch (_) { }
+  }
+}, 15 * 60 * 1000);
 
 // Kiểm tra sức khỏe nhanh cho danh sách Fanpage (Public / Restricted / Live)
 app.post('/api/buff-check-pages-health', async (req, res) => {
@@ -3279,6 +3857,33 @@ app.post('/api/buff-check-pages-health', async (req, res) => {
   }
 });
 
+// Cập nhật nhanh Cookie cho Via từ Cảnh báo (CookieAlertManager)
+app.post('/api/buff-vias/quick-update-cookie', async (req, res) => {
+  try {
+    const { uid, cookieString, proxyUrl } = req.body;
+    if (!cookieString || !String(cookieString).trim()) {
+      return res.status(400).json({ success: false, error: 'Vui lòng cung cấp chuỗi Cookie Facebook mới!' });
+    }
+    const norm = normalizeFbCookie(cookieString);
+    if (!norm.valid) {
+      return res.status(400).json({ success: false, error: 'Cookie không hợp lệ: cần có đủ c_user và xs.' });
+    }
+    const targetUid = uid || norm.uid;
+    const result = await db.updateViaCookieByUid(targetUid, norm.cookie, proxyUrl);
+    deadBuffVias.delete(targetUid);
+    if (norm.uid) deadBuffVias.delete(norm.uid);
+    return res.json({
+      success: true,
+      message: `Đã cập nhật Cookie mới cho Via UID ${targetUid}`,
+      detectedUid: norm.uid,
+      cookieString: norm.cookie,
+      ...(result?.dbSaved === false ? { warning: MYSQL_SAVE_WARNING } : {}),
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Kiểm tra sức khỏe dàn Via và CẬP NHẬT TRỰC TIẾP vào MySQL Workbench (social_accounts)
 app.post('/api/buff-vias/health-check', async (req, res) => {
   try {
@@ -3286,10 +3891,11 @@ app.post('/api/buff-vias/health-check', async (req, res) => {
     let targetVias = [];
 
     if (cookieString) {
+      const norm = normalizeFbCookie(cookieString);
       targetVias.push({
         id: viaId || 'custom',
         viaName: 'Via Kiểm Tra',
-        cookieString: String(cookieString).trim(),
+        cookieString: norm.valid ? norm.cookie : String(cookieString).trim(),
         proxyUrl: '',
       });
     } else {
@@ -3713,19 +4319,21 @@ app.get('/api/buff-seeding-presets', (req, res) => {
   });
 });
 
-// Lấy danh sách ID các Fanpage đã từng like/tương tác với bài viết mục tiêu (chống trùng lặp tức thì)
+// Lấy danh sách ID các Fanpage đã từng like/tương tác với bài viết mục tiêu (chống trùng lặp tức thì, gộp cả alias /share/)
 app.get('/api/buff-post-interacted-pages', async (req, res) => {
   if (!(await checkLicenseOrReject(req, res))) return;
   const targetUrl = req.query.url;
   if (!targetUrl) {
     return res.json({ success: true, count: 0, interactedPageIds: [] });
   }
-  const normUrl = fbBuffTool.normalizeFbPostUrl(targetUrl);
-  const interactedSet = fbBuffTool.getPostInteractedPageIds(normUrl);
+  const normUrl = normalizeFbPostUrl(targetUrl);
+  const canonicalUrl = await resolvePostUrlCanonical(targetUrl).catch(() => normUrl);
+  const interactedSet = getPostInteractedPageIds(normUrl);
   const interactedPageIds = Array.from(interactedSet);
   return res.json({
     success: true,
     normalizedUrl: normUrl,
+    canonicalUrl,
     count: interactedPageIds.length,
     interactedPageIds,
   });
@@ -3846,6 +4454,9 @@ app.get('/api/buff-vias/overview', async (req, res) => {
         isEmergencyStopped: isEmergencyStopped(),
         emergencyReason: sysSettings.emergencyReason || '',
         emergencyStoppedAt: sysSettings.emergencyStoppedAt || null,
+        postHunterPaused: isPostHunterPaused(),
+        autoBuffOwnPosts: Boolean(sysSettings.autoBuffOwnPosts),
+        maxPagesPerPost: Number(sysSettings.maxPagesPerPost) || 60,
         telegramConfigured: Boolean(sysSettings.telegramBotToken && sysSettings.telegramChatId),
       },
     });
@@ -3995,14 +4606,14 @@ app.post('/api/telegram/test-scenario', async (req, res) => {
       text = [
         `🎯 <b>[MÔ PHỎNG: SĂN BÀI VIẾT MỚI THÀNH CÔNG]</b>`,
         `━━━━━━━━━━━━━━━━━━`,
-        `📢 <b>Nguồn theo dõi:</b> Fanpage "VIPLIKE RADIANT OFFICIAL"`,
+        `📢 <b>Nguồn theo dõi:</b> Fanpage "VIP LIKE OFFICIAL"`,
         `🔗 <b>Bài viết mới:</b> <a href="https://facebook.com/viplike/posts/123456789">facebook.com/viplike/posts/123456789</a>`,
         `⏳ <b>Kế hoạch:</b> Tự động buff 50 Like sau 3 phút nữa`,
         `⏰ <b>Phát hiện lúc:</b> ${now}`,
       ].join('\n');
     } else {
       text = [
-        `🤖 <b>[TEST THÀNH CÔNG: VIPLIKE RADIANT OPS BOT]</b>`,
+        `🤖 <b>[TEST THÀNH CÔNG: VIP LIKE OPS BOT]</b>`,
         `━━━━━━━━━━━━━━━━━━`,
         `✅ Kết nối Telegram Bot thông suốt 100%!`,
         `⏰ Thời gian: ${now}`,
@@ -4025,7 +4636,7 @@ app.post('/api/buff-settings/test-telegram', async (req, res) => {
     const { botToken, chatId } = req.body;
     const now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
     const customMsg = [
-      `🤖 <b>[TEST THÀNH CÔNG: VIPLIKE RADIANT OPS BOT]</b>`,
+      `🤖 <b>[TEST THÀNH CÔNG: VIP LIKE OPS BOT]</b>`,
       `━━━━━━━━━━━━━━━━━━`,
       `✅ Kết nối Telegram Bot thông suốt 100%!`,
       `⏰ Thời gian: ${now}`,
@@ -4047,7 +4658,7 @@ app.post('/api/buff-settings/test-telegram', async (req, res) => {
         await db.saveTelegramNotification({
           chatId,
           eventType: 'TEST',
-          title: 'TEST THÀNH CÔNG: VIPLIKE RADIANT OPS BOT',
+          title: 'TEST THÀNH CÔNG: VIP LIKE OPS BOT',
           message: customMsg.replace(/<[^>]*>/g, ''),
           status: 'SENT',
           telegramMessageId: msgId,
@@ -4228,6 +4839,8 @@ store
     await initFenceEpoch();
     // Tự động kiểm tra và phục hồi các task bị treo ở trạng thái RUNNING sau khi dữ liệu MySQL đã nạp hoàn tất vào bộ nhớ!
     recoverStaleRunningQueueTasks();
+    // Đồng bộ ngầm các link /share/ cũ trong sổ chống trùng về URL bài viết gốc để nhận diện trùng giữa nhiều share link
+    backfillShareAliases().catch((err) => console.warn('[PagePostRegistry] ⚠️ Lỗi backfill alias:', err.message));
   })
   .catch((err) => console.error('[StateStore] ❌ Lỗi khởi tạo:', err.message));
 
@@ -4249,7 +4862,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 
 app.listen(PORT, async () => {
   console.log(`\n================================================================`);
-  console.log(`✨ VIPLIKE RADIANT BACKEND ĐANG CHẠY TẠI http://localhost:${PORT}`);
+  console.log(`✨ VIP LIKE BACKEND ĐANG CHẠY TẠI http://localhost:${PORT}`);
   console.log(`================================================================`);
 
   // Kiểm tra kết nối MySQL Workbench ngay khi khởi động

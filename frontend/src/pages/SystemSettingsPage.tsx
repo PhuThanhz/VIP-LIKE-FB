@@ -1,5 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Alert, Input, Button, Switch, ConfigProvider, Select, Tag, Table, Spin, message, Tooltip } from 'antd';
+import {
+  BellOutlined,
+  AlertOutlined,
+  CheckCircleOutlined,
+  StopOutlined,
+  AimOutlined,
+  SafetyCertificateOutlined,
+  SendOutlined,
+  ReloadOutlined,
+  ControlOutlined,
+  HistoryOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons';
 import { isAdmin, useCurrentUser } from '../auth/session';
 import api from '../config/axios';
 
@@ -219,16 +232,10 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
             </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <ol className="m-0 pl-4 text-xs text-slate-400 space-y-1">
-                <li>
-                  Tạo bot tại <span className="text-blue-400 font-medium">@BotFather</span> và lấy Chat ID tại <span className="text-blue-400 font-medium">@userinfobot</span>.
-                </li>
-                <li>
-                  <span className="text-slate-300 font-medium">Cho người khác thuê hoặc dùng:</span> Họ chỉ cần nhập Token và Chat ID của họ vào đây rồi bấm Lưu.
-                </li>
-                <li>Bấm <b>Lưu</b>, sau đó <b>Gửi tin thử</b> để kiểm tra bot gửi về máy.</li>
-              </ol>
-              <Button loading={testingTelegram} disabled={!hasTelegramInput} onClick={onTestTelegram} className="shrink-0">
+              <div className="text-xs text-slate-400">
+                Tạo bot qua <span className="text-blue-400 font-medium">@BotFather</span> và lấy Chat ID từ <span className="text-blue-400 font-medium">@userinfobot</span>. Bấm <b>Lưu</b> sau khi nhập để áp dụng.
+              </div>
+              <Button loading={testingTelegram} disabled={!hasTelegramInput} onClick={onTestTelegram} icon={<SendOutlined />} className="shrink-0 text-xs">
                 Gửi tin thử
               </Button>
             </div>
@@ -237,132 +244,137 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
 
         {/* Telegram Bot Giúp Gì Cho Bạn? */}
         <Section
-          title="💡 Telegram Bot Này Giúp Gì Cho Bạn?"
-          description="Hệ thống giám sát tự động 24/7 bảo vệ dàn Via & Fanpage ngay cả khi bạn tắt máy tính. Bạn có thể bấm nút gửi thử để thấy ngay tin nhắn mô phỏng bắn về điện thoại!"
+          title="Kịch Bản Thông Báo Telegram"
+          description="Hệ thống tự động giám sát 24/7 và gửi cảnh báo về điện thoại ngay cả khi tắt máy."
         >
           <div className="px-5 pb-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* Card 1: Cứu cánh dàn Via */}
-              <div className="p-4 rounded-xl bg-gradient-to-br from-rose-950/30 to-slate-900/40 border border-rose-500/20 flex flex-col justify-between gap-3">
-                <div className="space-y-1.5">
+              <div className="p-3.5 rounded-xl bg-slate-900/40 border border-rose-500/20 flex flex-col justify-between gap-2.5">
+                <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-xl">🚨</span>
-                    <h4 className="text-sm font-bold text-rose-300 m-0">Cứu Cánh Dàn Via (Checkpoint / Die)</h4>
+                    <AlertOutlined className="text-rose-400 text-sm" />
+                    <h4 className="text-xs font-bold text-rose-300 m-0">Via Lỗi / Checkpoint</h4>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed m-0">
-                    Khi dàn Via có tài khoản bị quét, cookie hết hạn hoặc checkpoint, Bot nhắn ngay lập tức về điện thoại kèm UID và Tên Via. Hệ thống tự động cách ly Via đó, bảo vệ an toàn 100% cho hàng chục Fanpage con và không làm gián đoạn chiến dịch!
+                  <p className="text-[11px] text-slate-400 leading-normal m-0">
+                    Báo ngay UID khi Via bị quét hoặc hết cookie, tự động cách ly bảo vệ dàn Fanpage.
                   </p>
                 </div>
-                <div className="pt-1 flex items-center justify-between border-t border-rose-500/10">
-                  <span className="text-[11px] text-rose-400/80">Kích hoạt: Tự động 24/7</span>
+                <div className="pt-2 flex items-center justify-between border-t border-slate-800/80">
+                  <Tag color="error" className="text-[10px] m-0 border-0 px-1.5 py-0">Tự động 24/7</Tag>
                   <Button
                     size="small"
+                    icon={<SendOutlined className="text-[10px]" />}
                     loading={sendingScenario === 'VIA_DEAD'}
                     disabled={!hasTelegramInput}
                     onClick={() => handleTestScenario('VIA_DEAD', 'Cảnh báo Via Lỗi / Checkpoint')}
-                    className="border-rose-500/40 text-rose-300 hover:text-rose-200 text-xs"
+                    className="border-rose-500/40 text-rose-300 hover:text-rose-200 text-xs h-7 px-2.5 rounded-lg"
                   >
-                    ⚡ Bắn thử cảnh báo Via lỗi
+                    Gửi thử
                   </Button>
                 </div>
               </div>
 
               {/* Card 2: Báo cáo hoàn tất Buff */}
-              <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-950/30 to-slate-900/40 border border-emerald-500/20 flex flex-col justify-between gap-3">
-                <div className="space-y-1.5">
+              <div className="p-3.5 rounded-xl bg-slate-900/40 border border-emerald-500/20 flex flex-col justify-between gap-2.5">
+                <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-xl">🎉</span>
-                    <h4 className="text-sm font-bold text-emerald-300 m-0">Báo Cáo Hoàn Tất Buff (Real-time)</h4>
+                    <CheckCircleOutlined className="text-emerald-400 text-sm" />
+                    <h4 className="text-xs font-bold text-emerald-300 m-0">Hoàn Tất Chiến Dịch</h4>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed m-0">
-                    Dù bạn tắt máy tính hay đi ra ngoài, mỗi khi dàn Page buff xong 1 bài viết (ví dụ 26/26 Page Like thành công), Bot sẽ rung chuông gửi ngay: Link bài viết mục tiêu, số Page tương tác, thời gian chạy và tỉ lệ thành công 100%.
+                  <p className="text-[11px] text-slate-400 leading-normal m-0">
+                    Báo cáo link bài viết, số lượng tương tác thực tế và tỉ lệ thành công ngay khi buff xong.
                   </p>
                 </div>
-                <div className="pt-1 flex items-center justify-between border-t border-emerald-500/10">
-                  <span className="text-[11px] text-emerald-400/80">Kích hoạt: Mỗi khi buff xong 1 bài</span>
+                <div className="pt-2 flex items-center justify-between border-t border-slate-800/80">
+                  <Tag color="success" className="text-[10px] m-0 border-0 px-1.5 py-0">Khi xong bài</Tag>
                   <Button
                     size="small"
+                    icon={<SendOutlined className="text-[10px]" />}
                     loading={sendingScenario === 'BUFF_COMPLETED'}
                     disabled={!hasTelegramInput}
                     onClick={() => handleTestScenario('BUFF_COMPLETED', 'Báo cáo Hoàn tất Buff')}
-                    className="border-emerald-500/40 text-emerald-300 hover:text-emerald-200 text-xs"
+                    className="border-emerald-500/40 text-emerald-300 hover:text-emerald-200 text-xs h-7 px-2.5 rounded-lg"
                   >
-                    ⚡ Bắn thử báo cáo Buff xong
+                    Gửi thử
                   </Button>
                 </div>
               </div>
 
               {/* Card 3: Báo động dừng khẩn cấp */}
-              <div className="p-4 rounded-xl bg-gradient-to-br from-amber-950/30 to-slate-900/40 border border-amber-500/20 flex flex-col justify-between gap-3">
-                <div className="space-y-1.5">
+              <div className="p-3.5 rounded-xl bg-slate-900/40 border border-amber-500/20 flex flex-col justify-between gap-2.5">
+                <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-xl">🛑</span>
-                    <h4 className="text-sm font-bold text-amber-300 m-0">Báo Động Dừng Khẩn Cấp & Sự Cố</h4>
+                    <StopOutlined className="text-amber-400 text-sm" />
+                    <h4 className="text-xs font-bold text-amber-300 m-0">Dừng Khẩn Cấp / Sự Cố</h4>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed m-0">
-                    Khi có người ấn nút Dừng khẩn cấp hoặc khi mạng chập chờn, gặp 3 lỗi liên tiếp, Bot sẽ lập tức phát còi báo động khẩn về Telegram của bạn để chủ động kiểm tra và bảo vệ an toàn cho hệ thống.
+                  <p className="text-[11px] text-slate-400 leading-normal m-0">
+                    Báo động khẩn khi ấn nút dừng hoặc gặp lỗi mất kết nối liên tiếp để kiểm tra kịp thời.
                   </p>
                 </div>
-                <div className="pt-1 flex items-center justify-between border-t border-amber-500/10">
-                  <span className="text-[11px] text-amber-400/80">Kích hoạt: Khi dừng hoặc lỗi nghiêm trọng</span>
+                <div className="pt-2 flex items-center justify-between border-t border-slate-800/80">
+                  <Tag color="warning" className="text-[10px] m-0 border-0 px-1.5 py-0">Khẩn cấp</Tag>
                   <Button
                     size="small"
+                    icon={<SendOutlined className="text-[10px]" />}
                     loading={sendingScenario === 'EMERGENCY_STOP'}
                     disabled={!hasTelegramInput}
                     onClick={() => handleTestScenario('EMERGENCY_STOP', 'Báo động Dừng khẩn cấp')}
-                    className="border-amber-500/40 text-amber-300 hover:text-amber-200 text-xs"
+                    className="border-amber-500/40 text-amber-300 hover:text-amber-200 text-xs h-7 px-2.5 rounded-lg"
                   >
-                    ⚡ Bắn thử Dừng khẩn cấp
+                    Gửi thử
                   </Button>
                 </div>
               </div>
 
               {/* Card 4: Săn bài viết mới */}
-              <div className="p-4 rounded-xl bg-gradient-to-br from-purple-950/30 to-slate-900/40 border border-purple-500/20 flex flex-col justify-between gap-3">
-                <div className="space-y-1.5">
+              <div className="p-3.5 rounded-xl bg-slate-900/40 border border-purple-500/20 flex flex-col justify-between gap-2.5">
+                <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-xl">🎯</span>
-                    <h4 className="text-sm font-bold text-purple-300 m-0">Săn Bài Viết Tự Động (Auto-Hunter)</h4>
+                    <AimOutlined className="text-purple-400 text-sm" />
+                    <h4 className="text-xs font-bold text-purple-300 m-0">Săn Bài Viết Mới (Auto-Hunter)</h4>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed m-0">
-                    Bot tự động theo dõi Fanpage và Group mục tiêu. Ngay khi có bài đăng mới được xuất bản, Bot báo tin về máy và lập tức đưa vào hàng đợi chuẩn bị buff Like tự động sau số phút cài đặt.
+                  <p className="text-[11px] text-slate-400 leading-normal m-0">
+                    Theo dõi Fanpage/Group mục tiêu, tự động báo tin và nạp bài mới vào hàng đợi buff.
                   </p>
                 </div>
-                <div className="pt-1 flex items-center justify-between border-t border-purple-500/10">
-                  <span className="text-[11px] text-purple-400/80">Kích hoạt: Tự động khi có bài mới</span>
+                <div className="pt-2 flex items-center justify-between border-t border-slate-800/80">
+                  <Tag color="purple" className="text-[10px] m-0 border-0 px-1.5 py-0">Tự động</Tag>
                   <Button
                     size="small"
+                    icon={<SendOutlined className="text-[10px]" />}
                     loading={sendingScenario === 'HUNTER'}
                     disabled={!hasTelegramInput}
                     onClick={() => handleTestScenario('HUNTER', 'Săn bài mới')}
-                    className="border-purple-500/40 text-purple-300 hover:text-purple-200 text-xs"
+                    className="border-purple-500/40 text-purple-300 hover:text-purple-200 text-xs h-7 px-2.5 rounded-lg"
                   >
-                    ⚡ Bắn thử Săn bài mới
+                    Gửi thử
                   </Button>
                 </div>
               </div>
 
-              {/* Card 5: Báo động bị chặn tốc độ (Action Blocked) */}
-              <div className="p-4 rounded-xl bg-gradient-to-br from-orange-950/30 to-slate-900/40 border border-orange-500/20 flex flex-col justify-between gap-3 md:col-span-2">
-                <div className="space-y-1.5">
+              {/* Card 5: Báo động bị chặn tốc độ */}
+              <div className="p-3.5 rounded-xl bg-slate-900/40 border border-orange-500/20 flex flex-col justify-between gap-2.5 md:col-span-2">
+                <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-xl">🛡️</span>
-                    <h4 className="text-sm font-bold text-orange-300 m-0">Báo Động Bị Chặn Tốc Độ & Tự Động Hạ Nhiệt Via</h4>
+                    <SafetyCertificateOutlined className="text-orange-400 text-sm" />
+                    <h4 className="text-xs font-bold text-orange-300 m-0">Hạn Chế Thao Tác & Tự Động Hạ Nhiệt</h4>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed m-0">
-                    Khi bài viết bị Facebook hạn chế do thao tác quá nhanh ("Bạn tạm thời bị chặn..."), Bot cảnh báo ngay về máy kèm UID Via và link bài. Hệ thống tự động ngắt phiên ngay lập tức, chuyển trạng thái hạ nhiệt giúp Via không bao giờ bị khoá hay dính checkpoint!
+                  <p className="text-[11px] text-slate-400 leading-normal m-0">
+                    Cảnh báo khi Facebook hạn chế thao tác, tự động tạm ngắt phiên và hạ nhiệt bảo vệ Via an toàn.
                   </p>
                 </div>
-                <div className="pt-1 flex items-center justify-between border-t border-orange-500/10">
-                  <span className="text-[11px] text-orange-400/80">Kích hoạt: Tự động khi Facebook hạn chế tốc độ</span>
+                <div className="pt-2 flex items-center justify-between border-t border-slate-800/80">
+                  <Tag color="volcano" className="text-[10px] m-0 border-0 px-1.5 py-0">Bảo vệ Via</Tag>
                   <Button
                     size="small"
+                    icon={<SendOutlined className="text-[10px]" />}
                     loading={sendingScenario === 'ACTION_BLOCKED'}
                     disabled={!hasTelegramInput}
                     onClick={() => handleTestScenario('ACTION_BLOCKED', 'Cảnh báo Bị Chặn Tốc Độ')}
-                    className="border-orange-500/40 text-orange-300 hover:text-orange-200 text-xs"
+                    className="border-orange-500/40 text-orange-300 hover:text-orange-200 text-xs h-7 px-2.5 rounded-lg"
                   >
-                    ⚡ Bắn thử cảnh báo Chặn tốc độ
+                    Gửi thử
                   </Button>
                 </div>
               </div>
@@ -372,15 +384,15 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
 
         {/* Lịch Sử Thông Báo Telegram Trong MySQL Database */}
         <Section
-          title="📜 Lịch Sử Thông Báo Telegram Đã Lưu Trong MySQL Database"
-          description="Tất cả tin nhắn đã gửi từ bot đều được lưu vết minh bạch vào bảng telegram_notifications (Database: viplike_radiant)."
+          title="Lịch Sử Thông Báo Telegram"
+          description="Nhật ký tin nhắn được lưu trữ trong bảng telegram_notifications (Database: viplike_radiant)."
           extra={
             <div className="flex items-center gap-2">
               <Tag color="cyan" className="m-0 text-[11px] px-2 py-0.5 rounded">
-                MySQL Workbench: viplike_radiant
+                Database: viplike_radiant
               </Tag>
-              <Button size="small" onClick={fetchHistory} loading={loadingHistory} className="text-xs">
-                🔄 Làm mới
+              <Button size="small" icon={<ReloadOutlined />} onClick={fetchHistory} loading={loadingHistory} className="text-xs">
+                Làm mới
               </Button>
             </div>
           }
@@ -388,7 +400,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
           <div className="px-5 pb-5">
             {historyLogs.length === 0 ? (
               <div className="text-center py-8 text-slate-500 text-xs">
-                Chưa có thông báo nào trong lịch sử. Hãy thử bấm các nút "⚡ Bắn thử" ở trên để gửi tin!
+                Chưa có thông báo nào trong lịch sử. Hãy thử bấm các nút "Gửi thử" ở trên để kiểm tra kết nối!
               </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-slate-800/80 bg-slate-950/40">
@@ -420,18 +432,18 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
                       render: (type: string) => {
                         switch (type) {
                           case 'BUFF_COMPLETED':
-                            return <Tag color="green" className="text-[11px] font-semibold">🎉 BUFF HOÀN TẤT</Tag>;
+                            return <Tag color="green" className="text-[11px] font-semibold">Buff hoàn tất</Tag>;
                           case 'VIA_DEAD':
-                            return <Tag color="red" className="text-[11px] font-semibold">🚨 VIA CHECKPOINT</Tag>;
+                            return <Tag color="red" className="text-[11px] font-semibold">Via Checkpoint</Tag>;
                           case 'ACTION_BLOCKED':
-                            return <Tag color="volcano" className="text-[11px] font-semibold">🛡️ CHẶN TỐC ĐỘ (ACTION BLOCKED)</Tag>;
+                            return <Tag color="volcano" className="text-[11px] font-semibold">Chặn tốc độ</Tag>;
                           case 'EMERGENCY_STOP':
-                            return <Tag color="error" className="text-[11px] font-semibold">🛑 DỪNG KHẨN CẤP</Tag>;
+                            return <Tag color="error" className="text-[11px] font-semibold">Dừng khẩn cấp</Tag>;
                           case 'HUNTER':
-                            return <Tag color="purple" className="text-[11px] font-semibold">🎯 SĂN BÀI MỚI</Tag>;
+                            return <Tag color="purple" className="text-[11px] font-semibold">Săn bài mới</Tag>;
                           case 'TEST':
                           case 'TEST_INIT':
-                            return <Tag color="cyan" className="text-[11px] font-semibold">🤖 TEST BOT</Tag>;
+                            return <Tag color="cyan" className="text-[11px] font-semibold">Tin nhắn thử</Tag>;
                           default:
                             return <Tag color="blue" className="text-[11px] font-semibold">{type}</Tag>;
                         }
@@ -591,7 +603,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
 
         {/* Thuật toán Smart Adaptive Pacing & Bảo Vệ Via */}
         <Section
-          title="🛡️ Thuật Toán Smart Adaptive Pacing & Bảo Vệ Via"
+          title="Thuật Toán Smart Adaptive Pacing & Bảo Vệ Via"
           description="Tự động co giãn nhịp tương tác, ngắt nhịp nghỉ hạ nhiệt Via và ngăn chặn hoàn toàn cờ checkpoint của Meta."
         >
           <ToggleRow
@@ -644,15 +656,15 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
               <span className="block text-xs text-slate-500 mt-0.5">Áp dụng cho Hàng đợi, Săn bài tự động và Buff trực tiếp.</span>
             </div>
             <Select
-              value={systemSettings.defaultSpeedMode || 'FAST'}
+              value={systemSettings.defaultSpeedMode || 'NORMAL'}
               onChange={(v) => set({ defaultSpeedMode: v })}
               className="w-56 text-xs"
               options={[
-                { value: 'SMART', label: '🛡️ Safe Smart (5.5s - 9s)' },
-                { value: 'NORMAL', label: '⚖️ Chuẩn (6.5s)' },
-                { value: 'SAFE', label: '🛡️ Siêu An Toàn (9s)' },
-                { value: 'FAST', label: '🚀 Nhanh (5.0s)' },
-                { value: 'TURBO', label: '⚡ Nhanh Vừa (4.0s)' },
+                { value: 'NORMAL', label: 'Chuẩn (2.4s • 1 luồng/Via, Khuyên dùng)' },
+                { value: 'FAST', label: 'Nhanh (2.0s)' },
+                { value: 'SMART', label: 'Safe Smart (2.6s - 3.4s)' },
+                { value: 'TURBO', label: 'Siêu Tốc (1.4s)' },
+                { value: 'SAFE', label: 'An Toàn (5.0s)' },
               ]}
             />
           </div>
@@ -667,9 +679,9 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
               className="w-56 text-xs"
               options={[
                 { value: 1, label: '1 bài (Tuần tự)' },
-                { value: 2, label: '⚡ 2 bài cùng lúc (Khuyên dùng)' },
-                { value: 3, label: '⚡⚡ 3 bài cùng lúc' },
-                { value: 4, label: '🔥 4 bài cùng lúc (Cần nhiều Via)' },
+                { value: 2, label: '2 bài cùng lúc (Khuyên dùng)' },
+                { value: 3, label: '3 bài cùng lúc' },
+                { value: 4, label: '4 bài cùng lúc' },
               ]}
             />
           </div>

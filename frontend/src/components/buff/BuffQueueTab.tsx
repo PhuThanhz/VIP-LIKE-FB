@@ -99,7 +99,7 @@ export interface QueueTask {
   runAfter?: string;
   startedAt?: string;
   finishedAt?: string;
-  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'STOPPED';
+  status: 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'PARTIAL' | 'FAILED' | 'DEAD_LETTER' | 'NEEDS_REVIEW' | 'STOPPED';
   progress?: {
     done: number;
     total: number;
@@ -111,10 +111,12 @@ export interface QueueTask {
     failed: number;
     durationSec?: number;
     message?: string;
+    note?: string;
   };
   pageDetails?: PageDetailItem[];
   error?: string | null;
   attempts?: number;
+  stopRequested?: boolean;
 }
 
 export interface BuffQueueTabProps {
@@ -125,6 +127,7 @@ export interface BuffQueueTabProps {
   onRefresh: () => void;
   onRunNow: (id: string) => Promise<void> | void;
   onRetry: (id: string) => Promise<void> | void;
+  onStop?: (id: string) => Promise<void> | void;
   onRemove: (id: string) => Promise<void> | void;
   onClearCompleted: () => Promise<void> | void;
   onClearAll?: () => Promise<void> | void;
@@ -173,6 +176,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
   onRefresh,
   onRunNow,
   onRetry,
+  onStop,
   onRemove,
   onClearCompleted,
   onClearAll,
@@ -198,7 +202,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
   const [quickTargetLikes, setQuickTargetLikes] = useState<number | 'ALL'>(30);
   const [quickReaction, setQuickReaction] = useState('RANDOM_POSITIVE');
   const [quickDelayMinutes, setQuickDelayMinutes] = useState(0);
-  const [quickSpeedMode, setQuickSpeedMode] = useState<'FAST' | 'SMART' | 'SAFE'>('SMART');
+  const [quickSpeedMode, setQuickSpeedMode] = useState<'NORMAL' | 'FAST' | 'SMART' | 'SAFE'>('NORMAL');
   const [isSubmittingQuickAdd, setIsSubmittingQuickAdd] = useState(false);
 
   // Modal xem chi tiết bài viết
@@ -333,29 +337,53 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
         .sort((a, b) => new Date(a.runAfter || 0).getTime() - new Date(b.runAfter || 0).getTime()),
     [queueItems]
   );
-  const completedItems = useMemo(() => queueItems.filter((i) => i.status === 'COMPLETED'), [queueItems]);
+  const completedItems = useMemo(() => queueItems.filter((i) => i.status === 'COMPLETED' || i.status === 'PARTIAL'), [queueItems]);
   const failedItems = useMemo(
-    () => queueItems.filter((i) => i.status === 'FAILED' || i.status === 'STOPPED'),
+    () => queueItems.filter((i) => i.status === 'FAILED' || i.status === 'DEAD_LETTER' || i.status === 'STOPPED'),
     [queueItems]
   );
 
-  // Filtered items
-  const filteredItems = useMemo(() => {
-    return queueItems.filter((item) => {
-      if (filterStatus === 'RUNNING' && item.status !== 'RUNNING') return false;
-      if (filterStatus === 'QUEUED' && item.status !== 'QUEUED') return false;
-      if (filterStatus === 'COMPLETED' && item.status !== 'COMPLETED') return false;
-      if (filterStatus === 'FAILED' && item.status !== 'FAILED' && item.status !== 'STOPPED') return false;
+  // Trích xuất timestamp để sắp xếp các tác vụ hàng đợi mới nhất lên đầu
+  const getTaskTimestamp = (t: QueueTask): number => {
+    if (t.addedAt) {
+      const ms = new Date(t.addedAt).getTime();
+      if (!isNaN(ms)) return ms;
+    }
+    if (t.startedAt) {
+      const ms = new Date(t.startedAt).getTime();
+      if (!isNaN(ms)) return ms;
+    }
+    if (t.finishedAt) {
+      const ms = new Date(t.finishedAt).getTime();
+      if (!isNaN(ms)) return ms;
+    }
+    if (t.id && t.id.startsWith('task_')) {
+      const parts = t.id.split('_');
+      const ts = parseInt(parts[1], 10);
+      if (!isNaN(ts)) return ts;
+    }
+    return 0;
+  };
 
-      if (searchKeyword.trim()) {
-        const kw = searchKeyword.trim().toLowerCase();
-        const matchUrl = (item.targetUrl || '').toLowerCase().includes(kw);
-        const matchMonitor = (item.monitorName || '').toLowerCase().includes(kw);
-        const matchId = (item.id || '').toLowerCase().includes(kw);
-        if (!matchUrl && !matchMonitor && !matchId) return false;
-      }
-      return true;
-    });
+  // Filtered items (Luôn sắp xếp bài mới nhất lên trên đầu để người dùng dễ kiểm tra)
+  const filteredItems = useMemo(() => {
+    return queueItems
+      .filter((item) => {
+        if (filterStatus === 'RUNNING' && item.status !== 'RUNNING') return false;
+        if (filterStatus === 'QUEUED' && item.status !== 'QUEUED') return false;
+        if (filterStatus === 'COMPLETED' && item.status !== 'COMPLETED' && item.status !== 'PARTIAL') return false;
+        if (filterStatus === 'FAILED' && item.status !== 'FAILED' && item.status !== 'DEAD_LETTER' && item.status !== 'STOPPED') return false;
+
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.trim().toLowerCase();
+          const matchUrl = (item.targetUrl || '').toLowerCase().includes(kw);
+          const matchMonitor = (item.monitorName || '').toLowerCase().includes(kw);
+          const matchId = (item.id || '').toLowerCase().includes(kw);
+          if (!matchUrl && !matchMonitor && !matchId) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => getTaskTimestamp(b) - getTaskTimestamp(a));
   }, [queueItems, filterStatus, searchKeyword]);
 
   const handleCopyLink = (url: string) => {
@@ -435,10 +463,34 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             </Tag>
           );
         }
+        if (task.status === 'PARTIAL') {
+          return (
+            <Tag className="font-medium text-xs py-0.5 px-2 rounded-md m-0 bg-amber-500/10 border-amber-500/30 text-amber-300">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 mr-1.5 align-middle" />
+              Đạt một phần
+            </Tag>
+          );
+        }
+        if (task.status === 'STOPPED') {
+          return (
+            <Tag className="font-medium text-xs py-0.5 px-2 rounded-md m-0 bg-slate-500/10 border-slate-500/30 text-slate-300">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-400 mr-1.5 align-middle" />
+              Tạm dừng
+            </Tag>
+          );
+        }
+        if (task.status === 'NEEDS_REVIEW') {
+          return (
+            <Tag className="font-medium text-xs py-0.5 px-2 rounded-md m-0 bg-purple-500/10 border-purple-500/30 text-purple-300">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-purple-400 mr-1.5 align-middle" />
+              Cần đối soát
+            </Tag>
+          );
+        }
         return (
           <Tag className="font-medium text-xs py-0.5 px-2 rounded-md m-0 bg-rose-500/10 border-rose-500/30 text-rose-300">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-rose-400 mr-1.5 align-middle" />
-            {task.status === 'STOPPED' ? 'Tạm dừng' : 'Thất bại'}
+            Thất bại
           </Tag>
         );
       },
@@ -593,14 +645,15 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           );
         }
 
-        if (task.status === 'COMPLETED' && task.result) {
+        if ((task.status === 'COMPLETED' || task.status === 'PARTIAL') && task.result) {
           const duration = task.result.durationSec ? formatDuration(task.result.durationSec) : '';
           const targetKpi = (task.result as any).targetKpi || (task.targetLikes === 'ALL' ? task.result.total : task.targetLikes);
           const autoRefilled = (task.result as any).autoRefilledCount || 0;
+          const isPartial = task.status === 'PARTIAL';
           return (
             <div className="space-y-1">
               <div className="text-xs text-slate-200">
-                <span className="font-semibold text-emerald-400">{task.result.success}</span>
+                <span className={`font-semibold ${isPartial ? 'text-amber-400' : 'text-emerald-400'}`}>{task.result.success}</span>
                 <span className="text-slate-500"> / {targetKpi || task.result.total} like</span>
               </div>
               {autoRefilled > 0 && (
@@ -611,18 +664,27 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
               {duration && (
                 <div className="text-[11px] text-slate-500">Thời gian: {duration}</div>
               )}
+              {task.result?.note && (
+                <div className="text-[10px] text-slate-400 italic truncate max-w-[170px]" title={task.result.note}>
+                  {task.result.note}
+                </div>
+              )}
             </div>
           );
         }
 
-        if (task.status === 'FAILED' && task.error) {
+        if ((task.status === 'FAILED' || task.status === 'DEAD_LETTER') && task.error) {
           return (
             <Tooltip title={task.error}>
-              <div className="text-rose-400 text-xs truncate max-w-[160px] bg-rose-950/20 p-1.5 rounded border border-rose-800/30">
+              <div className="text-rose-400 text-xs truncate max-w-[180px] bg-rose-950/20 p-1.5 rounded border border-rose-800/30 cursor-pointer">
                 {task.error}
               </div>
             </Tooltip>
           );
+        }
+
+        if (task.status === 'STOPPED') {
+          return <span className="text-slate-400 text-xs">Đã dừng tác vụ</span>;
         }
 
         return <span className="text-slate-500 text-xs">Chờ lượt xử lý</span>;
@@ -640,7 +702,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             Chi tiết
           </Button>
 
-          {task.status === 'COMPLETED' && onViewHistory && (
+          {task.status !== 'QUEUED' && task.status !== 'RUNNING' && onViewHistory && (
             <Tooltip title="Xem chi tiết trong tab Lịch sử">
               <Button
                 size="small"
@@ -667,10 +729,30 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             </Tooltip>
           )}
 
-          {task.status === 'FAILED' && (
+          {(task.status === 'FAILED' || task.status === 'DEAD_LETTER' || task.status === 'STOPPED' || task.status === 'PARTIAL') && (
             <Tooltip title="Chạy lại bài này">
-              <Button size="small" onClick={() => onRetry(task.id)} className="text-xs px-2.5">
+              <Button
+                size="small"
+                onClick={() => onRetry(task.id)}
+                className="text-xs px-2.5 text-amber-300 border-amber-800/60 bg-amber-950/40 hover:bg-amber-900/50"
+              >
                 Thử lại
+              </Button>
+            </Tooltip>
+          )}
+
+          {(task.status === 'RUNNING' || task.status === 'QUEUED') && onStop && (
+            <Tooltip title={task.stopRequested ? 'Đang chờ dừng sau lượt hiện tại' : 'Dừng riêng bài này'}>
+              <Button
+                size="small"
+                danger
+                icon={<StopOutlined />}
+                loading={Boolean(task.stopRequested)}
+                disabled={Boolean(task.stopRequested)}
+                onClick={() => onStop(task.id)}
+                className="text-xs px-2.5"
+              >
+                {task.stopRequested ? 'Đang dừng...' : 'Dừng'}
               </Button>
             </Tooltip>
           )}
@@ -1023,7 +1105,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           <Button key="close" onClick={() => setDetailModalTask(null)} className="text-xs">
             Đóng
           </Button>,
-          detailModalTask?.status === 'COMPLETED' && onViewHistory && (
+          detailModalTask?.status !== 'QUEUED' && detailModalTask?.status !== 'RUNNING' && onViewHistory && (
             <Button
               key="viewHistory"
               type="primary"
@@ -1423,9 +1505,10 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                   onChange={setQuickSpeedMode}
                   className="w-full"
                   options={[
-                    { label: '🚀 FAST — Tốc độ cao (Tối ưu thời gian)', value: 'FAST' },
-                    { label: '🛡️ SMART — Tự nhiên (Khuyến nghị)', value: 'SMART' },
-                    { label: '🐢 SAFE — Giãn cách bảo toàn', value: 'SAFE' },
+                    { label: '🚀 FAST — Tốc độ cao (2.0s)', value: 'FAST' },
+                    { label: '⚖️ NORMAL — Nhanh ổn định (Khuyến nghị)', value: 'NORMAL' },
+                    { label: '🛡️ SMART — Tự thích ứng (3.0s+)', value: 'SMART' },
+                    { label: '🐢 SAFE — Giãn cách bảo toàn (5.5s)', value: 'SAFE' },
                   ]}
                 />
               </div>

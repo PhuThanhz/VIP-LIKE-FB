@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Layout, Menu } from 'antd';
 import type { MenuProps } from 'antd';
 import { NAV_ITEMS, NavKey, getRootNavItem } from '../config/navigation';
+import AppVersion from './common/AppVersion';
 
 const { Sider } = Layout;
 
@@ -138,10 +139,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
         {/* Brand */}
         <div className="h-16 flex items-center px-5 border-b shrink-0 border-slate-800/60">
           {collapsed ? (
-            <span className="mx-auto text-sm font-semibold text-slate-100">VR</span>
+            <span className="mx-auto text-sm font-semibold text-slate-100">VIP</span>
           ) : (
             <div className="min-w-0 leading-tight">
-              <div className="text-[15px] font-semibold text-slate-100 truncate">VIP LIKE – RADIANT</div>
+              <div className="text-[15px] font-semibold text-slate-100 truncate">VIP LIKE</div>
               <div className="text-xs text-slate-500 truncate mt-0.5">Hệ thống buff like tự động</div>
             </div>
           )}
@@ -159,6 +160,10 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           />
         </div>
 
+        {/* Số phiên bản + giờ build + trạng thái cập nhật */}
+        <div className="p-2.5 border-t border-slate-800/60 shrink-0">
+          <AppVersion compact={collapsed} />
+        </div>
       </div>
     </Sider>
   );

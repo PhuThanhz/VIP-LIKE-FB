@@ -31,7 +31,7 @@ const DEFAULT_SETTINGS = {
   notifyOnQueueIssue: true,
   notifyOnActionBlocked: true,
   // Smart Adaptive Pacing & Chống hạn chế FB:
-  defaultSpeedMode: 'FAST',
+  defaultSpeedMode: 'NORMAL',
   smartAdaptivePacing: true,
   cooldownEveryPages: 25,
   cooldownDurationSec: 20,
@@ -53,9 +53,11 @@ const DEFAULT_SETTINGS = {
   autoBuffOwnGroup: true,
   autoBuffDelayMinutes: 3,
   autoBuffReaction: 'RANDOM_POSITIVE',
+  // Tạm dừng toàn bộ tính năng Săn bài tự động (Post Hunter Scheduler + hàng đợi Post Hunter)
+  postHunterPaused: false,
   // Quy mô lớn (1000+ page): số page tối đa cho 1 bài khi chọn "xoay vòng", số via chạy song song
   maxPagesPerPost: 250,
-  buffParallelVias: 4,
+  buffParallelVias: 2,
   maxParallelTasks: 2, // Số bài viết chạy song song cùng lúc trong hàng đợi
   isEmergencyStopped: false,
   emergencyReason: '',
@@ -705,7 +707,7 @@ async function handleIncomingMessage(text, { getStatusText, onBuffRequested, get
   if (cmd === '/help' || cmd === '/start') {
     return sendTelegramMessage(
       [
-        `🤖 <b>HỆ THỐNG VIPLIKE RADIANT - ĐIỀU KHIỂN TELEGRAM</b>`,
+        `🤖 <b>HỆ THỐNG VIP LIKE - ĐIỀU KHIỂN TELEGRAM</b>`,
         `━━━━━━━━━━━━━━━━━━`,
         `👉 <b>CÁCH BUFF TƯƠNG TÁC ("CHAT LÀ BUFF"):</b>`,
         `Chỉ cần gửi link Facebook kèm số lượng và loại tương tác:`,

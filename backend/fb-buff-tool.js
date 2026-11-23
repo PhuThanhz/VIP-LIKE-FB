@@ -15,6 +15,10 @@ const {
   getGlobalRegistryStats,
   getPostInteractedPageIds,
   normalizeFbPostUrl,
+  registerPostUrlAlias,
+  isValidCanonicalFbPostUrl,
+  resolvePostUrlCanonical,
+  flushRegistry,
 } = require('./page-post-registry');
 const { isEmergencyStopped, loadSettings } = require('./telegram-alert');
 const store = require('./state-store');
@@ -40,13 +44,20 @@ const OPTIMIZED_CHROMIUM_ARGS = [
   '--disable-ipc-flooding-protection',
   '--no-first-run',
   '--no-default-browser-check',
+  '--disable-extensions',
+  '--disable-default-apps',
+  '--disable-sync',
+  '--disable-translate',
+  '--js-flags=--max-old-space-size=768',
+  '--renderer-process-limit=4',
   '--password-store=basic',
   '--use-mock-keychain',
   '--disk-cache-size=33554432',
   '--media-cache-size=16777216',
 ];
 
-// Hàm chặn quảng cáo, pixel theo dõi, video nặng & ảnh thừa để tăng tốc 3-5 lần (tiết kiệm 80% RAM & băng thông)
+// Hàm chặn video nặng, ảnh thừa & tracker quảng cáo bên thứ 3 để tối ưu RAM/băng thông
+// Giữ nguyên telemetry nội bộ của Facebook (/ajax/bz, logging_client_events, browser_measurement) để tránh bị Meta gắn cờ client bất thường
 async function applyResourceOptimization(context, allowMedia = false, blockImages = true) {
   try {
     await context.route('**/*', (route) => {
@@ -54,27 +65,20 @@ async function applyResourceOptimization(context, allowMedia = false, blockImage
       const rType = req.resourceType();
       const url = req.url();
 
-      // Chặn các tracker, pixel telemetry & metrics nền gây nghẽn mạng Facebook
+      // Chỉ chặn tracker quảng cáo bên thứ 3; giữ telemetry nội bộ của Facebook
       if (
-        url.includes('/tr/') ||
-        url.includes('pixel.facebook.com') ||
-        url.includes('connect.facebook.net') ||
         url.includes('googletagmanager.com') ||
-        url.includes('doubleclick.net') ||
-        url.includes('/ajax/bz') ||
-        url.includes('logging_client_events') ||
-        url.includes('browser_measurement') ||
-        url.includes('/privacy/sandbox')
+        url.includes('doubleclick.net')
       ) {
         return route.abort();
       }
 
-      // Khi chỉ cần Like/Comment, chặn luồng video mp4/m3u8 để tiết kiệm 70% băng thông
+      // Khi chỉ cần Like/Comment, chặn luồng video mp4/m3u8 để tiết kiệm băng thông
       if (!allowMedia && (rType === 'media' || url.endsWith('.mp4') || url.endsWith('.m3u8') || url.endsWith('.webm'))) {
         return route.abort();
       }
 
-      // Chặn ảnh và web font khi buff tương tác để tiết kiệm 80% RAM, CPU và giảm 70% thời gian tải DOM
+      // Chặn ảnh và web font khi buff tương tác để tiết kiệm RAM, CPU và giảm thời gian tải DOM
       if (blockImages) {
         if (
           rType === 'image' ||
@@ -98,8 +102,45 @@ async function applyResourceOptimization(context, allowMedia = false, blockImage
 
 
 function parseCookieString(cookieStr, domain = '.facebook.com') {
-  if (!cookieStr || typeof cookieStr !== 'string') return [];
-  const parts = cookieStr.split(';');
+  if (!cookieStr) return [];
+  if (Array.isArray(cookieStr)) return cookieStr;
+  let str = String(cookieStr).trim();
+  str = str.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // 1. Nếu là định dạng JSON (Cookie-Editor, J2Team, mảng cookies)
+  if ((str.startsWith('{') && str.endsWith('}')) || (str.startsWith('[') && str.endsWith(']'))) {
+    try {
+      const parsed = JSON.parse(str);
+      let list = [];
+      if (Array.isArray(parsed)) list = parsed;
+      else if (parsed && Array.isArray(parsed.cookies)) list = parsed.cookies;
+      else if (parsed && typeof parsed === 'object') {
+        list = Object.entries(parsed).map(([name, value]) => ({ name, value: String(value) }));
+      }
+      if (list.length > 0) {
+        return list
+          .map((c) => {
+            let sameSite = 'Lax';
+            if (c.sameSite === 'no_restriction' || c.sameSite === 'None' || c.sameSite === 'none') sameSite = 'None';
+            else if (c.sameSite === 'strict' || c.sameSite === 'Strict') sameSite = 'Strict';
+            return {
+              name: String(c.name).trim(),
+              value: c.value != null ? String(c.value).trim() : '',
+              domain: c.domain || domain,
+              path: c.path || '/',
+              httpOnly: Boolean(c.httpOnly || c.name === 'xs' || c.name === 'sb'),
+              secure: c.secure !== undefined ? Boolean(c.secure) : true,
+              sameSite: sameSite,
+              ...(c.expirationDate ? { expires: Math.floor(c.expirationDate) } : {}),
+            };
+          })
+          .filter((c) => c.name && c.value);
+      }
+    } catch (_) {}
+  }
+
+  // 2. Định dạng chuỗi cookie thông thường
+  const parts = str.split(';');
   const cookies = [];
   for (const part of parts) {
     const trimmed = part.trim();
@@ -124,8 +165,18 @@ function parseCookieString(cookieStr, domain = '.facebook.com') {
 }
 
 function getUserIdFromCookie(cookieStr) {
-  const match = cookieStr.match(/(?:^|;\s*)c_user=([0-9]+)/);
-  return match ? match[1] : null;
+  if (!cookieStr) return null;
+  const str = String(cookieStr);
+  const match = str.match(/(?:^|;\s*)c_user=([0-9]+)/);
+  if (match) return match[1];
+
+  // Tìm trong JSON
+  const jsonMatch =
+    str.match(/"name"\s*:\s*"c_user"\s*,\s*"value"\s*:\s*"([0-9]+)"/) ||
+    str.match(/"c_user"\s*:\s*"?([0-9]+)"?/);
+  if (jsonMatch) return jsonMatch[1];
+
+  return null;
 }
 
 // ==========================================
@@ -151,32 +202,160 @@ function getCachedPages(uid) {
   const cache = loadPagesCache();
   const entry = cache[uid];
   if (entry && Array.isArray(entry.pages) && entry.pages.length > 0) {
-    const age = Date.now() - new Date(entry.updatedAt || 0).getTime();
-    if (!(age < PAGES_CACHE_TTL_MS)) return null;
-    return entry.pages;
+    const quarantined = entry.quarantined && typeof entry.quarantined === 'object' ? entry.quarantined : {};
+    const valid = entry.pages.filter((p) => p && p.id && !quarantined[String(p.id)]);
+    // Ưu tiên Page đã từng chuyển danh tính thành công (verified) lên trước
+    return valid.sort((a, b) => (b.verified ? 1 : 0) - (a.verified ? 1 : 0));
   }
   return null;
 }
 
-function setCachedPages(uid, pages, viaName = '') {
+function setCachedPages(uid, pages, viaName = '', options = {}) {
   if (!uid || !Array.isArray(pages)) return;
+  const { replaceExisting = false } = options || {};
   const cache = loadPagesCache();
+  const prevEntry = cache[uid] && typeof cache[uid] === 'object' ? cache[uid] : {};
+  const quarantined = { ...(prevEntry.quarantined || {}) };
+  const switchFailures = { ...(prevEntry.switchFailures || {}) };
+  const prevPagesList = Array.isArray(prevEntry.pages) ? prevEntry.pages : [];
+  const prevVerifiedIds = new Set(
+    prevPagesList
+      .filter((p) => p && p.id && p.verified)
+      .map((p) => String(p.id))
+  );
+
+  const normalizedPages = [];
+  const seenIds = new Set();
+  for (const raw of pages) {
+    if (!raw || !raw.id) continue;
+    const pid = String(raw.id);
+    if (seenIds.has(pid)) continue;
+    // Nếu bảng Switcher trực tiếp thấy Page này thì bỏ cách ly; nguồn khác thì giữ nguyên cách ly cũ
+    if (quarantined[pid]) {
+      if (raw.source === 'SWITCHER') {
+        delete quarantined[pid];
+        delete switchFailures[pid];
+      } else {
+        continue;
+      }
+    }
+    seenIds.add(pid);
+    normalizedPages.push({
+      ...raw,
+      id: pid,
+      verified: Boolean(raw.verified || raw.source === 'SWITCHER' || prevVerifiedIds.has(pid)),
+    });
+  }
+
+  // Bảo vệ chống mất dữ liệu khi Facebook trả về kết quả quét thiếu (partial scan):
+  // nếu danh sách mới nhỏ hơn nhiều so với cache cũ, giữ lại các Page cũ không bị cách ly
+  if (!replaceExisting && prevPagesList.length > normalizedPages.length * 2 && normalizedPages.length > 0) {
+    for (const prev of prevPagesList) {
+      if (!prev || !prev.id) continue;
+      const pid = String(prev.id);
+      if (seenIds.has(pid) || quarantined[pid]) continue;
+      seenIds.add(pid);
+      normalizedPages.push({ ...prev, id: pid });
+    }
+  }
+
   cache[uid] = {
     uid,
-    viaName: viaName || `Via_${uid}`,
+    viaName: viaName || prevEntry.viaName || `Via_${uid}`,
     updatedAt: new Date().toISOString(),
-    count: pages.length,
-    pages,
+    count: normalizedPages.length,
+    pages: normalizedPages,
+    quarantined,
+    switchFailures,
   };
   savePagesCache(cache);
 
   // Đồng bộ trực tiếp vào bảng facebook_page_accesses trên MySQL
   try {
     const db = require('./db');
-    db.saveFacebookPageAccesses(pages, uid, viaName).catch((e) => {
+    db.saveFacebookPageAccesses(normalizedPages, uid, viaName).catch((e) => {
       console.warn(`[FB-Buff] ⚠️ Không đồng bộ được pages vào MySQL facebook_page_accesses: ${e.message}`);
     });
   } catch (_) { }
+}
+
+/**
+ * Ghi nhận kết quả chuyển danh tính Fanpage trên từng Via:
+ * - Thành công: xóa bộ đếm lỗi, đánh dấu verified = true.
+ * - Lỗi chuyển danh tính lặp lại (hoặc sai Via): tự động cách ly khỏi pages_cache & facebook_page_accesses.
+ */
+function recordPageSwitchOutcome(uid, pageId, success, errorCode = '') {
+  if (!uid || !pageId || String(pageId) === String(uid)) return { quarantined: false };
+  const uidKey = String(uid);
+  const pidKey = String(pageId);
+
+  const cache = loadPagesCache();
+  const entry = cache[uidKey];
+  if (!entry || !Array.isArray(entry.pages)) return { quarantined: false };
+
+  entry.quarantined = entry.quarantined && typeof entry.quarantined === 'object' ? entry.quarantined : {};
+  entry.switchFailures = entry.switchFailures && typeof entry.switchFailures === 'object' ? entry.switchFailures : {};
+  const targetIdx = entry.pages.findIndex((p) => p && String(p.id) === pidKey);
+  const targetPage = targetIdx !== -1 ? entry.pages[targetIdx] : null;
+
+  if (success) {
+    const hadFail = Boolean(entry.switchFailures[pidKey] || entry.quarantined[pidKey]);
+    const wasUnverified = targetPage && !targetPage.verified;
+    delete entry.switchFailures[pidKey];
+    delete entry.quarantined[pidKey];
+    if (targetPage) targetPage.verified = true;
+    if (hadFail || wasUnverified) {
+      savePagesCache(cache);
+      try {
+        const db = require('./db');
+        db.markFacebookPageAccessesStatus(
+          [{ personalProfileId: uidKey, pageId: pidKey }],
+          'VERIFIED',
+          1,
+          'Đã xác thực chuyển danh tính thành công'
+        ).catch(() => {});
+      } catch (_) {}
+    }
+    return { quarantined: false };
+  }
+
+  const isWrongVia = errorCode === 'WRONG_VIA';
+  const prevFails = Number(entry.switchFailures[pidKey] || 0);
+  const nextFails = prevFails + 1;
+  const threshold = isWrongVia ? 1 : (targetPage?.verified ? 3 : 2);
+
+  if (nextFails >= threshold) {
+    const reason = isWrongVia
+      ? 'Page thuộc quản trị của Via khác'
+      : `Không chuyển được danh tính Fanpage ${nextFails} lần liên tiếp`;
+    entry.quarantined[pidKey] = {
+      name: targetPage?.name || pidKey,
+      quarantinedAt: new Date().toISOString(),
+      reason,
+      failCount: nextFails,
+    };
+    delete entry.switchFailures[pidKey];
+    if (targetIdx !== -1) {
+      entry.pages.splice(targetIdx, 1);
+      entry.count = entry.pages.length;
+    }
+    savePagesCache(cache);
+    console.warn(`[FB-Buff] 🧹 Đã tự động cách ly Page "${targetPage?.name || pidKey}" (${pidKey}) khỏi Via ${uidKey}: ${reason}`);
+    try {
+      const db = require('./db');
+      db.markFacebookPageAccessesStatus(
+        [{ personalProfileId: uidKey, pageId: pidKey }],
+        'UNSWITCHABLE',
+        0,
+        reason
+      ).catch(() => {});
+    } catch (_) {}
+    return { quarantined: true, reason };
+  }
+
+  entry.switchFailures[pidKey] = nextFails;
+  savePagesCache(cache);
+  return { quarantined: false, failCount: nextFails };
 }
 
 // ==========================================
@@ -586,6 +765,50 @@ async function scanAccountsCenterPages(page, uid) {
  * @param {object} options - { forceRefresh: boolean, viaName: string, proxyUrl: string }
  * @returns {Promise<Array<{ id: string, name: string, url: string }>>}
  */
+/**
+ * Hợp nhất Fanpage từ pages_cache và bảng MySQL facebook_page_accesses (loại bỏ page đang bị cách ly).
+ */
+async function mergeCachedAndDbPages(uid, viaName = '') {
+  const uidKey = String(uid || '');
+  const isJunkPageName = (name) => {
+    const s = String(name || '').trim();
+    return /^(?:chưa đọc|unread)\b/i.test(s) || /đã theo dõi bạn|started following you|đã nhắc đến bạn/i.test(s);
+  };
+  let cached = uidKey ? (getCachedPages(uidKey) || []) : [];
+  const beforeJunkLen = cached.length;
+  cached = cached.filter((p) => !isJunkPageName(p?.name || p?.pageName));
+  if (!uidKey) return cached;
+  try {
+    const db = require('./db');
+    const dbPages = await db.getFacebookPageAccesses(1, uidKey);
+    if (dbPages && dbPages.length > 0) {
+      const cacheEntry = loadPagesCache()[uidKey] || {};
+      const quarantined = cacheEntry.quarantined && typeof cacheEntry.quarantined === 'object' ? cacheEntry.quarantined : {};
+      const mergedMap = new Map(cached.map((p) => [String(p.id), p]));
+      let addedFromDb = 0;
+      for (const p of dbPages) {
+        const pid = String(p.id);
+        const pName = p.name || p.pageName || `Page ${pid}`;
+        if (mergedMap.has(pid) || quarantined[pid] || isJunkPageName(pName)) continue;
+        mergedMap.set(pid, {
+          id: pid,
+          name: pName,
+          url: p.url || `https://www.facebook.com/${pid}`,
+          verified: p.verificationStatus === 'VERIFIED',
+        });
+        addedFromDb++;
+      }
+      if (addedFromDb > 0 || cached.length !== beforeJunkLen) {
+        cached = Array.from(mergedMap.values()).sort((a, b) => (b.verified ? 1 : 0) - (a.verified ? 1 : 0));
+        setCachedPages(uidKey, cached, viaName, true);
+      }
+    } else if (cached.length !== beforeJunkLen) {
+      setCachedPages(uidKey, cached, viaName, true);
+    }
+  } catch (_) {}
+  return cached;
+}
+
 async function getManagedPages(cookieStr, options = {}) {
   const { forceRefresh = false, viaName = '', proxyUrl = '' } = options;
   const cookies = parseCookieString(cookieStr);
@@ -595,13 +818,14 @@ async function getManagedPages(cookieStr, options = {}) {
 
   const uid = getUserIdFromCookie(cookieStr);
   if (!forceRefresh && uid) {
-    const cached = getCachedPages(uid);
+    const cached = await mergeCachedAndDbPages(uid, viaName);
     if (cached && cached.length > 0) {
-      console.log(`[FB-Buff] ⚡ [CACHE HIT] Đã lấy ${cached.length} Fanpage từ cache cho UID: ${uid} (không tốn thời gian quét lại)`);
+      console.log(`[FB-Buff] ⚡ [CACHE HIT] Đã lấy ${cached.length} Fanpage từ cache/DB cho UID: ${uid} (không tốn thời gian quét lại)`);
       return cached;
     }
   }
 
+  const device = getDeviceForUid(uid);
   const proxy = parseProxy(proxyUrl);
   const browser = await chromium.launch({
     headless: true,
@@ -611,10 +835,15 @@ async function getManagedPages(cookieStr, options = {}) {
 
   try {
     const context = await browser.newContext({
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      viewport: { width: 1280, height: 800 },
+      userAgent: device.userAgent,
+      viewport: device.viewport,
+      deviceScaleFactor: device.deviceScaleFactor,
+      isMobile: device.isMobile,
+      hasTouch: device.hasTouch,
+      locale: 'vi-VN',
+      timezoneId: 'Asia/Ho_Chi_Minh',
     });
+    await applyFingerprintToContext(context, device);
     await applyResourceOptimization(context, false);
     await context.addCookies(cookies);
     const page = await context.newPage();
@@ -750,17 +979,28 @@ async function getManagedPages(cookieStr, options = {}) {
       return results;
     });
 
+    pageList.forEach((p) => {
+      p.source = p.source || 'YOUR_PAGES';
+    });
+
     // Bổ sung từ bảng "Trang & trang cá nhân của bạn": đây đúng là danh sách page nick chuyển sang được,
     // thường nhiều hơn your_pages (page BM được gán, page dùng URL vanity...)
     try {
       const extra = await scanProfileSwitcherPages(page, uid);
-      const known = new Set(pageList.map((p) => p.id));
+      const byId = new Map(pageList.map((p) => [String(p.id), p]));
       const knownNames = new Set(pageList.map((p) => p.name));
       let added = 0;
       for (const item of extra) {
-        if (known.has(item.id) || (knownNames.has(item.name) && !item.id)) continue;
-        known.add(item.id);
-        pageList.push(item);
+        const existing = item.id ? byId.get(String(item.id)) : null;
+        if (existing) {
+          existing.source = 'SWITCHER';
+          existing.verified = true;
+          continue;
+        }
+        if (knownNames.has(item.name) && !item.id) continue;
+        const tagged = { ...item, source: 'SWITCHER', verified: true };
+        byId.set(String(tagged.id), tagged);
+        pageList.push(tagged);
         added++;
       }
       console.log(`[FB-Buff] 🔁 Bảng chuyển trang cá nhân: ${extra.length} page, bổ sung thêm ${added} page.`);
@@ -776,13 +1016,16 @@ async function getManagedPages(cookieStr, options = {}) {
       for (const item of acPages) {
         if (known.has(item.id)) continue;
         known.add(item.id);
-        pageList.push(item);
+        pageList.push({ ...item, source: 'ACCOUNTS_CENTRE', verified: false });
         addedAc++;
       }
       console.log(`[FB-Buff] 🏢 Meta Accounts Centre: ${acPages.length} page, bổ sung thêm ${addedAc} page.`);
     } catch (err) {
       console.warn(`[FB-Buff] ⚠️ Không quét được Accounts Centre: ${err.message}`);
     }
+
+    // Đưa các Page được xác nhận từ Switcher lên đầu danh sách
+    pageList.sort((a, b) => (b.verified ? 1 : 0) - (a.verified ? 1 : 0));
 
     console.log(`[FB-Buff] ✅ Đã tìm thấy và làm sạch tên ${pageList.length} Fanpage được quản lý.`);
     if (uid && pageList.length > 0) {
@@ -959,52 +1202,56 @@ function cancellableSleep(ms, signal) {
 }
 
 // Hàm tính toán độ trễ tối ưu giữa các trang theo chuẩn Safe Human Pacing (chống spam, chống checkpoint)
-function calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMinutes, totalPages, concurrency, speedMode = 'FAST') {
+function calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMinutes, totalPages, concurrency, speedMode = 'NORMAL') {
   if (dripFeedMode && dripDurationMinutes > 0) {
     const totalDurationMs = dripDurationMinutes * 60 * 1000;
     const dripBaseWait = Math.max(delayMs || 3000, Math.floor((totalDurationMs / Math.max(1, totalPages)) * concurrency));
-    const dripJitter = Math.floor(dripBaseWait * 0.12 * (Math.random() * 2 - 1));
-    return Math.max(2500, dripBaseWait + dripJitter);
+    const dripJitter = Math.floor(dripBaseWait * 0.15 * (Math.random() * 2 - 1));
+    return Math.max(2000, dripBaseWait + dripJitter);
   }
+
+  let minModeBase = 2000;
+  const userFloor = delayMs > 0 ? delayMs : 0;
 
   if (enableComment) {
-    // Có bình luận: giãn cách an toàn 7s - 10s
-    const baseWait = delayMs > 0 ? Math.max(delayMs, 7500) : 8000;
-    return baseWait + Math.floor(Math.random() * 2000);
+    minModeBase = 5000;
+  } else if (speedMode === 'TURBO') {
+    minModeBase = 1000;
+  } else if (speedMode === 'FAST') {
+    minModeBase = 1500;
+  } else if (speedMode === 'SMART') {
+    if (totalPages <= 30) minModeBase = 2200;
+    else if (totalPages <= 80) minModeBase = 2600;
+    else minModeBase = 3000;
+  } else if (speedMode === 'SAFE') {
+    minModeBase = 4500;
+  } else {
+    // NORMAL
+    minModeBase = 2000;
   }
 
-  // Chế độ TURBO (Siêu Tốc: 0.7s - 1.1s)
-  if (speedMode === 'TURBO' || (delayMs > 0 && delayMs <= 1500)) {
-    const base = delayMs > 0 ? Math.min(delayMs, 900) : 750;
-    return base + Math.floor(Math.random() * 250);
-  }
+  const baseWait = userFloor > 0 ? Math.max(Math.round(minModeBase * 0.7), userFloor) : minModeBase;
+  const jitter = Math.floor(baseWait * 0.12 * (Math.random() * 2 - 1));
+  return Math.max(Math.round(minModeBase * 0.7), baseWait + jitter);
+}
 
-  // Chế độ FAST (Nhanh & Tối ưu: 1.4s - 1.8s)
-  if (speedMode === 'FAST' || (delayMs > 1500 && delayMs <= 3000)) {
-    const base = delayMs > 0 ? Math.min(delayMs, 1600) : 1400;
-    return base + Math.floor(Math.random() * 300);
+/**
+ * Tính thời gian nghỉ hạ nhiệt theo lô (Batch Cooldown) dùng chung cho Single & Multi Worker
+ */
+function computeBatchCooldownMs(cooldownDurationMs, speedMode = 'FAST', isBigBatch = false) {
+  let baseCooldown = cooldownDurationMs || 10000;
+  if (speedMode === 'TURBO') {
+    baseCooldown = Math.max(3000, Math.min(baseCooldown, 6000));
+  } else if (speedMode === 'FAST') {
+    baseCooldown = Math.max(5000, Math.min(baseCooldown, 8000));
+  } else if (speedMode === 'SAFE') {
+    baseCooldown = Math.max(20000, baseCooldown);
+  } else {
+    baseCooldown = Math.max(8000, Math.min(baseCooldown, 12000));
   }
-
-  // Chế độ SMART (Thích ứng thông minh: 2.2s - 2.8s)
-  if (speedMode === 'SMART') {
-    let base = 2200;
-    if (totalPages <= 50) base = 1800;
-    else if (totalPages <= 100) base = 2200;
-    else base = 2500;
-    const jitter = Math.floor(base * 0.10 * (Math.random() * 2 - 1));
-    return Math.max(1600, base + jitter);
-  }
-
-  // Chế độ SAFE (Siêu An Toàn: 4s - 6s)
-  if (speedMode === 'SAFE' || delayMs >= 5000) {
-    const base = delayMs > 0 ? Math.max(4500, delayMs) : 5000;
-    return base + Math.floor(Math.random() * 1000);
-  }
-
-  // NORMAL (Chuẩn: 2.0s - 2.6s)
-  const base = delayMs > 0 ? Math.min(delayMs, 2400) : 2100;
-  const jitter = Math.floor(base * 0.12 * (Math.random() * 2 - 1));
-  return Math.max(1800, base + jitter);
+  return isBigBatch
+    ? Math.round(baseCooldown * 1.2) + Math.floor(Math.random() * 1000)
+    : baseCooldown + Math.floor(Math.random() * 1000);
 }
 
 // Tìm nút Like siêu tốc: Quét và đánh dấu trực tiếp trong DOM nội tại (0.5ms) thay vì gọi 25 lệnh CDP tuần tự
@@ -1136,31 +1383,59 @@ async function findLikeButtonOnTab(tab) {
   return null;
 }
 
-async function checkActionBlockedOnTab(tab) {
+/**
+ * Phát hiện hộp thoại hoặc trang cảnh báo chặn thao tác / nghi ngờ hành vi tự động từ Facebook
+ * @returns {Promise<{ blocked: boolean, automatedWarning: boolean, matched?: string, text?: string } | null>}
+ */
+async function detectActionBlockReason(tab) {
   try {
-    if (!tab || tab.isClosed()) return false;
+    if (!tab || tab.isClosed()) return null;
     const curUrl = tab.url() || '';
-    // Nếu tab đang ở trang chuyển tài khoản trung gian hoặc trang đăng nhập, không tính là Action Blocked
-    if (curUrl.includes('forced_account_switch') || curUrl.includes('/login') || curUrl.includes('/checkpoint')) {
-      return false;
+    if (curUrl.includes('forced_account_switch') || curUrl.includes('/login')) {
+      return null;
     }
 
-    const checkResult = await tab.evaluate(() => {
+    const automatedPhrases = [
+      'hành vi tự động',
+      'automated behavior',
+      'suspect automated',
+      'we suspect',
+      'nghi ngờ có hành vi tự động',
+      'xác nhận bạn là người thật',
+      'confirm you are human',
+      'bạn đang dùng tính năng này quá nhanh',
+      'going too fast',
+    ];
+
+    const blockedPhrases = [
+      ...automatedPhrases,
+      'bạn tạm thời bị chặn',
+      'hành động này bị chặn',
+      'bạn tạm thời bị hạn chế',
+      'you’re temporarily blocked',
+      'you\'re temporarily blocked',
+      'action blocked',
+      'không thể bày tỏ cảm xúc',
+      'tài khoản của bạn bị hạn chế',
+      'your account is restricted',
+      'we restrict certain activity',
+      'hãy thử lại sau',
+      'try again later',
+    ];
+
+    if (curUrl.includes('/checkpoint')) {
+      return {
+        blocked: true,
+        automatedWarning: true,
+        matched: '/checkpoint',
+        aria: 'url',
+        text: curUrl,
+      };
+    }
+
+    const checkResult = await tab.evaluate(({ blockedList, automatedList }) => {
       const dialogs = document.querySelectorAll('div[role="dialog"], div[role="alertdialog"], [role="alert"]');
-      const blockedPhrases = [
-        'bạn tạm thời bị chặn',
-        'hành động này bị chặn',
-        'bạn tạm thời bị hạn chế',
-        'you’re temporarily blocked',
-        'you\'re temporarily blocked',
-        'action blocked',
-        'không thể bày tỏ cảm xúc',
-        'tài khoản của bạn bị hạn chế',
-        'your account is restricted',
-        'we restrict certain activity',
-      ];
       for (const d of dialogs) {
-        // Bỏ qua modal xem bài viết, chọn profile, thông báo hệ thống thông thường
         const aria = (d.getAttribute('aria-label') || '').toLowerCase();
         if (
           aria.includes('bài viết') ||
@@ -1176,31 +1451,45 @@ async function checkActionBlockedOnTab(tab) {
         ) continue;
 
         const text = (d.innerText || '').toLowerCase();
-        // Bỏ qua cảnh báo về tài khoản quảng cáo (Ads restriction không ảnh hưởng đến like bài viết thông thường)
         if (text.includes('quảng cáo') || text.includes('advertising') || text.includes('ad account')) continue;
-        // Bỏ qua hướng dẫn chuyển tài khoản
         if (text.includes('chuyển sang') || text.includes('switch to')) continue;
 
-        // Chỉ coi là Action Blocked nếu popup có tiêu đề hoặc nội dung cảnh báo ngắn gọn
-        if (text.length > 0 && text.length < 500) {
-          const matched = blockedPhrases.find((phrase) => text.includes(phrase));
+        if (text.length > 0 && text.length < 700) {
+          const matched = blockedList.find((phrase) => text.includes(phrase));
           if (matched) {
-            return { blocked: true, matched, text: text.slice(0, 180), aria };
+            const automatedWarning = automatedList.some((p) => text.includes(p));
+            return { blocked: true, automatedWarning, matched, text: text.slice(0, 180), aria };
           }
         }
       }
+
+      // Kiểm tra thêm toàn trang khi Facebook đẩy qua màn hình cảnh báo không nằm trong dialog
+      const bodyText = (document.body ? document.body.innerText : '').toLowerCase();
+      if (bodyText.length > 0 && bodyText.length < 3000) {
+        const autoMatch = automatedList.find((p) => bodyText.includes(p));
+        if (autoMatch) {
+          return { blocked: true, automatedWarning: true, matched: autoMatch, text: bodyText.slice(0, 180), aria: 'body' };
+        }
+      }
       return null;
-    }).catch(() => null);
+    }, { blockedList: blockedPhrases, automatedList: automatedPhrases }).catch(() => null);
 
     if (checkResult && checkResult.blocked) {
-      console.warn(`[FB-Buff] 🛑 Action Blocked khớp cụm từ: "${checkResult.matched}" trong [aria="${checkResult.aria}"]: "${checkResult.text.replace(/\s+/g, ' ')}"`);
-      return true;
+      console.warn(
+        `[FB-Buff] 🛑 ${checkResult.automatedWarning ? 'CẢNH BÁO HÀNH VI TỰ ĐỘNG' : 'Action Blocked'} khớp "${checkResult.matched}" [${checkResult.aria}]: "${checkResult.text.replace(/\s+/g, ' ')}"`
+      );
+      return checkResult;
     }
 
-    return false;
+    return null;
   } catch (e) {
-    return false;
+    return null;
   }
+}
+
+async function checkActionBlockedOnTab(tab) {
+  const reason = await detectActionBlockReason(tab);
+  return Boolean(reason && reason.blocked);
 }
 
 /** Tự động đóng các popup / overlay làm phiền của Facebook (Lúc khác, Not now, Đóng, v.v.) */
@@ -1301,34 +1590,88 @@ async function checkFacebookContentUnavailable(tab) {
   }
 }
 
-/** Đảm bảo Tab luôn mở và kết nối còn tốt, tự động phục hồi nếu Tab bị crash hoặc đóng */
-async function ensureTabHealthy(context, currentTab) {
-  try {
-    if (!currentTab || currentTab.isClosed()) {
-      console.log('[FB-Buff] 🔄 Tab bị đóng hoặc ngắt kết nối, đang tự động khởi tạo tab mới...');
-      const newTab = await context.newPage();
-      await newTab.route('**/*.{png,jpg,jpeg,webp,gif,avif,ico,mp4,mov,m4v,avi,webm,m3u8,ts}', (route) => route.abort()).catch(() => { });
-      await newTab.route('**/*{google-analytics,doubleclick,connect.facebook.net/signals,pixel.facebook.com,facebook.com/tr/}*', (route) => route.abort()).catch(() => { });
-      return newTab;
+function registerLightweightTabRoutes(tab) {
+  if (!tab || tab._hasLightweightRoutes) return;
+  tab._hasLightweightRoutes = true;
+  tab._isCrashed = false;
+  if (!tab._hasCrashListener) {
+    tab._hasCrashListener = true;
+    tab.on('crash', () => {
+      tab._isCrashed = true;
+    });
+  }
+  tab.route('**/*.{png,jpg,jpeg,webp,gif,avif,ico,mp4,mov,m4v,avi,webm,m3u8,ts,woff,woff2,ttf,otf}', (route) => route.abort()).catch(() => {});
+  tab.route('**/*{google-analytics,doubleclick}*', (route) => route.abort()).catch(() => {});
+}
+
+/** Đảm bảo Tab luôn mở và kết nối còn tốt, tự động đóng tab crash/treo và tạo tab mới */
+async function ensureTabHealthy(context, currentTab, trackedTabs = null) {
+  let needsNewTab = !currentTab || currentTab.isClosed() || Boolean(currentTab._isCrashed);
+
+  if (!needsNewTab) {
+    if (!currentTab._hasCrashListener) {
+      currentTab._hasCrashListener = true;
+      currentTab.on('crash', () => {
+        currentTab._isCrashed = true;
+      });
     }
+    try {
+      await Promise.race([
+        currentTab.evaluate(() => 1),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Tab health probe timeout')), 4000)),
+      ]);
+      if (currentTab._isCrashed || currentTab.isClosed()) {
+        needsNewTab = true;
+      }
+    } catch {
+      needsNewTab = true;
+    }
+  }
+
+  if (!needsNewTab) {
     return currentTab;
+  }
+
+  if (currentTab) {
+    if (trackedTabs) trackedTabs.delete(currentTab);
+    if (!currentTab.isClosed()) {
+      await currentTab.close().catch(() => {});
+    }
+  }
+
+  try {
+    console.log('[FB-Buff] 🔄 Tab bị đóng, crash hoặc treo — đang tự động khởi tạo tab sạch mới...');
+    const newTab = await context.newPage();
+    registerLightweightTabRoutes(newTab);
+    if (trackedTabs) trackedTabs.add(newTab);
+    return newTab;
   } catch (err) {
-    const isBrowserDead = err.message && (
-      err.message.includes('closed') ||
-      err.message.includes('Target page') ||
-      err.message.includes('Connection closed') ||
-      err.message.includes('Target closed')
+    const msg = String(err?.message || '');
+    const isBrowserDead = (
+      msg.includes('closed') ||
+      msg.includes('Target page') ||
+      msg.includes('Connection closed') ||
+      msg.includes('Target closed')
     );
     if (isBrowserDead) {
-      console.error('[FB-Buff] 🛑 Trình duyệt Chromium đã bị đóng hoặc crash:', err.message);
-      const deadErr = new Error(`Trình duyệt Chromium đã bị đóng hoặc crash: ${err.message}`);
+      console.error('[FB-Buff] 🛑 Trình duyệt Chromium đã bị đóng hoặc crash toàn phiên:', msg);
+      const deadErr = new Error(`Trình duyệt Chromium đã bị đóng hoặc crash: ${msg}`);
       deadErr.isBrowserDead = true;
       throw deadErr;
     }
-    console.warn('[FB-Buff] ⚠️ Lỗi kiểm tra tab, tạo lại tab sạch:', err.message);
-    const newTab = await context.newPage();
-    return newTab;
+    throw err;
   }
+}
+
+/** Chủ động đóng tab cũ và tạo tab mới để giải phóng RAM renderer cho các lô dài */
+async function recycleHealthyTab(context, currentTab, trackedTabs = null) {
+  if (currentTab) {
+    if (trackedTabs) trackedTabs.delete(currentTab);
+    if (!currentTab.isClosed()) {
+      await currentTab.close().catch(() => {});
+    }
+  }
+  return ensureTabHealthy(context, null, trackedTabs);
 }
 
 async function dispatchSyntheticClick(el) {
@@ -1354,6 +1697,15 @@ async function dispatchSyntheticClick(el) {
   }
 }
 
+async function waitVisible(locator, timeoutMs = 2000) {
+  try {
+    await locator.waitFor({ state: 'visible', timeout: timeoutMs });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function getCurrentActor(tab) {
   return await tab.evaluate(() => {
     try {
@@ -1366,10 +1718,11 @@ async function getCurrentActor(tab) {
   }).catch(() => null);
 }
 
-async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '') {
+async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', options = {}) {
   const isProfileVia = !pageInfo.id || pageInfo.id === uid || pageInfo.isProfile === true;
   const targetId = String(pageInfo.id || uid);
   const targetName = (pageInfo.name || '').trim();
+  const skipAvatarModal = Boolean(options?.skipAvatarModal);
 
   // Kiểm tra xem hiện tại đã ở đúng danh tính chưa
   const currentActor = await getCurrentActor(tab);
@@ -1387,48 +1740,57 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '') {
 
   // Đóng các modal thừa nếu có
   await tab.keyboard.press('Escape').catch(() => { });
-  await tab.waitForTimeout(300);
+  await tab.waitForTimeout(200);
 
   // Bước 1: Mở menu Avatar góc trên cùng bên phải trong banner hoặc header navigation
-  let avatarBtn = tab.locator(
-    'div[role="banner"] div[role="button"][aria-label*="trang cá nhân"], ' +
-    'div[role="banner"] div[role="button"][aria-label*="Your profile"], ' +
-    'div[role="banner"] div[role="button"][aria-label*="Tài khoản"], ' +
-    'div[role="navigation"] div[role="button"][aria-label*="trang cá nhân"], ' +
-    'div[role="navigation"] div[role="button"][aria-label*="Tài khoản"], ' +
-    '[aria-label*="Tài khoản cá nhân"], [aria-label*="Account controls and settings"]'
-  ).first();
+  // (Bỏ qua nếu Voice Switcher đã mở và không thấy Page để đi thẳng qua profile.php?id=..., tiết kiệm 5-6s/page)
+  const avatarSelector =
+    'div[role="banner"] div[role="button"][aria-label*="trang cá nhân" i], ' +
+    'div[role="banner"] div[role="button"][aria-label*="Your profile" i], ' +
+    'div[role="banner"] div[role="button"][aria-label*="Account, your profile" i], ' +
+    'div[role="banner"] div[role="button"][aria-label*="Tài khoản" i], ' +
+    'div[role="navigation"] div[role="button"][aria-label*="trang cá nhân" i], ' +
+    'div[role="navigation"] div[role="button"][aria-label*="Your profile" i], ' +
+    'div[role="navigation"] div[role="button"][aria-label*="Tài khoản" i], ' +
+    '[aria-label*="Tài khoản cá nhân" i], [aria-label*="Account controls and settings" i]';
+  let avatarBtn = tab.locator(avatarSelector).last();
 
-  let hasAvatar = (await avatarBtn.count().catch(() => 0)) > 0 && (await avatarBtn.isVisible({ timeout: 800 }).catch(() => false));
+  let hasAvatar = skipAvatarModal ? false : await waitVisible(avatarBtn, 1500);
 
   // TỐI ƯU SIÊU TỐC: Chỉ khi giao diện hiện tại thực sự thiếu thanh header menu Avatar mới cần đưa về trang chủ
-  if (!hasAvatar) {
+  if (!skipAvatarModal && !hasAvatar) {
     const curSwitchUrl = tab.url() || '';
     if (curSwitchUrl.includes('/watch/') || !curSwitchUrl.includes('facebook.com')) {
       await tab.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => { });
-      await tab.waitForTimeout(600);
-      avatarBtn = tab.locator(
-        'div[role="banner"] div[role="button"][aria-label*="trang cá nhân"], ' +
-        'div[role="banner"] div[role="button"][aria-label*="Your profile"], ' +
-        'div[role="banner"] div[role="button"][aria-label*="Tài khoản"], ' +
-        '[aria-label*="Tài khoản cá nhân"]'
-      ).first();
+      avatarBtn = tab.locator(avatarSelector).last();
+      hasAvatar = await waitVisible(avatarBtn, 3000);
     }
   }
 
   let switched = false;
-  if (await avatarBtn.isVisible({ timeout: 1800 }).catch(() => false)) {
+  if (hasAvatar) {
     await avatarBtn.click({ force: true });
-    await tab.waitForTimeout(350);
 
     // Bước 2: Kiểm tra xem Page/Via mục tiêu có nằm ngay trong danh sách rút gọn không
     const searchTargetName = isProfileVia ? '' : targetName;
+    const seeAllBtn = tab.locator(
+      'div[role="button"]:has-text("Xem tất cả trang cá nhân"), ' +
+      'div[role="button"]:has-text("Xem tất cả các trang cá nhân"), ' +
+      'div[role="button"]:has-text("See all profiles"), ' +
+      'div[role="button"]:has-text("See all Profiles"), ' +
+      'div[role="button"]:has-text("Switch profiles"), ' +
+      '[aria-label*="See all profiles" i], [aria-label*="Xem tất cả trang" i]'
+    ).first();
+
+    // Chờ menu tài khoản render xong (đợi seeAllBtn hoặc mục quickPage xuất hiện)
+    await waitVisible(seeAllBtn, 2000);
+
     if (searchTargetName) {
       const quickPage = tab.locator(
         `div[role="menu"] div[role="button"]:has-text("${searchTargetName}"), ` +
         `div[role="dialog"] div[role="button"]:has-text("${searchTargetName}")`
       ).first();
-      if (await quickPage.isVisible({ timeout: 400 }).catch(() => false)) {
+      if (await waitVisible(quickPage, 400)) {
         await quickPage.click({ force: true });
         switched = true;
       }
@@ -1437,62 +1799,89 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '') {
       const viaOption = tab.locator(
         'div[role="menu"] div[role="button"], div[role="dialog"] div[role="button"]'
       ).first();
-      if (await viaOption.isVisible({ timeout: 400 }).catch(() => false)) {
+      if (await waitVisible(viaOption, 500)) {
         await viaOption.click({ force: true });
         switched = true;
       }
     }
 
     // Bước 3: Nếu chưa bấm được, mở modal "Xem tất cả trang cá nhân"
-    if (!switched) {
-      const seeAllBtn = tab.locator(
-        'div[role="button"]:has-text("Xem tất cả trang cá nhân"), ' +
-        'div[role="button"]:has-text("See all profiles")'
-      ).first();
+    if (!switched && (await waitVisible(seeAllBtn, 1200))) {
+      await seeAllBtn.click({ force: true });
 
-      if (await seeAllBtn.isVisible({ timeout: 800 }).catch(() => false)) {
-        await seeAllBtn.click({ force: true });
-        await tab.waitForTimeout(250);
+      // Bắt dialog chứa danh sách chuyển trang cá nhân
+      const profileDlg = tab.locator('div[role="dialog"]').filter({
+        has: tab.locator('input, [role="listitem"]'),
+      }).last();
+      const fallbackDlg = tab.locator('div[role="dialog"]').last();
+      const activeDlg = (await waitVisible(profileDlg, 2500)) ? profileDlg : ((await waitVisible(fallbackDlg, 1000)) ? fallbackDlg : null);
 
-        // Bắt bất kỳ dialog nào vừa mở ra sau khi bấm "Xem tất cả trang cá nhân"
-        let profileDlg = tab.locator('div[role="dialog"]').last();
-        if (!(await profileDlg.isVisible({ timeout: 800 }).catch(() => false))) {
-          profileDlg = tab.locator('div[role="dialog"]').first();
+      if (activeDlg) {
+        // 1. Kiểm tra nhanh nếu Page/Profile đã hiển thị ngay trong danh sách ban đầu của modal
+        let pageItem = activeDlg.locator('div[role="button"], div[role="listitem"]').filter({ hasText: targetName }).first();
+        if (await waitVisible(pageItem, 500)) {
+          await pageItem.click({ force: true });
+          switched = true;
         }
 
-        if (await profileDlg.isVisible({ timeout: 1000 }).catch(() => false)) {
-          // Lọc ưu tiên bằng ô tìm kiếm trong modal để tìm chính xác trong kho BM lớn (hàng trăm Fanpage)
-          const searchBox = profileDlg.locator(
-            'input[placeholder*="Tìm"], input[aria-label*="Tìm"], input[placeholder*="Search"], input[aria-label*="Search"], input[type="search"], input[type="text"]'
-          ).first();
-
-          if (await searchBox.isVisible({ timeout: 600 }).catch(() => false)) {
-            await searchBox.click({ force: true }).catch(() => {});
-            await searchBox.fill(targetName).catch(() => {});
+        // 2. Nếu chưa thấy, dùng ô tìm kiếm trong modal (nhập bằng DOM evaluate để an toàn không gây blur modal)
+        if (!switched && targetName) {
+          const hasSearchInput = await activeDlg.locator('input').first().isVisible({ timeout: 350 }).catch(() => false);
+          if (hasSearchInput) {
+            await tab.evaluate((name) => {
+              const dlg = document.querySelector('div[role="dialog"]');
+              if (!dlg) return;
+              const input = dlg.querySelector('input');
+              if (input) {
+                input.focus();
+                const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                if (setter) setter.call(input, name);
+                else input.value = name;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+            }, targetName).catch(() => {});
             await tab.waitForTimeout(250);
-            const filteredItem = profileDlg.locator(
-              `div[role="button"]:has-text("${targetName}"), ` +
-              `div[role="listitem"]:has-text("${targetName}"), ` +
-              `[aria-label*="${targetName}"]`
-            ).first();
-            if (await filteredItem.isVisible({ timeout: 800 }).catch(() => false)) {
-              await filteredItem.click({ force: true });
-              switched = true;
-            }
-          }
 
-          if (!switched) {
-            const pageItem = profileDlg.locator(
-              `div[role="button"]:has-text("${targetName}"), ` +
-              `div[role="listitem"]:has-text("${targetName}"), ` +
-              `[aria-label*="${targetName}"]`
-            ).first();
-
-            if (await pageItem.isVisible({ timeout: 500 }).catch(() => false)) {
+            pageItem = activeDlg.locator('div[role="button"], div[role="listitem"]').filter({ hasText: targetName }).first();
+            if (await waitVisible(pageItem, 700)) {
               await pageItem.click({ force: true });
               switched = true;
             }
           }
+        }
+
+        // 3. Nếu vẫn chưa thấy, cuộn nhanh danh sách (hỗ trợ tài khoản có hàng chục - hàng trăm Page)
+        if (!switched && targetName) {
+          for (let scrollAttempt = 0; scrollAttempt < 8 && !switched; scrollAttempt++) {
+            await activeDlg.evaluate((dlg) => {
+              const scrollable = dlg.querySelector('div[style*="overflow"], [role="list"]') || dlg;
+              scrollable.scrollTop += 500;
+            }).catch(() => {});
+            await tab.waitForTimeout(180);
+
+            pageItem = activeDlg.locator('div[role="button"], div[role="listitem"]').filter({ hasText: targetName }).first();
+            if (await waitVisible(pageItem, 350)) {
+              await pageItem.click({ force: true });
+              switched = true;
+              break;
+            }
+
+            const seeMoreBtn = activeDlg.locator(
+              'div[role="button"]:has-text("Xem thêm"), div[role="button"]:has-text("See more")'
+            ).first();
+            if (await waitVisible(seeMoreBtn, 200)) {
+              await seeMoreBtn.click({ force: true }).catch(() => {});
+            }
+          }
+        }
+
+        if (switched) {
+          await tab.waitForFunction(() => {
+            const text = document.body ? document.body.innerText : '';
+            return !text.includes('Đang chuyển sang') && !text.includes('Switching to');
+          }, { timeout: 8000 }).catch(() => {});
+          await tab.waitForTimeout(250);
         }
       }
     }
@@ -1500,45 +1889,86 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '') {
 
   // Fallback nếu không click được qua menu banner
   if (!switched) {
+    // Xóa i_user trước khi mở profile.php: khi đang mang i_user của Page trước, Facebook ẩn nút "Switch Now" / "Chuyển ngay"
+    await context.clearCookies({ name: 'i_user' }).catch(() => { });
+    await tab.waitForTimeout(250);
+
+    const openProfileUrl = async (profileId) => {
+      const profileUrl = `https://www.facebook.com/profile.php?id=${profileId}`;
+      for (let navTry = 0; navTry < 2; navTry++) {
+        await tab.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => { });
+        if ((tab.url() || '').includes(String(profileId))) return true;
+        await tab.waitForTimeout(400);
+      }
+      return (tab.url() || '').includes(String(profileId));
+    };
+
     if (isProfileVia) {
-      await tab.goto(`https://www.facebook.com/profile.php?id=${uid}`, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => { });
-      const switchBtn = tab.locator('div[role="button"]:has-text("Chuyển ngay"), div[role="button"]:has-text("Chuyển")').first();
-      if (await switchBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await openProfileUrl(uid);
+      const switchBtn = tab.locator(
+        'div[aria-label="Switch Now"], div[aria-label="Chuyển ngay"], ' +
+        'div[role="button"]:has-text("Chuyển ngay"), div[role="button"]:has-text("Switch Now"), ' +
+        'div[role="button"]:has-text("Chuyển"), div[role="button"]:has-text("Switch")'
+      ).first();
+      if (await waitVisible(switchBtn, 4000)) {
         await switchBtn.click({ force: true }).catch(() => { });
+        switched = true;
       }
     } else {
-      await tab.goto(`https://www.facebook.com/profile.php?id=${pageInfo.id}`, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => { });
-      const switchBtn = tab.locator('div[role="button"]:has-text("Chuyển ngay"), div[role="button"]:has-text("Chuyển"), [aria-label*="Chuyển sang"], div[role="button"]:has-text("Switch now")').first();
-      if (await switchBtn.isVisible({ timeout: 2500 }).catch(() => false)) {
-        await switchBtn.click({ force: true }).catch(() => { });
-        await tab.waitForTimeout(600);
+      await openProfileUrl(pageInfo.id);
+      const primarySwitchBtn = tab.locator(
+        'div[role="button"][aria-label="Chuyển ngay"], div[role="button"][aria-label="Switch Now"], ' +
+        'div[aria-label="Switch Now"], div[aria-label="Chuyển ngay"], ' +
+        'div[role="button"]:text-is("Chuyển ngay"), div[role="button"]:text-is("Switch Now"), ' +
+        'div[role="button"]:text-is("Switch now"), [aria-label*="Switch into" i]'
+      ).first();
+      const secondarySwitchBtn = tab.locator(
+        'div[role="button"][aria-label="Chuyển"], div[role="button"][aria-label="Switch"], ' +
+        'div[role="button"]:text-is("Chuyển"), div[role="button"]:text-is("Switch")'
+      ).first();
+
+      let switchBtn = null;
+      let clickedPrimary = false;
+      if (await waitVisible(primarySwitchBtn, 4500)) {
+        switchBtn = primarySwitchBtn;
+        clickedPrimary = true;
+      } else if (await waitVisible(secondarySwitchBtn, 1500)) {
+        switchBtn = secondarySwitchBtn;
+      }
+
+      if (switchBtn) {
+        await switchBtn.click().catch(async () => {
+          await switchBtn.click({ force: true }).catch(() => {});
+        });
+        await tab.waitForTimeout(500);
 
         // Kiểm tra nếu Facebook yêu cầu chuyển sang Via khác (không thuộc quyền của Via hiện tại)
         const mismatchDlg = tab.locator('div[role="dialog"]').filter({
           hasText: /Bạn cần chuyển sang|Chuyển tài khoản|You need to switch to/i
         }).first();
-        if (await mismatchDlg.isVisible({ timeout: 1500 }).catch(() => false)) {
+        if (await waitVisible(mismatchDlg, 800)) {
           console.warn(`[FB-Buff]${workerTag} ⚠️ Page "${pageInfo.name}" (${pageInfo.id}) thuộc quản trị của Via khác. Tự động bỏ qua.`);
+          pageInfo._switchErrorType = 'WRONG_VIA';
           await tab.keyboard.press('Escape').catch(() => { });
-          await tab.waitForTimeout(400);
+          await tab.waitForTimeout(300);
           return false;
         }
 
-        // Bắt và bấm nút "Chuyển" trong hộp thoại xác nhận đổi trang cá nhân Pro5 nếu có
-        const modalConfirm = tab.locator(
-          'div[role="dialog"] div[role="button"]:has-text("Chuyển"), ' +
-          'div[role="dialog"] div[role="button"]:has-text("Switch"), ' +
-          'div[role="dialog"] [aria-label*="Chuyển sang"]'
-        ).first();
-        if (await modalConfirm.isVisible({ timeout: 2500 }).catch(() => false)) {
-          await modalConfirm.click({ force: true }).catch(() => { });
-          switched = true;
-          await tab.waitForTimeout(1000);
-        } else {
-          // Nút switchBtn đã được click thành công trực tiếp (Facebook chuyển ngay không hiện popup)
-          switched = true;
-          await tab.waitForTimeout(600);
+        // Bắt và bấm nút "Chuyển" trong hộp thoại xác nhận đổi trang cá nhân Pro5 nếu mở modal
+        if (!clickedPrimary) {
+          const modalConfirm = tab.locator(
+            'div[role="dialog"] div[role="button"][aria-label="Chuyển"], ' +
+            'div[role="dialog"] div[role="button"][aria-label="Switch"], ' +
+            'div[role="dialog"] div[role="button"]:text-is("Chuyển"), ' +
+            'div[role="dialog"] div[role="button"]:text-is("Switch")'
+          ).last();
+          if (await waitVisible(modalConfirm, 2000)) {
+            await modalConfirm.click().catch(async () => {
+              await modalConfirm.click({ force: true }).catch(() => {});
+            });
+          }
         }
+        switched = true;
       }
     }
   }
@@ -1547,34 +1977,52 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '') {
   await tab.keyboard.press('Escape').catch(() => { });
 
   if (switched) {
+    // Chờ Facebook hoàn tất request GraphQL đổi cookie i_user trên server trước khi điều hướng (tránh cắt ngang request!)
+    const wantsPageCookie = Boolean(pageInfo.id && pageInfo.id !== uid && !pageInfo.isProfile);
+    const cookieDeadline = Date.now() + 5000;
+    while (Date.now() < cookieDeadline) {
+      const ctxCookies = await context.cookies('https://www.facebook.com').catch(() => []);
+      const iUser = ctxCookies.find((c) => c.name === 'i_user')?.value || '';
+      if (wantsPageCookie && iUser === targetId) break;
+      if (!wantsPageCookie && !iUser) break;
+      await tab.waitForTimeout(300);
+    }
+
     // Chờ Facebook thực hiện điều hướng chuyển sang phiên tài khoản mới hoàn tất
+    await tab.waitForFunction(() => {
+      const text = document.body ? document.body.innerText : '';
+      return !text.includes('Đang chuyển sang') && !text.includes('Switching to');
+    }, { timeout: 10000 }).catch(() => {});
     await Promise.race([
-      tab.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 3500 }),
-      tab.waitForTimeout(1100),
+      tab.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 2500 }),
+      tab.waitForTimeout(350),
     ]).catch(() => { });
-    await tab.waitForTimeout(150);
 
     const usePageBtn = tab.locator('div[role="button"]:has-text("Dùng Trang"), div[role="button"]:has-text("Use Page")').first();
-    if (await usePageBtn.isVisible({ timeout: 400 }).catch(() => false)) {
+    if (await waitVisible(usePageBtn, 350)) {
       await usePageBtn.click({ force: true }).catch(() => { });
       await tab.waitForTimeout(100);
     }
-  }
 
-  // Cập nhật cookie i_user cho Playwright context (chìa khóa để Facebook nhận diện actor Fanpage)
-  if (pageInfo.id && pageInfo.id !== uid && !pageInfo.isProfile) {
-    await context.addCookies([
-      {
-        name: 'i_user',
-        value: String(pageInfo.id),
-        domain: '.facebook.com',
-        path: '/',
-        secure: true,
-        sameSite: 'Lax',
-      },
-    ]).catch(() => { });
+    // Cập nhật cookie i_user cho Playwright context khi chuyển thành công
+    if (wantsPageCookie) {
+      await context.addCookies([
+        {
+          name: 'i_user',
+          value: String(pageInfo.id),
+          domain: '.facebook.com',
+          path: '/',
+          secure: true,
+          sameSite: 'Lax',
+        },
+      ]).catch(() => { });
+    } else {
+      await context.clearCookies({ name: 'i_user' }).catch(() => { });
+    }
   } else {
     await context.clearCookies({ name: 'i_user' }).catch(() => { });
+    console.warn(`[FB-Buff]${workerTag} ⚠️ Không thể tìm nút chuyển sang danh tính "${pageInfo.name}" (${pageInfo.id}) trên Facebook.`);
+    return false;
   }
 
   return true;
@@ -1710,19 +2158,23 @@ async function executePageInteraction({
   workerTag = '',
   speedMode = 'SMART',
   signal = null,
+  shouldStop = null,
 }) {
-  if (signal?.aborted) {
+  if (signal?.aborted || (typeof shouldStop === 'function' && shouldStop())) {
     return {
       aborted: true,
-      deadReason: 'Tác vụ đã bị dừng bởi AbortSignal / Lease hết hạn',
+      deadReason: 'Tác vụ đã dừng do đạt đủ KPI hoặc có lệnh dừng',
       item: {
         pageId: pageInfo.id,
         pageName: pageInfo.name,
         status: 'SKIPPED',
-        error: 'Tác vụ đã bị hủy bởi AbortSignal',
-      },
-    };
-  }
+        likeStatus: 'SKIPPED',
+        commentStatus: 'SKIPPED',
+        shareStatus: 'SKIPPED',
+        message: 'Bỏ qua do đã đạt đủ KPI mục tiêu',
+    },
+  };
+}
 
   // BƯỚC 0: KIỂM TRA ĐĂNG XUẤT / HẾT HẠN COOKIE TRÊN TAB
   const isLoginPageOnTab = await tab.evaluate(() => {
@@ -1759,10 +2211,12 @@ async function executePageInteraction({
   let usedCommentText = '';
   let currentReaction = (reactionType || 'LIKE').toUpperCase();
   let isActionBlocked = false;
+  let isAutomatedWarning = false;
 
   try {
     // BƯỚC 1: CHUYỂN ĐỔI DANH TÍNH
     let fastSwitched = false;
+    let voiceSwitchMissed = false;
     const curTabUrl = tab.url();
     const isFacebookHome = curTabUrl === 'https://www.facebook.com/' ||
       curTabUrl === 'https://www.facebook.com' ||
@@ -1819,7 +2273,8 @@ async function executePageInteraction({
         '[aria-label*="Bình luận với tư cách" i], [aria-label*="Comment as" i], [aria-label*="Tương tác bằng" i], ' +
         '[aria-label*="Switch to profile" i], [aria-label*="Interact as" i], [aria-label*="Chọn cách tương tác" i], ' +
         '[aria-label*="Choose how to interact" i], div[aria-haspopup="menu"][aria-label*="trang cá nhân" i], ' +
-        'div[aria-haspopup="menu"][aria-label*="profile" i]'
+        'div[aria-haspopup="menu"][aria-label*="profile" i], ' +
+        'div[role="button"]:has-text("Comment as"), div[role="button"]:has-text("Bình luận dưới tên")'
       ).first();
 
       if ((await voiceBtn.count().catch(() => 0)) > 0 && (await voiceBtn.isVisible().catch(() => false))) {
@@ -1830,76 +2285,60 @@ async function executePageInteraction({
           await voiceBtn.click({ force: true }).catch(() => { });
           await tab.waitForTimeout(450);
 
-          let pageOpt = tab.locator(
-            `[role="dialog"] [aria-label*="${pageInfo.name}"], [role="menu"] [aria-label*="${pageInfo.name}"], div[role="dialog"] div:has-text("${pageInfo.name}"), [role="menu"] div:has-text("${pageInfo.name}")`
-          ).last();
+          const voiceItemSel =
+            `[role="dialog"] [role="button"]:has-text("${pageInfo.name}"), ` +
+            `[role="dialog"] [role="menuitem"]:has-text("${pageInfo.name}"), ` +
+            `[role="dialog"] [role="menuitemradio"]:has-text("${pageInfo.name}"), ` +
+            `[role="dialog"] [role="option"]:has-text("${pageInfo.name}"), ` +
+            `[role="dialog"] [role="radio"]:has-text("${pageInfo.name}"), ` +
+            `[role="menu"] [role="button"]:has-text("${pageInfo.name}"), ` +
+            `[role="menu"] [role="menuitem"]:has-text("${pageInfo.name}"), ` +
+            `[role="menu"] [role="menuitemradio"]:has-text("${pageInfo.name}"), ` +
+            `[role="dialog"] [aria-label*="${pageInfo.name}"]:not(input), ` +
+            `[role="menu"] [aria-label*="${pageInfo.name}"]:not(input)`;
 
-          if ((await pageOpt.count().catch(() => 0)) > 0 && (await pageOpt.isVisible().catch(() => false))) {
+          let pageOpt = tab.locator(voiceItemSel).first();
+
+          if (await waitVisible(pageOpt, 500)) {
             await pageOpt.click({ force: true }).catch(() => { });
             // Chờ Facebook hoàn tất vòng xoay chuyển danh tính (đợi "Đang chuyển sang..." biến mất)
             await tab.waitForFunction(() => {
               const text = document.body ? document.body.innerText : '';
               return !text.includes('Đang chuyển sang') && !text.includes('Switching to');
-            }, { timeout: 15000 }).catch(() => { });
-            await tab.waitForTimeout(650);
+            }, { timeout: 12000 }).catch(() => { });
+            await tab.waitForTimeout(450);
             fastSwitched = true;
             console.log(`[FB-Buff]${workerTag} ⚡ [FAST-SWITCH] Đã đổi sang Page "${pageInfo.name}" ngay trên bài viết!`);
           } else {
-            // Tìm ô search trong modal chọn Page (tránh nhầm ô tìm kiếm Facebook trên header)
-            const searchBox = tab.locator(
-              'div[role="dialog"] input[placeholder*="Tìm kiếm trang cá nhân"], ' +
-              'div[role="dialog"] input[aria-label*="Tìm kiếm trang cá nhân"], ' +
-              'div[role="dialog"] input[placeholder*="Search profiles"], ' +
-              'div[role="dialog"] input[aria-label*="Search profiles"], ' +
-              'div[role="dialog"] input[type="text"]:not([aria-label*="Facebook"]), ' +
-              'div[role="dialog"] input[type="search"]:not([aria-label*="Facebook"]), ' +
-              '[role="menu"] input, div[role="dialog"] [role="searchbox"]'
+            // Tránh gõ vào searchBox (FB đóng dialog khi nhập input); thử mở rộng 1 lần nhanh, nếu không có thì đóng và đi thẳng qua profile.php
+            const seeMoreVoice = tab.locator(
+              'div[role="dialog"] div[role="button"]:has-text("Xem thêm trang"), ' +
+              'div[role="dialog"] div[role="button"]:has-text("See more Pages"), ' +
+              'div[role="dialog"] div[role="button"]:has-text("See more pages")'
             ).first();
-
-            if ((await searchBox.count().catch(() => 0)) > 0 && (await searchBox.isVisible().catch(() => false))) {
-              await searchBox.click({ force: true }).catch(() => { });
-              await searchBox.fill(pageInfo.name).catch(() => { });
-              await tab.waitForTimeout(800);
-
-              const filteredOpt = tab.locator(
-                `[role="dialog"] [aria-label*="${pageInfo.name}"], [role="menu"] [aria-label*="${pageInfo.name}"], div[role="dialog"] div:has-text("${pageInfo.name}")`
-              ).last();
-
-              if ((await filteredOpt.count().catch(() => 0)) > 0 && (await filteredOpt.isVisible().catch(() => false))) {
-                await filteredOpt.click({ force: true }).catch(() => { });
-                await tab.waitForFunction(() => {
-                  const text = document.body ? document.body.innerText : '';
-                  return !text.includes('Đang chuyển sang') && !text.includes('Switching to');
-                }, { timeout: 15000 }).catch(() => { });
-                await tab.waitForTimeout(650);
-                fastSwitched = true;
-                console.log(`[FB-Buff]${workerTag} ⚡ [FAST-SWITCH SEARCH] Đã lọc và đổi sang Page "${pageInfo.name}" trong kho BM!`);
-              }
-            }
-
-            if (!fastSwitched) {
+            if (await waitVisible(seeMoreVoice, 350)) {
+              await seeMoreVoice.click({ force: true }).catch(() => {});
+              await tab.waitForTimeout(450);
+            } else {
               await tab.evaluate(() => {
                 const scrollable = document.querySelector('div[role="dialog"] [role="list"], div[role="dialog"] div[style*="overflow"]');
-                if (scrollable) scrollable.scrollBy(0, 500);
-              }).catch(() => { });
-              await tab.waitForTimeout(400);
+                if (scrollable) scrollable.scrollBy(0, 600);
+              }).catch(() => {});
+            }
 
-              const retryOpt = tab.locator(
-                `[role="dialog"] [aria-label*="${pageInfo.name}"], [role="menu"] [aria-label*="${pageInfo.name}"]`
-              ).last();
-
-              if ((await retryOpt.count().catch(() => 0)) > 0 && (await retryOpt.isVisible().catch(() => false))) {
-                await retryOpt.click({ force: true }).catch(() => { });
-                await tab.waitForFunction(() => {
-                  const text = document.body ? document.body.innerText : '';
-                  return !text.includes('Đang chuyển sang') && !text.includes('Switching to');
-                }, { timeout: 15000 }).catch(() => { });
-                await tab.waitForTimeout(650);
-                fastSwitched = true;
-                console.log(`[FB-Buff]${workerTag} ⚡ [FAST-SWITCH SCROLL] Đã cuộn tìm và đổi sang Page "${pageInfo.name}"!`);
-              } else {
-                await tab.keyboard.press('Escape').catch(() => { });
-              }
+            const retryOpt = tab.locator(voiceItemSel).first();
+            if (await waitVisible(retryOpt, 450)) {
+              await retryOpt.click({ force: true }).catch(() => { });
+              await tab.waitForFunction(() => {
+                const text = document.body ? document.body.innerText : '';
+                return !text.includes('Đang chuyển sang') && !text.includes('Switching to');
+              }, { timeout: 12000 }).catch(() => { });
+              await tab.waitForTimeout(450);
+              fastSwitched = true;
+              console.log(`[FB-Buff]${workerTag} ⚡ [FAST-SWITCH SCROLL] Đã tìm và đổi sang Page "${pageInfo.name}"!`);
+            } else {
+              voiceSwitchMissed = true;
+              await tab.keyboard.press('Escape').catch(() => { });
             }
           }
         }
@@ -1921,11 +2360,25 @@ async function executePageInteraction({
         // Chỉ cần chờ ngắn 450ms để DOM Facebook cập nhật actor mới
         await tab.waitForTimeout(450);
       }
+
+      // Kiểm tra lại danh tính thực tế ngay sau Fast-Switch; nếu chưa đổi thì fallback sang Switch chuẩn
+      const postFastActor = await getCurrentActor(tab);
+      if (postFastActor && pageInfo.id && pageInfo.id !== uid && !pageInfo.isProfile) {
+        const fastMatched =
+          postFastActor.id === String(pageInfo.id) ||
+          (pageInfo.name && postFastActor.name && postFastActor.name.toLowerCase() === pageInfo.name.toLowerCase());
+        if (!fastMatched) {
+          console.warn(`[FB-Buff]${workerTag} ⚠️ Fast-Switch chưa đổi được danh tính (vẫn là "${postFastActor.name}"), tự động chuyển sang Switch chuẩn...`);
+          await tab.keyboard.press('Escape').catch(() => { });
+          fastSwitched = false;
+        }
+      }
     }
 
     if (!fastSwitched) {
-      const switchOk = await switchTabIdentity(tab, context, pageInfo, uid, workerTag);
+      const switchOk = await switchTabIdentity(tab, context, pageInfo, uid, workerTag, { skipAvatarModal: voiceSwitchMissed });
       if (!switchOk) {
+        recordPageSwitchOutcome(uid, pageInfo.id, false, pageInfo._switchErrorType || 'SWITCH_FAILED');
         throw new Error(`Không thể chuyển sang danh tính Fanpage "${pageInfo.name}" (${pageInfo.id}) trên Facebook`);
       }
 
@@ -2004,14 +2457,11 @@ async function executePageInteraction({
       if (Math.random() < 0.15 && currentSpeed !== 'TURBO') {
         await tab.evaluate(() => {
           const dlg = document.querySelector('div[role="dialog"]');
-          if (dlg) dlg.scrollBy({ top: -(25 + Math.floor(Math.random() * 40)), behavior: 'smooth' });
-          else window.scrollBy({ top: -(25 + Math.floor(Math.random() * 40)), behavior: 'smooth' });
+          if (dlg) dlg.scrollBy({ top: -(20 + Math.floor(Math.random() * 40)), behavior: 'smooth' });
+          else window.scrollBy({ top: -(20 + Math.floor(Math.random() * 40)), behavior: 'smooth' });
         }).catch(() => { });
-        await tab.waitForTimeout(150 + Math.floor(Math.random() * 150));
+        await tab.waitForTimeout(200);
       }
-    } else {
-      // Giữ thời gian dừng tối thiểu an toàn để không bị FB gắn cờ bot click tức thì
-      await tab.waitForTimeout(250 + Math.floor(Math.random() * 200));
     }
 
     // BƯỚC 3: PHÂN BỔ CẢM XÚC THÔNG MINH
@@ -2079,13 +2529,30 @@ async function executePageInteraction({
 
       if (likeBtn) {
         // KIỂM TRA CHẮC CHẮN DANH TÍNH TRƯỚC KHI LIKE (Chống like nhầm bằng nick Mẹ)
-        const currentActor = await getCurrentActor(tab);
+        let currentActor = await getCurrentActor(tab);
         if (currentActor && pageInfo.id && pageInfo.id !== uid && !pageInfo.isProfile) {
-          const isMatched = currentActor.id === String(pageInfo.id) ||
+          let isMatched = currentActor.id === String(pageInfo.id) ||
             (pageInfo.name && currentActor.name && currentActor.name.toLowerCase() === pageInfo.name.toLowerCase());
           if (!isMatched) {
-            console.warn(`[FB-Buff]${workerTag} ⚠️ Danh tính chưa khớp! Kỳ vọng "${pageInfo.name}" (${pageInfo.id}) nhưng hiện tại là "${currentActor.name}" (${currentActor.id}). TỪ CHỐI LIKE để bảo vệ Via.`);
-            throw new Error(`Chưa chuyển được danh tính sang Page "${pageInfo.name}" (Hiện tại: ${currentActor.name})`);
+            // Nếu cookie i_user đã mang ID Page mới nhưng CurrentUserInitialData trên SPA bị cũ, tải lại tab 1 lần để làm mới actor
+            const ctxCookies = await context.cookies('https://www.facebook.com').catch(() => []);
+            const iUserCookie = ctxCookies.find((c) => c.name === 'i_user')?.value || '';
+            if (iUserCookie === String(pageInfo.id)) {
+              console.log(`[FB-Buff]${workerTag} 🔄 Cookie đã sang Page "${pageInfo.name}" (${pageInfo.id}) nhưng DOM cũ vẫn ghi "${currentActor.name}", đang tải lại bài viết để đồng bộ...`);
+              await tab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+              await tab.waitForTimeout(800);
+              currentActor = await getCurrentActor(tab);
+              isMatched = Boolean(currentActor && (
+                currentActor.id === String(pageInfo.id) ||
+                (pageInfo.name && currentActor.name && currentActor.name.toLowerCase() === pageInfo.name.toLowerCase())
+              ));
+              const refreshedBtn = await findLikeButtonOnTab(tab);
+              if (refreshedBtn) likeBtn = refreshedBtn;
+            }
+          }
+          if (!isMatched) {
+            console.warn(`[FB-Buff]${workerTag} ⚠️ Danh tính chưa khớp! Kỳ vọng "${pageInfo.name}" (${pageInfo.id}) nhưng hiện tại là "${currentActor?.name}" (${currentActor?.id}). TỪ CHỐI LIKE để bảo vệ Via.`);
+            throw new Error(`Chưa chuyển được danh tính sang Page "${pageInfo.name}" (Hiện tại: ${currentActor?.name || 'N/A'})`);
           }
         }
 
@@ -2102,6 +2569,23 @@ async function executePageInteraction({
           console.log(`[FB-Buff]${workerTag} ℹ️ Page "${pageInfo.name}" đã Like trước đó (Trạng thái: ${currentAria}).`);
           likeStatus = 'ALREADY_LIKED';
         } else {
+          // KIỂM TRA CHẶN VƯỢT SCOPE: Nếu trước khi bấm Like mà đã đạt đủ KPI hoặc có lệnh dừng, SKIP ngay
+          if (typeof shouldStop === 'function' && shouldStop()) {
+            console.warn(`[FB-Buff]${workerTag} 🛑 Đã đạt đủ KPI / nhận lệnh dừng, hủy lượt Like của Page "${pageInfo.name}" để không vượt scope.`);
+            likeStatus = 'SKIPPED';
+            return {
+              item: {
+                pageId: pageInfo.id,
+                pageName: pageInfo.name,
+                status: 'SKIPPED',
+                likeStatus: 'SKIPPED',
+                commentStatus: 'SKIPPED',
+                shareStatus: 'SKIPPED',
+                message: 'Hủy like do đã đạt đủ KPI mục tiêu',
+              },
+            };
+          }
+
           if (currentReaction === 'LIKE') {
             await dispatchSyntheticClick(likeBtn);
             const verifyTimeout = speedMode === 'TURBO' ? 700 : speedMode === 'FAST' ? 1200 : 2000;
@@ -2157,20 +2641,27 @@ async function executePageInteraction({
             console.log(`[FB-Buff]${workerTag} ${verified ? '✅' : '❔'} Page "${pageInfo.name}" thả ${currentReaction} ${verified ? 'đã xác nhận' : 'chưa xác nhận được trạng thái nút'}.`);
           }
 
-          if (await checkActionBlockedOnTab(tab)) {
-            console.warn(`[FB-Buff]${workerTag} ⚠️ Facebook cảnh báo chặn hành động sau khi like bằng Page "${pageInfo.name}".`);
+          const blockInfoAfterClick = await detectActionBlockReason(tab);
+          if (blockInfoAfterClick && blockInfoAfterClick.blocked) {
+            console.warn(`[FB-Buff]${workerTag} ⚠️ Facebook cảnh báo sau khi like bằng Page "${pageInfo.name}" (${blockInfoAfterClick.matched}).`);
             likeStatus = 'ERROR';
-            likeError = 'Facebook tạm thời hạn chế hành động (Action Blocked)';
+            isAutomatedWarning = Boolean(blockInfoAfterClick.automatedWarning);
+            likeError = isAutomatedWarning
+              ? 'Facebook cảnh báo nghi ngờ hành vi tự động - Dừng ngay bảo vệ Via'
+              : 'Facebook tạm thời hạn chế hành động (Action Blocked)';
             isActionBlocked = true;
           }
         }
       } else {
-        const isBlockedOnMissing = await checkActionBlockedOnTab(tab);
-        if (isBlockedOnMissing) {
+        const blockInfoMissing = await detectActionBlockReason(tab);
+        if (blockInfoMissing && blockInfoMissing.blocked) {
           isActionBlocked = true;
+          isAutomatedWarning = Boolean(blockInfoMissing.automatedWarning);
           likeStatus = 'ERROR';
-          likeError = 'Facebook tạm thời hạn chế do thao tác nhanh (Action Blocked) - Tự động dừng bảo vệ Via';
-          console.warn(`[FB-Buff]${workerTag} 🛑 PHÁT HIỆN FACEBOOK CHẶN HÀNH ĐỘNG (Rate Limit): "Bạn tạm thời bị chặn do sử dụng quá nhanh" trên Page "${pageInfo.name}"!`);
+          likeError = isAutomatedWarning
+            ? 'Facebook cảnh báo nghi ngờ hành vi tự động - Tự động dừng bảo vệ Via'
+            : 'Facebook tạm thời hạn chế do thao tác nhanh (Action Blocked) - Tự động dừng bảo vệ Via';
+          console.warn(`[FB-Buff]${workerTag} 🛑 PHÁT HIỆN FACEBOOK CẢNH BÁO (${blockInfoMissing.matched}) trên Page "${pageInfo.name}"!`);
         } else {
           const currentUrl = tab.url();
           const isUnavailable = await checkFacebookContentUnavailable(tab);
@@ -2327,7 +2818,7 @@ async function executePageInteraction({
       else msgs.push(`Lỗi like: ${likeError || 'Không thể like'}`);
     }
     if (enableComment) {
-      if (commentStatus === 'SUCCESS') msgs.push(`Đã cmt: "${usedCommentText}"`);
+      if (commentStatus === 'SUCCESS') msgs.push('Đã bình luận');
       else if (commentStatus === 'SKIPPED') msgs.push('Bỏ qua cmt');
       else msgs.push(`Lỗi cmt: ${commentError || 'Không gửi được'}`);
     }
@@ -2347,6 +2838,13 @@ async function executePageInteraction({
     else finalStatus = 'ERROR';
 
     if (finalStatus === 'SUCCESS' || finalStatus === 'ALREADY_LIKED' || finalStatus === 'UNVERIFIED') {
+      const currentTabUrl = tab.url();
+      const canonicalUrl = isValidCanonicalFbPostUrl(currentTabUrl)
+        ? currentTabUrl
+        : isValidCanonicalFbPostUrl(targetUrl)
+          ? targetUrl
+          : '';
+      recordPageSwitchOutcome(uid, pageInfo.id, true);
       recordPageAction(pageInfo.id);
       recordPagePostInteraction(normalizedPostUrl, pageInfo.id, {
         reactionType: currentReaction,
@@ -2354,11 +2852,13 @@ async function executePageInteraction({
         shareStatus,
         status: finalStatus,
         pageName: pageInfo.name,
+        canonicalUrl,
       });
     }
 
     return {
       actionBlocked: isActionBlocked,
+      automatedWarning: isAutomatedWarning,
       item: {
         pageId: pageInfo.id,
         pageName: pageInfo.name,
@@ -2373,22 +2873,35 @@ async function executePageInteraction({
     };
   } catch (err) {
     console.error(`[FB-Buff]${workerTag} ❌ Lỗi khi Page "${pageInfo.name}" tương tác: ${err.message}`);
-    const isBrowserDead = Boolean(
-      err.isBrowserDead ||
-      (err.message && (
-        err.message.includes('closed') ||
-        err.message.includes('Target page') ||
-        err.message.includes('Connection closed') ||
-        err.message.includes('Target closed')
-      ))
+    const errMsg = String(err?.message || '');
+    const isTabCrashed = Boolean(
+      errMsg.includes('Page crashed') ||
+      errMsg.includes('Target crashed') ||
+      errMsg.includes('Tab health probe timeout')
     );
-    const isBlockedOnCatch = isBrowserDead ? false : await checkActionBlockedOnTab(tab).catch(() => false);
-    const isCp = Boolean(err.message?.includes('checkpoint') || err.message?.includes('xác minh người thật'));
-    const isExp = Boolean(err.message?.includes('Cookie hết hạn') || err.message?.includes('đăng nhập') || err.message?.includes('/login'));
+    const isBrowserDead = Boolean(
+      !isTabCrashed && (
+        err.isBrowserDead ||
+        errMsg.includes('Browser has been closed') ||
+        errMsg.includes('Target page, context or browser has been closed') ||
+        errMsg.includes('Connection closed') ||
+        errMsg.includes('Target closed')
+      )
+    );
+    if (isTabCrashed && tab) {
+      tab._isCrashed = true;
+    }
+    const blockOnCatch = (isBrowserDead || isTabCrashed) ? null : await detectActionBlockReason(tab).catch(() => null);
+    const isBlockedOnCatch = Boolean(blockOnCatch && blockOnCatch.blocked);
+    const isAutoWarnOnCatch = Boolean(blockOnCatch && blockOnCatch.automatedWarning);
+    const isCp = Boolean(errMsg.includes('checkpoint') || errMsg.includes('xác minh người thật'));
+    const isExp = Boolean(errMsg.includes('Cookie hết hạn') || errMsg.includes('đăng nhập') || errMsg.includes('/login'));
     const cookieDead = isCp || isExp;
     return {
       actionBlocked: isBlockedOnCatch,
+      automatedWarning: isAutoWarnOnCatch,
       browserDead: isBrowserDead,
+      tabCrashed: isTabCrashed,
       cookieDead,
       isCheckpoint: isCp,
       isExpired: isExp,
@@ -2402,9 +2915,13 @@ async function executePageInteraction({
         shareStatus: enableShare ? 'ERROR' : 'SKIPPED',
         error: isBrowserDead
           ? 'Trình duyệt Chromium đã bị đóng hoặc mất kết nối.'
-          : isBlockedOnCatch
-            ? 'Facebook tạm thời hạn chế hành động (Action Blocked) do thao tác nhanh. Tự động dừng bảo vệ Via.'
-            : err.message,
+          : isTabCrashed
+            ? 'Tab Chromium bị crash (đã tự khởi tạo lại tab sạch cho page tiếp theo).'
+            : isAutoWarnOnCatch
+              ? 'Facebook cảnh báo nghi ngờ hành vi tự động. Tự động dừng bảo vệ Via.'
+              : isBlockedOnCatch
+                ? 'Facebook tạm thời hạn chế hành động (Action Blocked) do thao tác nhanh. Tự động dừng bảo vệ Via.'
+                : err.message,
       },
     };
   }
@@ -2421,8 +2938,8 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
   const {
     reactionType = 'RANDOM_POSITIVE', // Mặc định RANDOM_POSITIVE (65% Like, 25% Love, 10% Care) để tương tác tự nhiên, chống Meta AI phát hiện bot
     selectedPages = [],    // Mảng các page { id, name, comment? } hoặc để trống để tự quét
-    delayMs = 2800,        // Độ trễ cơ sở giữa mỗi lần tương tác (được Safe Human Pacing tự động tối ưu)
-    speedMode = 'FAST',    // Mặc định FAST (~2.8s - 3.2s) để chạy nhanh, mượt và an toàn
+    delayMs = 2500,        // Độ trễ cơ sở giữa mỗi lần tương tác
+    speedMode = 'NORMAL',  // Mặc định NORMAL (~2.4s) chạy êm, ổn định 1 luồng/Via
     enableLike = true,     // Có thả Like/Reaction không (mặc định true)
     enableComment = false, // Có viết bình luận bằng Fanpage không (mặc định false)
     enableShare = false,   // Có chia sẻ bài viết lên tường Fanpage không (mặc định false)
@@ -2461,7 +2978,28 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     throw new Error('Không tìm thấy Fanpage nào trong tài khoản để thực hiện');
   }
 
+  // BẢO VỆ CHỐNG PAGE LỖI CHUYỂN DANH TÍNH (kể cả khi client gửi selectedPages từ cache cũ)
+  const laneViaUid = getUserIdFromCookie(cookieStr);
+  const cachedEntry = laneViaUid ? loadPagesCache()[laneViaUid] : null;
+  const quarantinedMap = cachedEntry?.quarantined && typeof cachedEntry.quarantined === 'object' ? cachedEntry.quarantined : {};
+  const beforeQuarantineCount = pages.length;
+  pages = pages.filter((p) => p && p.id && !quarantinedMap[String(p.id)]);
+  if (beforeQuarantineCount > pages.length) {
+    console.log(`[FB-Buff] 🛡️ Bỏ qua ${beforeQuarantineCount - pages.length} Page đã bị cách ly (không chuyển được danh tính).`);
+  }
+  if (pages.length === 0) {
+    return {
+      total: beforeQuarantineCount,
+      success: 0,
+      failed: 0,
+      skipped: beforeQuarantineCount,
+      message: 'Toàn bộ Fanpage đã chọn đều nằm trong danh sách cách ly không chuyển được danh tính',
+      details: [],
+    };
+  }
+
   // BẢO VỆ CHỐNG TRÙNG LẶP & CHỐNG HỦY LIKE (UN-LIKE)
+  await resolvePostUrlCanonical(targetUrl).catch(() => normalizedPostUrl);
   const originalPagesCount = pages.length;
   pages = filterAvailablePagesForPost(normalizedPostUrl, pages);
   if (pages.length === 0) {
@@ -2511,22 +3049,20 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       details: cappedDetails,
     };
   }
-  pages.sort((a, b) => usedToday(a.id) - usedToday(b.id));
+  pages.sort((a, b) => (usedToday(a.id) - usedToday(b.id)) || ((b.verified ? 1 : 0) - (a.verified ? 1 : 0)));
 
-  // TÍNH TOÁN CẤU HÌNH ĐA LUỒNG (MULTI-WORKER CONCURRENCY) & TỐI ƯU TỐC ĐỘ:
+  // TÍNH TOÁN CẤU HÌNH ĐA LUỒNG (MULTI-WORKER CONCURRENCY) & BẢO VỆ VIA:
+  // Chỉ mở đa luồng trên cùng 1 Via khi có >= 2 Proxy riêng biệt trong proxyPool; nếu không, giữ 1 luồng tuần tự (Persistent Profile) tránh "sử dụng quá nhanh"
   const targetConcurrency = Math.max(1, Math.min(4, parseInt(concurrency, 10) || 1));
-  let safeConcurrency = targetConcurrency;
-  if (targetConcurrency > 1 && (!Array.isArray(proxyPool) || proxyPool.length <= 1)) {
-    // Tự động phân bổ luồng an toàn: TURBO cho phép 3 luồng, FAST cho phép 2 luồng song song (tăng tốc 2x - 3x)
-    const maxSafe = speedMode === 'TURBO' ? 3 : (speedMode === 'FAST' ? 2 : (targetConcurrency >= 2 ? 2 : 1));
-    safeConcurrency = Math.min(targetConcurrency, maxSafe);
-    if (safeConcurrency < targetConcurrency) {
-      console.log(`[FB-Buff] ⚡ Tối ưu điều chỉnh luồng song song về ${safeConcurrency} luồng để vừa tăng tốc vừa an toàn.`);
-    }
+  const hasMultiProxyPool = Array.isArray(proxyPool) && proxyPool.length >= 2;
+  let safeConcurrency = hasMultiProxyPool ? targetConcurrency : 1;
+  if (safeConcurrency < targetConcurrency) {
+    console.log(`[FB-Buff] 🛡️ Chưa có Proxy Pool đa IP — giữ 1 luồng/Via (Persistent Profile) để tránh Facebook cảnh báo "sử dụng quá nhanh".`);
   }
   const isMultiWorker = safeConcurrency > 1 && pages.length >= safeConcurrency;
   const actualConcurrency = safeConcurrency;
   const effectiveKpi = parseInt(kpiTarget || targetLikes, 10) || 0;
+  let adaptiveSlowFactor = 1.0;
 
   console.log(`[FB-Buff] 🚀 Bắt đầu Buff Tương Tác: ${targetUrl}`);
   console.log(`[FB-Buff] 🎯 Mục tiêu: ${effectiveKpi > 0 ? `KPI ${effectiveKpi} Like thành công (kho dự phòng: ${pages.length} Pages)` : `${pages.length} Fanpage`} | Chế độ tốc độ: ${speedMode} (${delayMs}ms) | Thả Like: ${enableLike ? reactionType : 'TẮT'} | Bình luận: ${enableComment ? 'BẬT' : 'TẮT'} | Chia sẻ (Share): ${enableShare ? 'BẬT' : 'TẮT'} | Số luồng: ${actualConcurrency} luồng | Fast-Switch: ${fastSwitch ? 'BẬT' : 'TẮT'}`);
@@ -2535,6 +3071,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     total: effectiveKpi > 0 ? effectiveKpi : (pages.length + cappedDetails.length),
     candidateCount: pages.length + cappedDetails.length,
     success: 0,
+    alreadyLiked: 0,
     failed: 0,
     unverified: 0,
     skipped: cappedDetails.length,
@@ -2649,8 +3186,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         }
         let workerTab = await workerContext.newPage();
         trackedTabs.add(workerTab);
-        await workerTab.route('**/*.{png,jpg,jpeg,webp,gif,avif,ico,mp4,mov,m4v,avi,webm,m3u8,ts,woff,woff2,ttf,otf}', (route) => route.abort());
-        await workerTab.route('**/*{google-analytics,doubleclick,connect.facebook.net/signals,pixel.facebook.com,facebook.com/tr/}*', (route) => route.abort());
+        registerLightweightTabRoutes(workerTab);
 
         // Giãn cách mở bài viết ban đầu giữa các worker để tránh nghẽn phiên
         await new Promise((r) => setTimeout(r, (workerId - 1) * 2000));
@@ -2661,6 +3197,9 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           const redirected = workerTab.url();
           if (redirected && redirected.includes('facebook.com') && !redirected.includes('/share/')) {
             workerTargetUrl = redirected;
+            if (isValidCanonicalFbPostUrl(redirected)) {
+              registerPostUrlAlias(normalizedPostUrl, redirected);
+            }
           }
         } catch (e) {
           console.warn(`[FB-Buff]${workerTag} ⚠️ Lỗi tải bài viết ban đầu: ${e.message}`);
@@ -2683,7 +3222,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           }
 
           try {
-            workerTab = await ensureTabHealthy(workerContext, workerTab);
+            workerTab = await ensureTabHealthy(workerContext, workerTab, trackedTabs);
           } catch (tErr) {
             if (tErr.isBrowserDead || (tErr.message && tErr.message.includes('closed'))) {
               globalStopTriggered = true;
@@ -2694,6 +3233,38 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           }
 
           const { page: pageInfo, originalIndex } = workerPages[i];
+          if (pageInfo && pageInfo.id && hasPageInteractedWithPost(normalizedPostUrl, pageInfo.id)) {
+            completedCount++;
+            results.alreadyLiked++;
+            const skippedItem = {
+              pageId: pageInfo.id,
+              pageName: pageInfo.name,
+              status: 'ALREADY_LIKED',
+              likeStatus: 'ALREADY_LIKED',
+              commentStatus: 'SKIPPED',
+              shareStatus: 'SKIPPED',
+              message: 'Đã like trước đó (bỏ qua tự động từ liên kết gốc)',
+            };
+            results.details.push(skippedItem);
+            if (typeof onProgress === 'function') {
+              const pct = effectiveKpi > 0
+                ? Math.min(100, Math.round((results.success / effectiveKpi) * 100))
+                : Math.round((completedCount / pages.length) * 100);
+              onProgress({
+                type: 'PAGE_FINISH',
+                index: originalIndex,
+                total: effectiveKpi > 0 ? effectiveKpi : pages.length,
+                kpiTarget: effectiveKpi > 0 ? effectiveKpi : undefined,
+                ...skippedItem,
+                percent: pct,
+                workerId,
+              });
+            }
+            continue;
+          }
+          try {
+            options.touch?.() || options.fence?.touch?.() || options.fence?.heartbeat?.();
+          } catch (_) {}
           console.log(`[FB-Buff]${workerTag} [${i + 1}/${workerPages.length}] ⚡ Đang tương tác bằng Page: "${pageInfo.name}" (ID: ${pageInfo.id})...`);
 
           if (typeof onProgress === 'function') {
@@ -2708,7 +3279,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             });
           }
 
-          const { actionBlocked, browserDead, cookieDead, isCheckpoint, isExpired, deadReason, item: resultItem } = await executePageInteraction({
+          const { actionBlocked, automatedWarning, browserDead, tabCrashed, cookieDead, isCheckpoint, isExpired, deadReason, item: resultItem } = await executePageInteraction({
             tab: workerTab,
             context: workerContext,
             pageInfo,
@@ -2727,7 +3298,21 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             workerTag,
             speedMode,
             signal,
+            shouldStop: () => isStopRequested() || globalStopTriggered || (effectiveKpi > 0 && results.success >= effectiveKpi),
           });
+
+          if (tabCrashed) {
+            try {
+              workerTab = await recycleHealthyTab(workerContext, workerTab, trackedTabs);
+            } catch (tErr) {
+              globalStopTriggered = true;
+              results.stopped = true;
+              results.failed++;
+              results.details.push(resultItem);
+              console.error(`[FB-Buff]${workerTag} 🛑 Không thể khôi phục tab sau crash: ${tErr.message}`);
+              break;
+            }
+          }
 
           if (browserDead) {
             globalStopTriggered = true;
@@ -2771,11 +3356,11 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             break;
           }
 
-          if (actionBlocked) {
+          if (actionBlocked || automatedWarning) {
             results.consecutiveBlocks = (results.consecutiveBlocks || 0) + 1;
             results.failed++;
             results.details.push(resultItem);
-            console.warn(`[FB-Buff]${workerTag} ⚠️ Page "${pageInfo.name}" bị Action Blocked (lần ${results.consecutiveBlocks} liên tiếp). Skip qua page tiếp theo...`);
+            console.warn(`[FB-Buff]${workerTag} ⚠️ Page "${pageInfo.name}" bị ${automatedWarning ? 'CẢNH BÁO HÀNH VI TỰ ĐỘNG' : 'Action Blocked'} (lần ${results.consecutiveBlocks} liên tiếp). Skip qua page tiếp theo...`);
             if (typeof onProgress === 'function') {
               onProgress({
                 type: 'PAGE_FINISH',
@@ -2786,8 +3371,16 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
                 workerId,
               });
             }
-            if (results.consecutiveBlocks >= 3) {
-              console.error(`[FB-Buff]${workerTag} 🛑 Bị Action Blocked liên tiếp ${results.consecutiveBlocks} lần! Dừng worker này để bảo vệ Via.`);
+            if (automatedWarning || results.consecutiveBlocks >= 3) {
+              globalStopTriggered = true;
+              results.stopped = true;
+              if (automatedWarning) {
+                results.cookieDead = true;
+                results.isCheckpoint = true;
+                results.deadViaUid = uid;
+                results.deadReason = 'Facebook cảnh báo nghi ngờ hành vi tự động';
+              }
+              console.error(`[FB-Buff]${workerTag} 🛑 ${automatedWarning ? 'Dừng ngay lập tức vì Facebook nghi ngờ hành vi tự động!' : `Bị Action Blocked liên tiếp ${results.consecutiveBlocks} lần! Dừng worker này để bảo vệ Via.`}`);
               break;
             }
             // Nghỉ thêm 8s trước khi thử page tiếp theo
@@ -2798,8 +3391,10 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           }
 
           completedCount++;
-          if (resultItem.status === 'SUCCESS' || resultItem.status === 'ALREADY_LIKED') {
+          if (resultItem.status === 'SUCCESS') {
             results.success++;
+          } else if (resultItem.status === 'ALREADY_LIKED') {
+            results.alreadyLiked++;
           } else if (resultItem.status === 'UNVERIFIED') {
             results.unverified++;
           } else {
@@ -2844,20 +3439,8 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
 
           // Chống checkpoint: Nghỉ ngơi an toàn theo lô (Batch Cooldown) per worker
           if (cooldownEvery < 9999 && i > 0 && i % cooldownEvery === 0 && i < workerPages.length - 1) {
-            let baseCooldown = cooldownDurationMs || 15000;
-            if (speedMode === 'TURBO') {
-              baseCooldown = Math.max(5000, Math.min(baseCooldown, 8000));
-            } else if (speedMode === 'FAST') {
-              baseCooldown = Math.max(8000, Math.min(baseCooldown, 12000));
-            } else if (speedMode === 'SAFE') {
-              baseCooldown = Math.max(25000, baseCooldown);
-            } else {
-              baseCooldown = Math.max(12000, Math.min(baseCooldown, 18000));
-            }
             const isBigBatch = i % (cooldownEvery * 2) === 0;
-            const batchRest = isBigBatch
-              ? Math.round(baseCooldown * 1.3) + Math.floor(Math.random() * 2000)
-              : baseCooldown + Math.floor(Math.random() * 1500);
+            const batchRest = computeBatchCooldownMs(cooldownDurationMs, speedMode, isBigBatch);
             const restSec = Math.round(batchRest / 1000);
             const restMsg = `🛡️ [Safe Human Pacing] Đang hạ nhiệt Via (${restSec}s) để reset bộ đếm tần suất của Facebook...`;
             console.log(`[FB-Buff]${workerTag} 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. ${restMsg}`);
@@ -2885,11 +3468,11 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             }
           }
 
-          // Giảm tải RAM cho Chromium khi chạy lô lớn (200 - 500 page)
-          if (i > 0 && i % 40 === 0) {
-            await workerTab.evaluate(() => {
-              if (window.gc) window.gc();
-            }).catch(() => {});
+          // Giảm tải RAM cho Chromium khi chạy lô lớn: tái tạo tab sạch mỗi 20 page
+          if (i > 0 && i % 20 === 0 && i < workerPages.length - 1) {
+            try {
+              workerTab = await recycleHealthyTab(workerContext, workerTab, trackedTabs);
+            } catch (_) {}
           }
 
           // Độ trễ tối ưu giữa các page
@@ -2974,9 +3557,10 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       }
       let tab = context.pages().length ? context.pages()[0] : await context.newPage();
       if (context) trackedContexts.add(context);
-      if (tab) trackedTabs.add(tab);
-      await tab.route('**/*.{png,jpg,jpeg,webp,gif,avif,ico,mp4,mov,m4v,avi,webm,m3u8,ts,woff,woff2,ttf,otf}', (route) => route.abort());
-      await tab.route('**/*{google-analytics,doubleclick,connect.facebook.net/signals,pixel.facebook.com,facebook.com/tr/}*', (route) => route.abort());
+      if (tab) {
+        trackedTabs.add(tab);
+        registerLightweightTabRoutes(tab);
+      }
 
       console.log(`[FB-Buff] 🌐 Tải bài viết mục tiêu trước khi chạy luồng: ${targetUrl}`);
       let effectiveTargetUrl = targetUrl;
@@ -2987,6 +3571,9 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         if (redirected && redirected.includes('facebook.com') && !redirected.includes('/share/')) {
           effectiveTargetUrl = redirected;
           console.log(`[FB-Buff] 🔗 Đã phát hiện link bài viết gốc: ${effectiveTargetUrl}`);
+          if (isValidCanonicalFbPostUrl(redirected)) {
+            registerPostUrlAlias(normalizedPostUrl, redirected);
+          }
         }
       } catch (e) {
         console.warn(`[FB-Buff] ⚠️ Lỗi tải bài viết ban đầu (${e.message}), sẽ tự động thử lại.`);
@@ -3008,7 +3595,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         }
 
         try {
-          tab = await ensureTabHealthy(context, tab);
+          tab = await ensureTabHealthy(context, tab, trackedTabs);
         } catch (tErr) {
           if (tErr.isBrowserDead || (tErr.message && tErr.message.includes('closed'))) {
             results.stopped = true;
@@ -3018,6 +3605,35 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         }
 
         const pageInfo = pages[i];
+        if (pageInfo && pageInfo.id && hasPageInteractedWithPost(normalizedPostUrl, pageInfo.id)) {
+          completedCount++;
+          results.alreadyLiked++;
+          const skippedItem = {
+            pageId: pageInfo.id,
+            pageName: pageInfo.name,
+            status: 'ALREADY_LIKED',
+            likeStatus: 'ALREADY_LIKED',
+            commentStatus: 'SKIPPED',
+            shareStatus: 'SKIPPED',
+            message: 'Đã like trước đó (bỏ qua tự động từ liên kết gốc)',
+          };
+          results.details.push(skippedItem);
+          if (typeof onProgress === 'function') {
+            const pct = effectiveKpi > 0
+              ? Math.min(100, Math.round((results.success / effectiveKpi) * 100))
+              : Math.round((completedCount / pages.length) * 100);
+            onProgress({
+              type: 'PAGE_FINISH',
+              index: i,
+              total: effectiveKpi > 0 ? effectiveKpi : pages.length,
+              kpiTarget: effectiveKpi > 0 ? effectiveKpi : undefined,
+              ...skippedItem,
+              percent: pct,
+              workerId: 1,
+            });
+          }
+          continue;
+        }
         console.log(`[FB-Buff] [${i + 1}/${pages.length}] ⚡ Đang tương tác bằng Page: "${pageInfo.name}" (ID: ${pageInfo.id})...`);
 
         if (typeof onProgress === 'function') {
@@ -3032,7 +3648,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           });
         }
 
-        const { actionBlocked, browserDead, cookieDead, isCheckpoint, isExpired, deadReason, item: resultItem } = await executePageInteraction({
+        const { actionBlocked, automatedWarning, browserDead, tabCrashed, cookieDead, isCheckpoint, isExpired, deadReason, item: resultItem } = await executePageInteraction({
           tab,
           context,
           pageInfo,
@@ -3051,7 +3667,20 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           workerTag: '',
           speedMode,
           signal,
+          shouldStop: () => isStopRequested() || (effectiveKpi > 0 && results.success >= effectiveKpi),
         });
+
+          if (tabCrashed) {
+            try {
+              tab = await recycleHealthyTab(context, tab, trackedTabs);
+            } catch (tErr) {
+              results.stopped = true;
+              results.failed++;
+              results.details.push(resultItem);
+              console.error(`[FB-Buff] 🛑 Không thể khôi phục tab sau crash: ${tErr.message}`);
+              break;
+            }
+          }
 
           if (browserDead) {
             results.stopped = true;
@@ -3093,13 +3722,13 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             break;
           }
 
-          if (actionBlocked) {
+          if (actionBlocked || automatedWarning) {
             // Không dừng toàn bộ — chỉ skip page này, tiếp tục page tiếp theo
-            // Nhưng nếu bị block liên tiếp >= 3 lần thì dừng để bảo vệ Via
+            // Nhưng nếu bị block liên tiếp >= 3 lần (hoặc gặp cảnh báo tự động) thì dừng để bảo vệ Via
             results.consecutiveBlocks = (results.consecutiveBlocks || 0) + 1;
             results.failed++;
             results.details.push(resultItem);
-            console.warn(`[FB-Buff] ⚠️ Page "${pageInfo.name}" bị Action Blocked (lần ${results.consecutiveBlocks} liên tiếp). Skip qua page tiếp theo...`);
+            console.warn(`[FB-Buff] ⚠️ Page "${pageInfo.name}" bị ${automatedWarning ? 'CẢNH BÁO HÀNH VI TỰ ĐỘNG' : 'Action Blocked'} (lần ${results.consecutiveBlocks} liên tiếp). Skip qua page tiếp theo...`);
             if (typeof onProgress === 'function') {
               onProgress({
                 type: 'PAGE_FINISH',
@@ -3110,9 +3739,15 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
                 workerId: 1,
               });
             }
-            if (results.consecutiveBlocks >= 3) {
+            if (automatedWarning || results.consecutiveBlocks >= 3) {
               results.stopped = true;
-              console.error(`[FB-Buff] 🛑 Bị Action Blocked liên tiếp ${results.consecutiveBlocks} lần! Dừng tác vụ để bảo vệ Via.`);
+              if (automatedWarning) {
+                results.cookieDead = true;
+                results.isCheckpoint = true;
+                results.deadViaUid = uid;
+                results.deadReason = 'Facebook cảnh báo nghi ngờ hành vi tự động';
+              }
+              console.error(`[FB-Buff] 🛑 ${automatedWarning ? 'Dừng ngay lập tức vì Facebook nghi ngờ hành vi tự động!' : `Bị Action Blocked liên tiếp ${results.consecutiveBlocks} lần! Dừng tác vụ để bảo vệ Via.`}`);
               break;
             }
             // Nghỉ thêm 15s trước khi thử page tiếp theo
@@ -3125,8 +3760,10 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           results.consecutiveBlocks = 0;
 
           completedCount++;
-          if (resultItem.status === 'SUCCESS' || resultItem.status === 'ALREADY_LIKED') {
+          if (resultItem.status === 'SUCCESS') {
             results.success++;
+          } else if (resultItem.status === 'ALREADY_LIKED') {
+            results.alreadyLiked++;
           } else if (resultItem.status === 'UNVERIFIED') {
             results.unverified++;
           } else {
@@ -3171,20 +3808,8 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
 
           // Chống checkpoint: Nghỉ ngơi an toàn theo lô (Batch Cooldown)
           if (cooldownEvery < 9999 && i > 0 && i % cooldownEvery === 0 && i < pages.length - 1) {
-            let baseCooldown = cooldownDurationMs || 15000;
-            if (speedMode === 'TURBO') {
-              baseCooldown = Math.max(5000, Math.min(baseCooldown, 8000));
-            } else if (speedMode === 'FAST') {
-              baseCooldown = Math.max(8000, Math.min(baseCooldown, 12000));
-            } else if (speedMode === 'SAFE') {
-              baseCooldown = Math.max(25000, baseCooldown);
-            } else {
-              baseCooldown = Math.max(12000, Math.min(baseCooldown, 18000));
-            }
             const isBigBatch = i % (cooldownEvery * 2) === 0;
-            const batchRest = isBigBatch
-              ? Math.round(baseCooldown * 1.3) + Math.floor(Math.random() * 2000)
-              : baseCooldown + Math.floor(Math.random() * 1500);
+            const batchRest = computeBatchCooldownMs(cooldownDurationMs, speedMode, isBigBatch);
             const restSec = Math.round(batchRest / 1000);
             const restMsg = `🛡️ [Safe Human Pacing] Đang hạ nhiệt Via (${restSec}s) để reset bộ đếm tần suất của Facebook...`;
             console.log(`[FB-Buff] 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. ${restMsg}`);
@@ -3210,6 +3835,13 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             }
           }
 
+          // Giảm tải RAM cho Chromium khi chạy lô lớn: tái tạo tab sạch mỗi 20 page
+          if (i > 0 && i % 20 === 0 && i < pages.length - 1) {
+            try {
+              tab = await recycleHealthyTab(context, tab, trackedTabs);
+            } catch (_) {}
+          }
+
           // Độ trễ tối ưu giữa các page
           if (i < pages.length - 1) {
             const waitTime = calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMinutes, pages.length, 1, speedMode);
@@ -3227,8 +3859,9 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     }
 
     if (signal) signal.removeEventListener('abort', abortCleanup);
+    flushRegistry();
 
-    console.log(`[FB-Buff] 🏁 Hoàn thành buff Like: Thành công ${results.success}/${effectiveKpi > 0 ? effectiveKpi : results.total} (Thất bại/Bù lỗi: ${results.failed}, Luồng: ${actualConcurrency})`);
+    console.log(`[FB-Buff] 🏁 Hoàn thành buff Like: Thành công ${results.success}/${effectiveKpi > 0 ? effectiveKpi : results.total} (Đã like trước: ${results.alreadyLiked}, Thất bại/Bù lỗi: ${results.failed}, Luồng: ${actualConcurrency})`);
     return results;
   }
 
@@ -3378,7 +4011,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       return first === 'groups' && /^(posts|permalink)$/.test(segments[2] || '');
     }
     if (info.type === 'PAGE') {
-      if (first === 'reel' || first === 'watch') return true; // Reel/Video không mang tên chủ sở hữu trong link
+      if (first === 'reel' || first === 'watch' || first === 'share') return true; // Reel/Video/Share link không mang tên chủ sở hữu trong link
       const ownerId = url.searchParams.get('id');
       if (ownerId) return Boolean(info.pageId) && ownerId === info.pageId;
       if (info.pageId) return first === info.pageId;
@@ -3393,6 +4026,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       proxyUrl = '',
       maxPosts = 8,
       timeoutMs = 30000,
+      browser: externalBrowser = null,
     } = options;
 
     if (!targetUrl || typeof targetUrl !== 'string') {
@@ -3404,16 +4038,19 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     const proxy = parseProxy(proxyUrl);
     console.log(`[FB-Hunter] 🔍 Đang quét bài viết mới từ: ${cleanTarget} (Max: ${maxPosts})`);
 
-    let browser = null;
+    let browser = externalBrowser;
+    const ownsBrowser = !externalBrowser;
     let context = null;
     const discoveredPosts = [];
 
     try {
-      browser = await chromium.launch({
-        headless: true,
-        args: OPTIMIZED_CHROMIUM_ARGS,
-        proxy: proxy ? { server: proxy.server, username: proxy.username, password: proxy.password } : undefined,
-      });
+      if (!browser) {
+        browser = await chromium.launch({
+          headless: true,
+          args: OPTIMIZED_CHROMIUM_ARGS,
+          proxy: proxy ? { server: proxy.server, username: proxy.username, password: proxy.password } : undefined,
+        });
+      }
 
 
       context = await browser.newContext({
@@ -3460,9 +4097,11 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           await a.hover({ timeout: 1500 }).catch(() => { });
           await page.waitForTimeout(150);
           const revealed = await a.evaluate((el) => el.href).catch(() => '');
-          if (revealed && /story_fbid=|\/posts\/|\/permalink\//.test(revealed)) {
-            const text = await unit.evaluate((el) => (el.innerText || '').trim().slice(0, 150)).catch(() => '');
-            revealedLinks.push({ href: revealed, text });
+          if (revealed && /story_fbid=|\/posts\/|\/permalink\/|\/share\//.test(revealed)) {
+            const unitText = await unit.evaluate((el) => (el.innerText || '').trim().slice(0, 300)).catch(() => '');
+            const isPinned = /đã ghim|bài viết đã ghim|pinned post/i.test(unitText) ||
+              Boolean(await unit.$('[aria-label*="ghim" i], [aria-label*="pin" i]').catch(() => null));
+            revealedLinks.push({ href: revealed, text: unitText.slice(0, 150), isPinned });
             break; // 1 permalink cho mỗi khối bài là đủ
           }
         }
@@ -3485,6 +4124,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         /\/posts\/[a-zA-Z0-9_-]+/i,
         /\/videos\/[0-9]+/i,
         /\/reel\/[0-9]+/i,
+        /\/share\/(?:p|v|r)\/[a-zA-Z0-9_-]+/i,
         /story\.php\?story_fbid=/i,
         /permalink\.php\?story_fbid=/i,
         /\/groups\/[^/]+\/permalink\/[0-9]+/i,
@@ -3516,6 +4156,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           url: cleanUrl,
           normalizedUrl: normalized,
           title: item.text || 'Bài viết Facebook',
+          isPinned: Boolean(item.isPinned),
           foundAt: new Date().toISOString(),
         });
 
@@ -3527,7 +4168,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       console.error(`[FB-Hunter] ❌ Lỗi quét mục tiêu ${cleanTarget}:`, err.message);
     } finally {
       if (context) await context.close().catch(() => { });
-      if (browser) await browser.close().catch(() => { });
+      if (ownsBrowser && browser) await browser.close().catch(() => { });
     }
 
     return discoveredPosts;
@@ -3726,10 +4367,12 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     parseCookieString,
     getUserIdFromCookie,
     getManagedPages,
+    mergeCachedAndDbPages,
     getCachedPages,
     setCachedPages,
     loadPagesCache,
     savePagesCache,
+    recordPageSwitchOutcome,
     buffLikesWithPages,
     buffViews,
     scanTargetForPosts,
@@ -3748,9 +4391,15 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     getGlobalRegistryStats,
     getPostInteractedPageIds,
     normalizeFbPostUrl,
+    resolvePostUrlCanonical,
+    registerPostUrlAlias,
     resolveSpintax,
     executePostShare,
+    switchTabIdentity,
+    ensureTabHealthy,
+    recycleHealthyTab,
     SEEDING_PRESETS,
+    OPTIMIZED_CHROMIUM_ARGS,
   };
 
   // ==========================================
