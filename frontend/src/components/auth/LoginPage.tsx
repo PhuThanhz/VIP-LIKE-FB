@@ -240,7 +240,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
       {/* Footer */}
       <footer className="py-3 px-6 text-center text-xs text-slate-400 border-t border-slate-800/60">
-        VIP LIKE v2.0 • Bản Quyền Thuộc Về Hệ Sinh Thái VIPLIKE SaaS • Bảo Vệ Bằng Mã Hóa HWID
+        VIP LIKE • Được làm bởi <span className="text-slate-200 font-medium">thanhphu</span>
       </footer>
     </div>
   );

@@ -175,6 +175,36 @@ body {
   border-radius: 10px !important;
 }
 
+/* Input có icon (prefix/suffix, ô mật khẩu): khung ngoài giữ nền & viền,
+   ô bên trong trong suốt để không thành "khung lồng khung" */
+.ant-input-affix-wrapper {
+  background: var(--input-bg) !important;
+  border-color: var(--border-input) !important;
+  border-radius: 10px !important;
+}
+
+.ant-input-affix-wrapper > input.ant-input {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Trình duyệt tự điền (autofill) tô nền riêng: phủ lại bằng màu nền input */
+.ant-input:-webkit-autofill,
+.ant-input:-webkit-autofill:hover,
+.ant-input:-webkit-autofill:focus,
+.ant-input-affix-wrapper > input.ant-input:-webkit-autofill,
+.ant-input-affix-wrapper > input.ant-input:-webkit-autofill:hover,
+.ant-input-affix-wrapper > input.ant-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text-strong) !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--input-bg) inset !important;
+  caret-color: var(--text-strong);
+  transition: background-color 9999s ease-out 0s;
+}
+
+.ant-input-affix-wrapper-focused,
+.ant-input-affix-wrapper:focus-within,
 .ant-input:focus,
 .ant-input-focused,
 .ant-input-number:focus,
