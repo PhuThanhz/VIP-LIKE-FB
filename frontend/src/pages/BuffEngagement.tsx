@@ -1,4 +1,12 @@
-import React, { useEffect, useMemo, useState, useRef, useCallback, lazy, Suspense } from 'react';
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  useCallback,
+  lazy,
+  Suspense,
+} from 'react';
 import {
   Card,
   Input,
@@ -123,6 +131,7 @@ import MonitorFormModal from '../features/buff/components/MonitorFormModal';
 import ViaHealthModal from '../features/buff/components/ViaHealthModal';
 import LogDetailModal from '../features/buff/components/LogDetailModal';
 import ManagePagesModal from '../features/buff/components/ManagePagesModal';
+import { useBuffQueue, useBuffMonitors, useBmOverview, useSystemSettings } from '../features/buff/hooks/usePolledData';
 
 
 export interface BuffEngagementProps {
@@ -504,29 +513,12 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   }, [targetPostUrl]);
 
   // Auto-Buff Queue State (Hunter-Ready & Background Pipeline)
-  const [queueItems, setQueueItems] = useState<any[]>([]);
+  const { queueItems, fetchBuffQueue } = useBuffQueue();
   const [queueUrlInput, setQueueUrlInput] = useState<string>('');
   const [queueTargetLikes, setQueueTargetLikes] = useState<number>(30);
   const [queueDelayMinutes, setQueueDelayMinutes] = useState<number>(3);
   const [queueReaction, setQueueReaction] = useState<string>('RANDOM_POSITIVE');
   const [queueLoading, setQueueLoading] = useState<boolean>(false);
-
-  const fetchBuffQueue = useCallback(async () => {
-    try {
-      const res = await axios.get(`${WORKER_BASE_URL}/api/buff-queue/list`);
-      if (res.data?.success) {
-        setQueueItems(res.data.queue || []);
-      }
-    } catch {}
-  }, []);
-
-  // Chỉ phụ thuộc vào cờ "có bài đang chạy" (boolean), không phụ thuộc mảng queueItems:
-  // trước đây mỗi lần fetch tạo mảng mới → effect chạy lại → fetch ngay → vòng lặp gọi API liên tục.
-  const queueHasRunning = queueItems.some((i) => i.status === 'RUNNING');
-  useEffect(() => {
-    fetchBuffQueue();
-  }, [fetchBuffQueue]);
-  useVisibleInterval(fetchBuffQueue, queueHasRunning ? 3000 : 8000);
 
   // Tab Tạo mới: chạy ngay hoặc đưa vào hàng đợi
   const [runMode, setRunMode] = useState<'NOW' | 'QUEUE'>('NOW');
@@ -744,61 +736,21 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   // ─────────────────────────────────────────────────────────────────────────────
   // POST HUNTER & AUTO-MONITORS STATE & HANDLERS
   // ─────────────────────────────────────────────────────────────────────────────
-  const [monitors, setMonitors] = useState<BuffMonitor[]>([]);
+  const { monitors, postHunterPaused, setPostHunterPaused, fetchBuffMonitors } = useBuffMonitors();
   const [isMonitorModalOpen, setIsMonitorModalOpen] = useState<boolean>(false);
   const [monitorModalTarget, setMonitorModalTarget] = useState<{ editing?: BuffMonitor; prefillUrl?: string }>({});
-
-
-  const [postHunterPaused, setPostHunterPaused] = useState<boolean>(false);
-
-  const fetchBuffMonitors = useCallback(async () => {
-    try {
-      const res = await axios.get(`${WORKER_BASE_URL}/api/buff-monitors`);
-      if (res.data?.success) {
-        setMonitors(res.data.monitors || []);
-        setPostHunterPaused(Boolean(res.data.postHunterPaused));
-      }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    fetchBuffMonitors();
-  }, [fetchBuffMonitors]);
-  useVisibleInterval(fetchBuffMonitors, 15000);
 
   // Via Health & Enterprise BM Overview State
   const [checkingViaHealth, setCheckingViaHealth] = useState<boolean>(false);
   const [viaHealthResults, setViaHealthResults] = useState<any[]>([]);
   const [isHealthModalOpen, setIsHealthModalOpen] = useState<boolean>(false);
-  const [bmOverview, setBmOverview] = useState<any>(null);
+  const { bmOverview, fetchBmOverview } = useBmOverview();
 
   // Enterprise Ops Settings & Telegram Bot State
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
-  const [systemSettings, setSystemSettings] = useState<any>({
-    telegramBotToken: '',
-    telegramBotTokenMasked: '',
-    telegramChatId: '',
-    notifyOnViaDead: true,
-    notifyOnHunter: true,
-    notifyOnBuffDone: true,
-    maxDailyPageActions: 25,
-  });
+  const { systemSettings, setSystemSettings, fetchSettings } = useSystemSettings();
   const [savingSettings, setSavingSettings] = useState<boolean>(false);
   const [testingTelegram, setTestingTelegram] = useState<boolean>(false);
-
-  const fetchBmOverview = useCallback(async () => {
-    try {
-      const res = await axios.get(`${WORKER_BASE_URL}/api/buff-vias/overview`);
-      if (res.data?.success) {
-        setBmOverview({
-          ...(res.data.bmHealth || {}),
-          antiOverlap: res.data.antiOverlap || { totalTrackedPosts: 0, totalProtectedInteractions: 0 },
-          system: res.data.system || { isEmergencyStopped: false, telegramConfigured: false },
-          stats: res.data.stats || {},
-        });
-      }
-    } catch {}
-  }, []);
 
   // Via có cookie hết hạn hoặc bị checkpoint (lấy từ dữ liệu tổng quan, tự làm mới mỗi 15 giây)
   const deadViaList = useMemo<{ uid: string; viaName?: string; tokenStatus: string }[]>(
@@ -835,21 +787,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     }
     notifiedDeadViaRef.current = current;
   }, [bmOverview, deadViaList, notification]);
-
-  const fetchSettings = useCallback(async () => {
-    try {
-      const res = await axios.get(`${WORKER_BASE_URL}/api/buff-settings`);
-      if (res.data?.success && res.data.settings) {
-        setSystemSettings(res.data.settings);
-      }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    fetchBmOverview();
-    fetchSettings();
-  }, [fetchBmOverview, fetchSettings]);
-  useVisibleInterval(fetchBmOverview, 15000);
 
   const handleSaveSettings = async () => {
     setSavingSettings(true);
