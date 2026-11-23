@@ -7,11 +7,13 @@ import { REACTIONS, SPEED_PRESETS } from '../constants';
 import { cleanPageName, extractCUser, formatDelaySeconds, formatDuration, getSpeedLabel } from '../utils';
 import { parseFacebookCookie } from '../../../utils/cookieHelper';
 import type { BuffController } from '../hooks/useBuffEngagementController';
+import LikeCapacityCard from './LikeCapacityCard';
 
 /** Tab "Tạo mới": nhập bài viết, tương tác, chọn tài khoản/Fanpage, chạy ngay hoặc đưa vào hàng đợi */
 export default function CreateBuffTab({ controller }: { controller: BuffController }) {
   const {
     actorMode,
+    bmOverview,
     antiCheckpointGuard,
     autoBuffMutation,
     autoBuffProgress,
@@ -1694,6 +1696,9 @@ export default function CreateBuffTab({ controller }: { controller: BuffControll
                           )}
                         </div>
                       </div>
+
+                      {/* Năng lực like của dàn Via (mỗi bài tối đa like được bao nhiêu) */}
+                      <LikeCapacityCard bmOverview={bmOverview} />
 
                       {/* MINI STATUS WIDGET TRÊN TAB TẠO MỚI (KHÔNG CHIẾM DIỆN TÍCH FORM) */}
                       {autoBuffProgress.status === 'RUNNING' || isBatchRunning ? (

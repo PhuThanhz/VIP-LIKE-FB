@@ -4513,6 +4513,33 @@ app.post('/api/buff-daily-report/send', async (req, res) => {
 });
 
 // Tổng quan sức khỏe hệ thống (truy vấn trực tiếp MySQL Workbench)
+// Tỉ lệ thành công thực tế 7 ngày theo Via (từ lịch sử buff), lưu tạm 5 phút vì overview được gọi mỗi 15 giây
+let viaSuccessRateCache = { at: 0, byVia: {} };
+async function getViaSuccessRates() {
+  if (Date.now() - viaSuccessRateCache.at < 5 * 60 * 1000) return viaSuccessRateCache.byVia;
+  const byVia = {};
+  try {
+    const [rows] = await db.getPool().query(
+      "SELECT details FROM buff_logs WHERE created_at > NOW() - INTERVAL 7 DAY AND account_name <> 'Via Facebook'"
+    );
+    for (const r of rows) {
+      let details = [];
+      try { details = typeof r.details === 'string' ? JSON.parse(r.details) : (r.details || []); } catch (_) {}
+      for (const d of details) {
+        if (!d || !d.viaName) continue;
+        if (['WAITING', 'RUNNING', 'SKIPPED', 'ALREADY_LIKED'].includes(d.status)) continue; // chỉ tính lượt đã thực sự thử
+        const e = byVia[d.viaName] || (byVia[d.viaName] = { tried: 0, success: 0 });
+        e.tried++;
+        if (d.status === 'SUCCESS') e.success++;
+      }
+    }
+  } catch (e) {
+    console.warn('[BuffOverview] ⚠️ Không tính được tỉ lệ thành công theo Via:', e.message);
+  }
+  viaSuccessRateCache = { at: Date.now(), byVia };
+  return byVia;
+}
+
 app.get('/api/buff-vias/overview', async (req, res) => {
   try {
     let totalVias = 0;
@@ -4555,6 +4582,24 @@ app.get('/api/buff-vias/overview', async (req, res) => {
         totalCachedPages += pagesCache[uid].pages.length;
       }
     }
+    // Năng lực từng Via: Page dùng được (Page bị cách ly đã bị loại khỏi danh sách) / bị cách ly / đã xác thực,
+    // kèm tỉ lệ thành công thực tế 7 ngày để ước tính số like thật (danh sách Page có thể lớn hơn năng lực thật)
+    const successRates = await getViaSuccessRates();
+    viaRows = viaRows.map((v) => {
+      const entry = pagesCache[v.uid] || {};
+      const pages = Array.isArray(entry.pages) ? entry.pages : [];
+      const displayName = entry.viaName || v.viaName;
+      const rate = successRates[displayName];
+      return {
+        ...v,
+        displayName,
+        usablePages: pages.length,
+        verifiedPages: pages.filter((p) => p && p.verified).length,
+        quarantinedPages: Object.keys(entry.quarantined || {}).length,
+        recentTried: rate?.tried || 0,
+        recentSuccess: rate?.success || 0,
+      };
+    });
 
     const queueData = loadBuffQueue();
     const history = loadBuffHistory();
