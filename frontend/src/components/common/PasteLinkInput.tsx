@@ -204,6 +204,11 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
               {contentType.icon} {contentType.label}
             </Tag>
           )}
+          {platform && (
+            <span className="text-[11px] text-emerald-500 font-medium flex items-center gap-1">
+              <CheckCircleOutlined /> Link hợp lệ
+            </span>
+          )}
         </div>
       )}
 
@@ -247,16 +252,6 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
         </div>
       </Modal>
 
-      {platform && (
-        <div className="flex items-center gap-2 text-[11px] px-1">
-          <Tag color={platform.color} icon={platform.icon} className="!mr-0 font-bold rounded-md">
-            {platform.name}
-          </Tag>
-          <span className="text-emerald-600 font-medium flex items-center gap-1">
-            <CheckCircleOutlined /> Link hợp lệ
-          </span>
-        </div>
-      )}
     </div>
   );
 };
