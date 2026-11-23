@@ -12,15 +12,23 @@
 | 3 | `HistoryTab` | `aba8a10` |
 | 4a | `RunningTab`, kèm đồng hồ 1 giây (giờ chỉ tab này render lại mỗi giây) | `71f6817` |
 | 4b | `ResumeBuffModal`, `AiSeedingModal` | `8f3b98b` |
+| 5a | Toàn bộ state/effect/handler sang `useBuffEngagementController`; `BuffController = ReturnType<...>` | `acfb883` |
+| 5b | `CreateBuffTab` (đọc `BuffController`) | `f71f1fb` |
+| 5c | Controller tách tiếp thành `useAccountsAndPages`, `useSingleRunner`, `useBatchRunner` (kiểu `Deps` do TS checker sinh) | `ac485a7` |
 
-**Còn lại (GĐ 5, chưa làm):** tab "Tạo mới" và bộ chạy buff (khoảng 2.900 dòng state/handler cùng 1.640 dòng JSX).
-- **Vì sao chưa làm:** tab này dùng tới 112 biến của component cha. Tách thẳng ra thành component với 112 props thì không giảm render và còn khó đọc hơn.
-- **Cách đúng:**
-  - `useBuffRunner()`: gồm stream SSE, batch, dừng/chạy tiếp, khôi phục phiên sau F5, `liveLogs`, `runTiming`.
-  - `useFanpageSelection()`: gồm Via, Fanpage, chọn page, chống trùng.
-  - `useCreateForm()`: gồm link, reaction, bình luận, tốc độ.
-  - Có 3 hook này rồi mới tách `CreateBuffTab`.
-- **Điều kiện:** phải chạy buff thật để kiểm chứng: chạy đơn, chạy batch, dừng giữa chừng, F5 khôi phục, chạy tiếp/bù like.
+**Kết quả:** `pages/BuffEngagement.tsx` còn 672 dòng (từ 8.959) và chỉ lo phần giao diện. Không file nào trong `features/buff/` dài quá khoảng 1.800 dòng.
+
+**Cần chạy buff thật để kiểm chứng trước khi merge** (khi refactor chỉ test được những thao tác không chạy):
+- chạy 1 link, ngắn (khoảng 5 Page)
+- dừng giữa chừng
+- F5 khi đang chạy, rồi xem phiên có được khôi phục không
+- chạy batch 2 link
+- chạy tiếp / bù like
+- thêm vào hàng đợi
+
+**Việc có thể làm sau:**
+- Phần state vẫn nằm chung trong controller, nên gõ vào form vẫn làm render lại cả trang.
+- Muốn tách render thật sự thì phải cho từng hook con tự giữ state của nó. Việc này là thiết kế lại, không còn là di chuyển code.
 
 ## Vì sao tách
 `frontend/src/pages/BuffEngagement.tsx` dài khoảng 8.960 dòng và có 127 `useState`, tất cả nằm trong một component. Hệ quả:
