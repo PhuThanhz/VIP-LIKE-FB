@@ -647,11 +647,18 @@ async function scanProfileSwitcherPages(page, uid) {
           .replace(/\s+/g, ' ')
           .trim();
       };
+      // Dòng xem trước thông báo (vd: "Chưa đọcNguyễn Phi Văn đã theo dõi bạn.") không phải tên Page
+      const notificationLike = /^(?:Chưa đọc|Unread)|(?:^|\s)đã (?:theo dõi|thích|bình luận|nhắc|gửi|chia sẻ|phản hồi|mời)(?:\s|$)|\b(?:followed|liked|commented|mentioned|shared|replied|invited)\b/;
       const set = new Set();
       dlg.querySelectorAll('[role="listitem"], [role="radio"], [role="button"], a').forEach((e) => {
-        const raw = (e.innerText || '').split('\n')[0].trim();
-        const t = cleanName(raw);
-        if (t && t.length > 1 && t.length < 80 && !noise.test(t)) set.add(t);
+        // Lấy dòng đầu tiên thực sự là tên (bỏ qua dòng thông báo chưa đọc nằm phía trên)
+        const lines = (e.innerText || '').split('\n').map((l) => l.trim()).filter(Boolean);
+        for (const raw of lines) {
+          const t = cleanName(raw);
+          if (!t || notificationLike.test(raw) || notificationLike.test(t)) continue;
+          if (t.length > 1 && t.length < 80 && !noise.test(t)) set.add(t);
+          break;
+        }
       });
       return [...set];
     });
@@ -2597,6 +2604,9 @@ async function executePageInteraction({
           }
           if (!isMatched) {
             console.warn(`[FB-Buff]${workerTag} ⚠️ Danh tính chưa khớp! Kỳ vọng "${pageInfo.name}" (${pageInfo.id}) nhưng hiện tại là "${currentActor?.name}" (${currentActor?.id}). TỪ CHỐI LIKE để bảo vệ Via.`);
+            // Ghi nhận như lỗi chuyển danh tính để Page hỏng lặp lại (vd: gán nhầm Via) được tự cách ly như nhánh switch thất bại.
+            // Trước đây nhánh này không ghi nhận → Page lỗi 9/9 lần vẫn bị thử lại ở mọi lượt chạy.
+            recordPageSwitchOutcome(uid, pageInfo.id, false, 'IDENTITY_MISMATCH');
             throw new Error(`Chưa chuyển được danh tính sang Page "${pageInfo.name}" (Hiện tại: ${currentActor?.name || 'N/A'})`);
           }
         }

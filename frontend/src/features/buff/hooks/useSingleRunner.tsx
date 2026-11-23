@@ -520,9 +520,9 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
       }
 
       buffAbortRef.current = null;
-      return { details: [...liveDetails], runTargetUrl, runAccountName, stopped: controller.signal.aborted };
+      return { details: [...liveDetails], runTargetUrl, runAccountName, runTargetKpi: targetKpi, stopped: controller.signal.aborted };
     },
-    onSuccess: ({ details, runTargetUrl, runAccountName, stopped }) => {
+    onSuccess: ({ details, runTargetUrl, runAccountName, runTargetKpi, stopped }) => {
       const counts = summarizeBuffDetails(details);
       const hasAnyExecuted = details.some((d) => d.status !== 'WAITING');
       if (runTargetUrl && details.length > 0 && hasAnyExecuted) {
@@ -539,6 +539,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
           targetUrl: runTargetUrl,
           reactionType: selectedReaction,
           totalPages: details.length,
+          targetLikes: runTargetKpi,
           successCount: counts.success,
           alreadyLikedCount: counts.alreadyLiked,
           failedCount: counts.failed,
