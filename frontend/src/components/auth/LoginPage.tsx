@@ -96,14 +96,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       {/* Top Bar */}
       <header className="px-6 py-4 flex items-center justify-between border-b bg-slate-900/60 border-slate-800/80 backdrop-blur-xl">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-300 font-bold">
-            <ThunderboltFilled className="text-base text-slate-300" />
-          </div>
+          <img src="/logo.png" alt="VIP LIKE RADIANT" className="w-9 h-9 rounded-xl shadow-md border border-slate-800 object-cover shrink-0" />
           <div>
-            <div className="font-extrabold text-sm tracking-wider uppercase text-slate-100">
-              VIP LIKE
+            <div className="font-extrabold text-sm tracking-wider uppercase text-slate-100 flex items-center gap-1.5">
+              <span>VIP LIKE</span>
+              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60">
+                RADIANT
+              </span>
             </div>
-            <div className="text-[10px] text-slate-400">Hệ Thống Tăng Tương Tác & Săn Bài Meta</div>
+            <div className="text-[10px] text-slate-400">Hệ Thống Tăng Tương Tác &amp; Săn Bài Meta</div>
           </div>
         </div>
 
@@ -118,11 +119,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           >
             {/* Header Badge & Brand */}
             <div className="text-center pb-4 pt-2">
+              <div className="flex justify-center mb-3">
+                <img src="/logo.png" alt="VIP LIKE RADIANT" className="w-16 h-16 rounded-2xl shadow-2xl border border-slate-800 object-cover" />
+              </div>
               <h1 className="text-xl font-bold tracking-tight mb-1 text-white">
                 ĐĂNG NHẬP HỆ THỐNG
               </h1>
               <p className="text-xs text-slate-400">
-                Vui lòng xác thực tài khoản để truy cập dàn Fanpage & Công cụ Buff
+                Vui lòng xác thực tài khoản để truy cập dàn Fanpage &amp; Công cụ Buff
               </p>
             </div>
 

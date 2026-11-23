@@ -137,13 +137,17 @@ const SidebarComponent: React.FC<SidebarProps> = ({
     >
       <div className="flex flex-col h-full">
         {/* Brand */}
-        <div className="h-16 flex items-center px-5 border-b shrink-0 border-slate-800/60">
-          {collapsed ? (
-            <span className="mx-auto text-sm font-semibold text-slate-100">VIP</span>
-          ) : (
+        <div className={`h-16 flex items-center border-b shrink-0 border-slate-800/60 ${collapsed ? 'justify-center px-2' : 'px-4 gap-3'}`}>
+          <img src="/logo.png" alt="VIP LIKE RADIANT" className="w-9 h-9 rounded-xl shadow-md border border-slate-800 shrink-0 object-cover" />
+          {!collapsed && (
             <div className="min-w-0 leading-tight">
-              <div className="text-[15px] font-semibold text-slate-100 truncate">VIP LIKE</div>
-              <div className="text-xs text-slate-500 truncate mt-0.5">Hệ thống buff like tự động</div>
+              <div className="text-[15px] font-bold text-slate-100 truncate tracking-tight flex items-center gap-1.5">
+                <span>VIP LIKE</span>
+                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60">
+                  RADIANT
+                </span>
+              </div>
+              <div className="text-xs text-slate-400 truncate mt-0.5">Hệ thống tương tác Meta</div>
             </div>
           )}
         </div>
