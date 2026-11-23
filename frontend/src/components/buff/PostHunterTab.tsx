@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import axios from 'axios';
-import { App, Badge, Button, Dropdown, Empty, Input, Modal, Segmented, Space, Switch, Table, Tooltip } from 'antd';
+import { App, Badge, Button, Dropdown, Empty, Input, Modal, Progress, Segmented, Space, Switch, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   DeleteOutlined,
@@ -12,7 +12,6 @@ import {
   SettingOutlined,
   ThunderboltOutlined,
   SendOutlined,
-  BarChartOutlined,
 } from '@ant-design/icons';
 
 export interface HunterMonitor {
@@ -276,27 +275,74 @@ export default function PostHunterTab({
         const daysLeft = mon.expiresAt ? Math.ceil((new Date(mon.expiresAt).getTime() - now) / DAY_MS) : null;
         return (
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[13px] font-semibold text-slate-100 truncate">{mon.targetName}</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <a
+                href={mon.targetUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[13px] font-semibold text-slate-100 hover:text-blue-400 truncate"
+                title={mon.targetUrl}
+              >
+                {mon.targetName}
+              </a>
               {daysLeft !== null && (
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${daysLeft > 5 ? 'bg-amber-950/60 text-amber-300 border border-amber-600/40' : daysLeft > 0 ? 'bg-rose-950/60 text-rose-300 border border-rose-600/40' : 'bg-slate-800 text-slate-400'}`}>
-                  {daysLeft > 0 ? `Gói VIP: ${daysLeft} ngày` : 'Hết hạn'}
+                <span
+                  className={`shrink-0 text-[10px] font-semibold px-1.5 py-px rounded-md ${
+                    daysLeft > 5
+                      ? 'bg-amber-400/10 text-amber-300'
+                      : daysLeft > 0
+                      ? 'bg-rose-400/10 text-rose-300'
+                      : 'bg-slate-800 text-slate-500'
+                  }`}
+                >
+                  {daysLeft > 0 ? `VIP ${daysLeft}d` : 'Hết hạn'}
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5 min-w-0">
-              <span className="shrink-0">{TYPE_LABELS[mon.targetType] || 'Fanpage'}</span>
-              <span className="shrink-0">·</span>
-              <a href={mon.targetUrl} target="_blank" rel="noopener noreferrer" className="truncate text-slate-400 hover:text-blue-400">
-                {shortUrl(mon.targetUrl)}
-              </a>
-              {mon.buffConfig?.maxPostsPerDay && (
-                <>
-                  <span className="shrink-0">·</span>
-                  <span className="text-slate-400 font-mono text-[10px]">Hôm nay: {mon.dailyPostsCount || 0}/{mon.buffConfig.maxPostsPerDay} bài</span>
-                </>
-              )}
+            <div className="text-[11px] text-slate-500 mt-0.5">{TYPE_LABELS[mon.targetType] || 'Fanpage'}</div>
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Gói buff',
+      key: 'buff',
+      width: 170,
+      render: (_, mon) => {
+        const cfg = mon.buffConfig || ({} as HunterMonitor['buffConfig']);
+        const amount = cfg.targetLikes === 'ALL' ? `≤${maxPagesPerPost}` : `${cfg.targetLikes || 30}`;
+        const detail = [
+          REACTION_LABELS[cfg.reactionType] || cfg.reactionType,
+          cfg.delayMinutes ? `chờ ${cfg.delayMinutes}p` : null,
+          cfg.enableComment ? 'bình luận' : null,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        return (
+          <Tooltip title={detail}>
+            <div className="whitespace-nowrap">
+              <span className="text-[13px] font-semibold text-slate-100">{amount}</span>
+              <span className="text-[11px] text-slate-500 ml-1">like / bài</span>
             </div>
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: 'Hôm nay',
+      key: 'today',
+      width: 130,
+      render: (_, mon) => {
+        const max = mon.buffConfig?.maxPostsPerDay;
+        const done = mon.dailyPostsCount || 0;
+        if (!max) return <span className="text-xs text-slate-300">{done} bài</span>;
+        return (
+          <div className="pr-3">
+            <div className="text-xs text-slate-300 whitespace-nowrap">
+              {done}
+              <span className="text-slate-500">/{max} bài</span>
+            </div>
+            <Progress percent={Math.min(100, (done / max) * 100)} showInfo={false} size="small" strokeColor="#22d3ee" className="!m-0" />
           </div>
         );
       },
@@ -304,95 +350,54 @@ export default function PostHunterTab({
     {
       title: 'Trạng thái',
       key: 'status',
-      width: 140,
+      width: 150,
       render: (_, mon) => {
         const health = getMonitorHealth(mon);
-        const badge = <Badge className="whitespace-nowrap" status={health.status} text={<span className="text-xs text-slate-200">{health.text}</span>} />;
-        return health.hint ? <Tooltip title={health.hint}>{badge}</Tooltip> : badge;
-      },
-    },
-    {
-      title: 'Cách buff',
-      key: 'buff',
-      width: 170,
-      render: (_, mon) => {
-        const varianceText = mon.buffConfig?.variancePercent ? ` (±${mon.buffConfig.variancePercent}%)` : '';
-        const dripText = mon.buffConfig?.enableDripFeed ? ` · rải ${mon.buffConfig.dripDurationMinutes || 20}p` : '';
-        return (
-          <div className="text-xs whitespace-nowrap">
-            <div className="text-slate-200">
-              {mon.buffConfig?.targetLikes === 'ALL' ? `Xoay vòng ≤${maxPagesPerPost} page` : `${mon.buffConfig?.targetLikes || 30} lượt${varianceText}`}
-            </div>
-            <div className="text-[11px] text-slate-400 mt-0.5 truncate">
-              {REACTION_LABELS[mon.buffConfig?.reactionType] || mon.buffConfig?.reactionType}
-              {' · '}
-              {mon.buffConfig?.delayMinutes ? `chờ ${mon.buffConfig.delayMinutes} phút` : 'buff ngay'}
-              {mon.buffConfig?.enableComment ? ' · bình luận' : ''}
-              {dripText}
-            </div>
+        const sub =
+          mon.status === 'ACTIVE'
+            ? `Quét tiếp: ${formatUntil(nextScanAt(mon), now).toLowerCase()}`
+            : mon.lastCheckedAt
+            ? `Quét ${formatAgo(mon.lastCheckedAt, now).toLowerCase()}`
+            : '';
+        const tip = [health.hint, mon.lastScanVia ? `Via quét: ${mon.lastScanVia}` : null].filter(Boolean).join('\n');
+        const body = (
+          <div className="whitespace-nowrap">
+            <Badge status={health.status} text={<span className="text-xs text-slate-200">{health.text}</span>} />
+            {sub && <div className="text-[11px] text-slate-500 mt-0.5 pl-3.5">{sub}</div>}
           </div>
         );
+        return tip ? <Tooltip title={<span className="whitespace-pre-line">{tip}</span>}>{body}</Tooltip> : body;
       },
-    },
-    {
-      title: 'Quét gần nhất',
-      key: 'lastScan',
-      width: 160,
-      render: (_, mon) => (
-        <div className="text-xs whitespace-nowrap">
-          <div className="text-slate-200">{formatAgo(mon.lastCheckedAt, now)}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5 truncate">
-            {mon.lastCheckedAt
-              ? `${mon.lastPostsFound ?? 0} bài${mon.lastScanVia ? ` · ${mon.lastScanVia}` : ''}`
-              : `Mỗi ${mon.checkIntervalMinutes} phút`}
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: 'Quét tiếp',
-      key: 'nextScan',
-      width: 105,
-      render: (_, mon) => (
-        <span className="text-xs text-slate-300 whitespace-nowrap">
-          {mon.status === 'ACTIVE' ? formatUntil(nextScanAt(mon), now) : '—'}
-        </span>
-      ),
     },
     {
       title: 'Đã bắt',
       key: 'caught',
-      width: 90,
+      width: 80,
       align: 'right',
-      render: (_, mon) => (
-        <div className="text-xs whitespace-nowrap">
-          <div className="text-slate-100 font-semibold">{mon.totalDetected || 0} bài</div>
-          {mon.lastFoundPostUrl && (
-            <a href={mon.lastFoundPostUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-400 hover:underline">
-              Bài gần nhất
+      render: (_, mon) =>
+        mon.lastFoundPostUrl ? (
+          <Tooltip title="Mở bài gần nhất">
+            <a href={mon.lastFoundPostUrl} target="_blank" rel="noopener noreferrer" className="text-[13px] font-semibold text-slate-100 hover:text-blue-400">
+              {mon.totalDetected || 0}
             </a>
-          )}
-        </div>
-      ),
+          </Tooltip>
+        ) : (
+          <span className="text-[13px] font-semibold text-slate-100">{mon.totalDetected || 0}</span>
+        ),
     },
     {
       title: '',
       key: 'actions',
-      width: 185,
+      width: 130,
       align: 'right',
       render: (_, mon) => (
-        <Space size={8}>
-          <Tooltip title={mon.status === 'ACTIVE' ? 'Tạm dừng theo dõi' : 'Bật theo dõi'}>
-            <Switch
-              size="small"
-              checked={mon.status === 'ACTIVE'}
-              loading={togglingId === mon.id}
-              onChange={() => handleToggle(mon.id)}
-            />
+        <Space size={4}>
+          <Tooltip title={mon.status === 'ACTIVE' ? 'Tạm dừng' : 'Bật theo dõi'}>
+            <Switch size="small" checked={mon.status === 'ACTIVE'} loading={togglingId === mon.id} onChange={() => handleToggle(mon.id)} />
           </Tooltip>
-          <Button size="small" icon={<ThunderboltOutlined />} loading={scanningId === mon.id} onClick={() => handleScanNow(mon.id)}>
-            Quét ngay
-          </Button>
+          <Tooltip title="Quét ngay">
+            <Button size="small" type="text" icon={<ThunderboltOutlined />} loading={scanningId === mon.id} onClick={() => handleScanNow(mon.id)} aria-label="Quét ngay" />
+          </Tooltip>
           <Dropdown
             trigger={['click']}
             menu={{
@@ -412,116 +417,83 @@ export default function PostHunterTab({
   ];
 
   const statItems = [
-    { label: 'Đang theo dõi', value: `${stats.active}/${monitors.length}`, sub: stats.attention > 0 ? `${stats.attention} mục cần xem lại` : 'mục tiêu' },
-    { label: 'Bài bắt được 24h', value: String(stats.caught24h), sub: 'bài mới' },
-    { label: 'Chờ buff', value: String(stats.waiting), sub: stats.running > 0 ? `${stats.running} bài đang buff` : 'trong hàng đợi' },
-    { label: 'Lượt quét tiếp', value: stats.soonest === null ? '—' : formatUntil(stats.soonest, now), sub: 'mục tiêu gần nhất' },
+    { label: 'Theo dõi', value: `${stats.active}/${monitors.length}`, warn: false },
+    { label: 'Bài mới 24h', value: String(stats.caught24h), warn: false },
+    { label: stats.running > 0 ? `Chờ buff · ${stats.running} đang chạy` : 'Chờ buff', value: String(stats.waiting), warn: false },
+    { label: 'Quét tiếp', value: stats.soonest === null ? '—' : formatUntil(stats.soonest, now), warn: false },
+    ...(stats.attention > 0 ? [{ label: 'Cần xem lại', value: String(stats.attention), warn: true }] : []),
   ];
 
   return (
     <div className="space-y-4">
       {/* Tiêu đề + thao tác chính */}
-      <div className="app-surface p-4 space-y-3">
+      <div className="app-surface p-4 space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2.5">
               <span className="text-[15px] font-semibold text-slate-100">Tự săn bài mới</span>
               <Badge
                 status={postHunterPaused ? 'warning' : 'success'}
                 text={
-                  <span className={`text-xs font-medium ${postHunterPaused ? 'text-amber-300' : 'text-emerald-300'}`}>
-                    {postHunterPaused ? 'Đang tạm dừng' : 'Đang hoạt động'}
+                  <span className={`text-xs ${postHunterPaused ? 'text-amber-300' : 'text-emerald-300'}`}>
+                    {postHunterPaused ? 'Tạm dừng' : 'Đang chạy'}
                   </span>
                 }
               />
             </div>
-            <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-              Theo dõi Fanpage và Group. Khi có bài mới, hệ thống chờ một khoảng ngắn rồi buff bằng các page của via, xoay vòng để page nào cũng được dùng đều.
-              Lần quét đầu chỉ lấy mốc nên bài cũ không bị buff.
+            <p className="text-xs text-slate-500 mt-1">
+              Page/Group có bài mới là tự buff.{' '}
+              <Tooltip title="Lần quét đầu chỉ lấy mốc nên bài cũ không bị buff. Page của via được xoay vòng để dùng đều.">
+                <span className="underline decoration-dotted cursor-help">Cách hoạt động</span>
+              </Tooltip>
             </p>
           </div>
-          <Space className="shrink-0" wrap>
+          <Space className="shrink-0" wrap size={8}>
             {onTogglePostHunterPaused && (
-              <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-900/80 border border-slate-800">
-                <span className="text-xs text-slate-300">Săn bài tự động</span>
-                <Switch
-                  size="small"
-                  checked={!postHunterPaused}
-                  loading={togglingGlobalPause}
-                  onChange={handleGlobalPauseSwitch}
-                />
-              </div>
+              <Tooltip title={postHunterPaused ? 'Bật săn bài tự động' : 'Tạm dừng toàn bộ'}>
+                <Switch checked={!postHunterPaused} loading={togglingGlobalPause} onChange={handleGlobalPauseSwitch} />
+              </Tooltip>
             )}
-            <Tooltip title="Làm mới">
-              <Button icon={<ReloadOutlined />} onClick={onRefresh} aria-label="Làm mới" />
-            </Tooltip>
-            <Button icon={<SearchOutlined />} onClick={() => setTestOpen(true)}>
-              Quét thử link
-            </Button>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'refresh', icon: <ReloadOutlined />, label: 'Làm mới', onClick: onRefresh },
+                  { key: 'test', icon: <SearchOutlined />, label: 'Quét thử link', onClick: () => setTestOpen(true) },
+                  { key: 'report', icon: <SendOutlined />, label: 'Gửi báo cáo 24h về Telegram', disabled: sendingReport, onClick: handleSendDailyReport },
+                  { type: 'divider' },
+                  {
+                    key: 'own',
+                    icon: <SettingOutlined />,
+                    label: `Tự buff bài app đăng: ${autoBuffOwnPosts ? 'Bật' : 'Tắt'}`,
+                    onClick: onOpenSettings,
+                  },
+                ],
+              }}
+            >
+              <Button icon={<MoreOutlined />} aria-label="Thêm thao tác" />
+            </Dropdown>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => onAdd()}>
               Thêm mục tiêu
             </Button>
           </Space>
         </div>
+
+        {/* Số liệu vận hành */}
+        <div className="flex flex-wrap gap-x-8 gap-y-3 pt-3 border-t border-slate-800/80">
+          {statItems.map((item) => (
+            <div key={item.label}>
+              <div className={`text-xl font-semibold leading-none ${item.warn ? 'text-amber-300' : 'text-slate-100'}`}>{item.value}</div>
+              <div className="text-[11px] text-slate-500 mt-1.5">{item.label}</div>
+            </div>
+          ))}
+        </div>
+
         {postHunterPaused && (
-          <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex items-center justify-between gap-2">
-            <span>Tính năng Săn bài tự động đang tạm dừng. Hệ thống sẽ không quét bài mới hay tự buff bài Post Hunter; các đơn chạy tay trong Hàng đợi vẫn hoạt động bình thường.</span>
+          <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
+            Đang tạm dừng: không quét bài mới. Đơn chạy tay trong Hàng đợi vẫn chạy.
           </div>
         )}
-      </div>
-
-      {/* Số liệu vận hành */}
-      <div className="app-surface grid grid-cols-2 lg:grid-cols-5">
-        {statItems.map((item, idx) => (
-          <div key={item.label} className={`px-4 py-3.5 ${idx > 0 ? 'lg:border-l border-slate-800/80' : ''}`}>
-            <div className="app-stat-label">{item.label}</div>
-            <div className="text-xl font-semibold text-slate-100 mt-1">{item.value}</div>
-            <div className={`text-[11px] mt-0.5 ${item.sub.includes('cần xem lại') ? 'text-amber-400' : 'text-slate-500'}`}>{item.sub}</div>
-          </div>
-        ))}
-        <div className="px-4 py-3.5 lg:border-l border-slate-800/80">
-          <div className="app-stat-label">Tự buff bài app đăng</div>
-          <div className="mt-1.5">
-            <Badge status={autoBuffOwnPosts ? 'success' : 'default'} text={<span className="text-sm font-semibold text-slate-100">{autoBuffOwnPosts ? 'Đang bật' : 'Đang tắt'}</span>} />
-          </div>
-          <Button type="link" size="small" className="!p-0 !h-auto text-[11px]" onClick={onOpenSettings}>
-            Cài đặt
-          </Button>
-        </div>
-      </div>
-
-      {/* Khung Báo Cáo Tổng Quan Cuối Ngày (Daily Summary Banner) */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-900/90 to-cyan-950/40 border border-emerald-500/30 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-lg shadow-emerald-950/20">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center shrink-0 text-xl">
-            📊
-          </div>
-          <div>
-            <div className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              <span>Báo Cáo Tổng Quan VIP Like Cuối Ngày</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                24 Giờ Qua
-              </span>
-            </div>
-            <div className="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span>🎯 Đang theo dõi: <b className="text-emerald-300">{stats.active}/{monitors.length}</b> mục tiêu</span>
-              <span>📰 Bài bắt được: <b className="text-cyan-300">{stats.caught24h}</b> bài mới</span>
-              <span>⏳ Chờ trong hàng đợi: <b className="text-amber-300">{stats.waiting}</b> bài</span>
-              <span>🛡️ Dàn Via thực thi: <b className="text-slate-200">514 Page Thành An</b> (Sẵn sàng)</span>
-            </div>
-          </div>
-        </div>
-        <div className="shrink-0 flex items-center gap-2">
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
-            loading={sendingReport}
-            onClick={handleSendDailyReport}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs h-9 shadow-md shadow-emerald-950/40"
-          >
-            Gửi Báo Cáo Về Telegram
-          </Button>
-        </div>
       </div>
 
       {/* Danh sách mục tiêu */}
@@ -532,20 +504,20 @@ export default function PostHunterTab({
             value={filter}
             onChange={setFilter}
             options={[
-              { value: 'ALL', label: `Tất cả (${monitors.length})` },
-              { value: 'ACTIVE', label: `Đang chạy (${stats.active})` },
-              { value: 'PAUSED', label: `Tạm dừng (${monitors.length - stats.active})` },
-              { value: 'ATTENTION', label: `Cần xem lại (${stats.attention})` },
+              { value: 'ALL', label: `Tất cả ${monitors.length}` },
+              { value: 'ACTIVE', label: `Đang chạy ${stats.active}` },
+              { value: 'PAUSED', label: `Tạm dừng ${monitors.length - stats.active}` },
+              ...(stats.attention > 0 ? [{ value: 'ATTENTION' as MonitorFilter, label: `Cần xem lại ${stats.attention}` }] : []),
             ]}
           />
           <Input
             allowClear
             size="small"
             prefix={<SearchOutlined className="text-slate-500" />}
-            placeholder="Tìm theo tên hoặc link"
+            placeholder="Tìm mục tiêu"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="md:w-64"
+            className="md:w-56"
           />
         </div>
         <Table<HunterMonitor>
@@ -554,6 +526,7 @@ export default function PostHunterTab({
           columns={columns}
           dataSource={filteredMonitors}
           tableLayout="fixed"
+          scroll={{ x: 860 }}
           pagination={filteredMonitors.length > 10 ? { pageSize: 10, showTotal: (t) => `${t} mục tiêu` } : false}
           locale={{
             emptyText:
@@ -561,7 +534,7 @@ export default function PostHunterTab({
                 <div className="py-10">
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={<span className="text-slate-400 text-xs">Chưa theo dõi Fanpage hay Group nào</span>}
+                    description={<span className="text-slate-400 text-xs">Chưa có mục tiêu nào</span>}
                   >
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => onAdd()}>
                       Thêm mục tiêu
@@ -569,7 +542,7 @@ export default function PostHunterTab({
                   </Empty>
                 </div>
               ) : (
-                <div className="py-8 text-xs text-slate-400">Không có mục tiêu phù hợp bộ lọc</div>
+                <div className="py-8 text-xs text-slate-400">Không có mục tiêu phù hợp</div>
               ),
           }}
         />
@@ -578,36 +551,34 @@ export default function PostHunterTab({
       {/* Bài bắt gần đây */}
       <div className="app-surface overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800/80">
-          <div className="text-[13px] font-semibold text-slate-100">Bài bắt gần đây</div>
-          <Button type="link" size="small" className="!p-0" onClick={onOpenQueue}>
-            Mở hàng đợi
+          <div className="text-[13px] font-semibold text-slate-100">Bài mới bắt được</div>
+          <Button type="link" size="small" className="!p-0 text-xs" onClick={onOpenQueue}>
+            Xem hàng đợi
           </Button>
         </div>
         {recentCatches.length === 0 ? (
-          <div className="px-4 py-8 text-center text-xs text-slate-500">
-            Chưa có bài nào. Bài mới từ các mục tiêu và bài app vừa đăng sẽ hiện ở đây.
-          </div>
+          <div className="px-4 py-8 text-center text-xs text-slate-500">Chưa có bài nào.</div>
         ) : (
           <div className="divide-y divide-slate-800/70">
-            {recentCatches.map((task) => (
-              <div key={task.id} className="px-4 py-2.5 grid grid-cols-12 items-center gap-3 text-xs">
-                <div className="col-span-2 text-slate-400">{formatAgo(task.addedAt, now)}</div>
-                <div className="col-span-3 text-slate-200 truncate">
-                  {task.source === 'AUTO_OWN_POST'
-                    ? `Bài app đăng${task.topic === 'GROUP' ? ' · Group' : task.topic === 'FANPAGE' ? ' · Fanpage' : ''}`
-                    : task.monitorName || 'Post Hunter'}
+            {recentCatches.map((task) => {
+              const source =
+                task.source === 'AUTO_OWN_POST' ? 'Bài app đăng' : task.monitorName && task.monitorName !== 'Post Hunter' ? task.monitorName : null;
+              return (
+                <div key={task.id} className="px-4 py-2.5 flex items-center gap-4 text-xs">
+                  <div className="w-20 shrink-0 text-slate-500">{formatAgo(task.addedAt, now)}</div>
+                  <div className="min-w-0 flex-1">
+                    <a href={task.targetUrl} target="_blank" rel="noopener noreferrer" className="block truncate text-slate-300 hover:text-blue-400">
+                      {shortUrl(task.targetUrl || '')}
+                    </a>
+                    {source && <div className="text-[11px] text-slate-500 truncate">{source}</div>}
+                  </div>
+                  <div className="w-28 shrink-0">{renderTaskStatus(task)}</div>
+                  <div className="w-14 shrink-0 text-right text-slate-400 font-mono">
+                    {task.result ? `${task.result.success}/${task.result.total}` : ''}
+                  </div>
                 </div>
-                <div className="col-span-4 min-w-0">
-                  <a href={task.targetUrl} target="_blank" rel="noopener noreferrer" className="block truncate text-blue-400 hover:underline">
-                    {shortUrl(task.targetUrl || '')}
-                  </a>
-                </div>
-                <div className="col-span-2">{renderTaskStatus(task)}</div>
-                <div className="col-span-1 text-right text-slate-300">
-                  {task.result ? `${task.result.success}/${task.result.total}` : '—'}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
