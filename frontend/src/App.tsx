@@ -5,6 +5,7 @@ import Header from './components/Header';
 import Sidebar, { SidebarStats } from './components/Sidebar';
 import PageSkeleton from './components/common/SaaSLoadingSkeleton';
 import api from './config/axios';
+import { useVisibleInterval } from './hooks/useVisibleInterval';
 import { DEFAULT_NAV_KEY } from './config/navigation';
 import { DARK_THEME } from './theme/antdTheme';
 import { WallpaperProvider } from './theme/WallpaperContext';
@@ -90,10 +91,9 @@ const useDbStatus = () => {
 
   useEffect(() => {
     fetchDbStatus(false);
-    // Poll nền: không bật loading để không làm cả cây re-render khi DB không đổi
-    const interval = setInterval(() => fetchDbStatus(true), DB_POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
   }, [fetchDbStatus]);
+  // Poll nền: không bật loading để không làm cả cây re-render khi DB không đổi; dừng khi ẩn tab
+  useVisibleInterval(() => fetchDbStatus(true), DB_POLL_INTERVAL_MS);
 
   // Bấm nút kiểm tra thủ công: hiện loading
   const checkDb = useCallback(() => fetchDbStatus(false), [fetchDbStatus]);

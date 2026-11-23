@@ -73,6 +73,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
+import { useVisibleInterval } from '../hooks/useVisibleInterval';
 import api, { WORKER_BASE_URL } from '../config/axios';
 import PasteLinkInput from '../components/common/PasteLinkInput';
 import { triggerCookieExpiredAlert, useCookieAlert } from '../components/common/CookieAlertManager';
@@ -908,12 +909,11 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     }
   }, [autoBuffProgress.status, autoBuffProgress.details]);
 
-  useEffect(() => {
-    const isWaitingOrRunning = autoBuffProgress.details.some((d) => d.status === 'WAITING' || d.status === 'RUNNING');
-    if (autoBuffProgress.status !== 'RUNNING' || (autoBuffProgress.details.length > 0 && !isWaitingOrRunning)) return;
-    const id = setInterval(() => setClockNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [autoBuffProgress.status, autoBuffProgress.details]);
+  const clockTicking =
+    autoBuffProgress.status === 'RUNNING' &&
+    (autoBuffProgress.details.length === 0 ||
+      autoBuffProgress.details.some((d) => d.status === 'WAITING' || d.status === 'RUNNING'));
+  useVisibleInterval(() => setClockNow(Date.now()), clockTicking ? 1000 : null);
 
   // Khôi phục phiên Buff trực tiếp hoặc tác vụ Hàng đợi đang chạy ngầm nếu người dùng F5 hoặc mở trang
   useEffect(() => {
@@ -1166,12 +1166,13 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     } catch {}
   }, []);
 
+  // Chỉ phụ thuộc vào cờ "có bài đang chạy" (boolean), không phụ thuộc mảng queueItems:
+  // trước đây mỗi lần fetch tạo mảng mới → effect chạy lại → fetch ngay → vòng lặp gọi API liên tục.
+  const queueHasRunning = queueItems.some((i) => i.status === 'RUNNING');
   useEffect(() => {
     fetchBuffQueue();
-    const hasRunning = queueItems.some((i) => i.status === 'RUNNING');
-    const interval = setInterval(fetchBuffQueue, hasRunning ? 3000 : 8000);
-    return () => clearInterval(interval);
-  }, [fetchBuffQueue, queueItems]);
+  }, [fetchBuffQueue]);
+  useVisibleInterval(fetchBuffQueue, queueHasRunning ? 3000 : 8000);
 
   // Tab Tạo mới: chạy ngay hoặc đưa vào hàng đợi
   const [runMode, setRunMode] = useState<'NOW' | 'QUEUE'>('NOW');
@@ -1415,6 +1416,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [monDripDurationMinutes, setMonDripDurationMinutes] = useState<number>(20);
   const [monExpiryDays, setMonExpiryDays] = useState<number>(30);
   const [spintaxSampleOutputs, setSpintaxSampleOutputs] = useState<string[]>([]);
+  const [monShowAdvanced, setMonShowAdvanced] = useState<boolean>(false);
 
 
   const [postHunterPaused, setPostHunterPaused] = useState<boolean>(false);
@@ -1431,9 +1433,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
   useEffect(() => {
     fetchBuffMonitors();
-    const interval = setInterval(fetchBuffMonitors, 15000);
-    return () => clearInterval(interval);
   }, [fetchBuffMonitors]);
+  useVisibleInterval(fetchBuffMonitors, 15000);
 
   // Via Health & Enterprise BM Overview State
   const [checkingViaHealth, setCheckingViaHealth] = useState<boolean>(false);
@@ -1517,9 +1518,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   useEffect(() => {
     fetchBmOverview();
     fetchSettings();
-    const interval = setInterval(fetchBmOverview, 15000);
-    return () => clearInterval(interval);
   }, [fetchBmOverview, fetchSettings]);
+  useVisibleInterval(fetchBmOverview, 15000);
 
   const handleSaveSettings = async () => {
     setSavingSettings(true);
@@ -1646,7 +1646,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       setMonTargetName('');
       setMonTargetType('PAGE');
       setMonInterval(10);
-      setMonTargetLikes('ALL');
+      setMonTargetLikes(100);
       setMonReaction('RANDOM_POSITIVE');
       setMonEnableComment(false);
       setMonDelayMinutes(3);
@@ -8528,91 +8528,100 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             {editingMonitorId ? 'Lưu thay đổi' : 'Bắt đầu theo dõi'}
           </Button>,
         ]}
-        width={640}
+        width={560}
         className="dark-modal"
       >
         <div className="space-y-5 py-1 text-slate-200">
+          {/* MỤC TIÊU */}
           <section className="space-y-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Mục tiêu</div>
-            <div>
-              <label className="text-xs text-slate-300 mb-1 block">
-                Link Fanpage hoặc Group <span className="text-rose-400">*</span>
-              </label>
+            <Input
+              autoFocus
+              size="large"
+              placeholder="Dán link Fanpage hoặc Group"
+              value={monTargetUrl}
+              onChange={(e) => {
+                const url = e.target.value;
+                setMonTargetUrl(url);
+                if (/facebook\.com\/groups\//i.test(url)) setMonTargetType('GROUP');
+                else if (/facebook\.com\//i.test(url) && monTargetType === 'GROUP') setMonTargetType('PAGE');
+              }}
+            />
+            <div className="flex gap-2">
               <Input
-                autoFocus
-                placeholder="https://www.facebook.com/groups/... hoặc link Fanpage"
-                value={monTargetUrl}
-                onChange={(e) => {
-                  const url = e.target.value;
-                  setMonTargetUrl(url);
-                  if (/facebook\.com\/groups\//i.test(url)) setMonTargetType('GROUP');
-                  else if (/facebook\.com\//i.test(url) && monTargetType === 'GROUP') setMonTargetType('PAGE');
-                }}
+                placeholder="Tên gợi nhớ (tuỳ chọn)"
+                value={monTargetName}
+                onChange={(e) => setMonTargetName(e.target.value)}
+                className="flex-1"
+              />
+              <Select
+                value={monTargetType}
+                onChange={(val) => setMonTargetType(val)}
+                className="w-36"
+                options={[
+                  { value: 'PAGE', label: 'Fanpage' },
+                  { value: 'GROUP', label: 'Group' },
+                  { value: 'PROFILE', label: 'Trang cá nhân' },
+                ]}
               />
             </div>
-            <Row gutter={12}>
-              <Col span={15}>
-                <label className="text-xs text-slate-300 mb-1 block">Tên hiển thị</label>
-                <Input
-                  placeholder="VD: Group nguồn hàng, Page chính"
-                  value={monTargetName}
-                  onChange={(e) => setMonTargetName(e.target.value)}
-                />
-              </Col>
-              <Col span={9}>
-                <label className="text-xs text-slate-300 mb-1 block">Loại</label>
-                <Select
-                  value={monTargetType}
-                  onChange={(val) => setMonTargetType(val)}
-                  className="w-full"
-                  options={[
-                    { value: 'PAGE', label: 'Fanpage' },
-                    { value: 'GROUP', label: 'Group' },
-                    { value: 'PROFILE', label: 'Trang cá nhân' },
-                  ]}
-                />
-              </Col>
-            </Row>
             {monTargetType === 'GROUP' && (
-              <div className="text-[11px] text-slate-400">
-                Với Group riêng tư, ít nhất một via phải là thành viên thì mới đọc được bài.
-              </div>
+              <div className="text-[11px] text-slate-500">Group riêng tư: cần ít nhất một via là thành viên.</div>
             )}
           </section>
 
-          <section className="space-y-3 pt-4 border-t border-slate-800">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Cách buff</div>
-            <div>
-              <label className="text-xs text-slate-300 mb-1 block">Số lượt mỗi bài</label>
-              <div className="flex items-center gap-3">
-                <Segmented
-                  value={monTargetLikes === 'ALL' ? 'ALL' : 'FIXED'}
-                  onChange={(val) => setMonTargetLikes(val === 'ALL' ? 'ALL' : 30)}
+          {/* GÓI VIP */}
+          <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Like mỗi bài</label>
+                <InputNumber
+                  min={5}
+                  max={500}
+                  value={monTargetLikes === 'ALL' ? null : monTargetLikes}
+                  onChange={(v) => setMonTargetLikes(v ? Number(v) : 'ALL')}
+                  placeholder={`Tối đa ${systemSettings.maxPagesPerPost || 150}`}
+                  className="!w-full"
+                />
+                <button
+                  type="button"
+                  className={`mt-1 text-[11px] ${monTargetLikes === 'ALL' ? 'text-cyan-400' : 'text-slate-500 hover:text-cyan-400'}`}
+                  onClick={() => setMonTargetLikes('ALL')}
+                >
+                  {monTargetLikes === 'ALL' ? `✓ Đang dùng tối đa ${systemSettings.maxPagesPerPost || 150} page` : 'Dùng tối đa'}
+                </button>
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Bài mỗi ngày</label>
+                <InputNumber
+                  min={1}
+                  max={50}
+                  value={monMaxPostsPerDay}
+                  onChange={(v) => setMonMaxPostsPerDay(v || 5)}
+                  className="!w-full"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Thời hạn</label>
+                <Select
+                  value={monExpiryDays}
+                  onChange={(v) => setMonExpiryDays(v)}
+                  className="w-full"
                   options={[
-                    { value: 'ALL', label: 'Xoay vòng page' },
-                    { value: 'FIXED', label: 'Số cố định' },
+                    ...([7, 15, 30, 60, 90, 0].includes(monExpiryDays) ? [] : [{ value: monExpiryDays, label: `Còn ${monExpiryDays} ngày` }]),
+                    { value: 7, label: '7 ngày' },
+                    { value: 15, label: '15 ngày' },
+                    { value: 30, label: '30 ngày' },
+                    { value: 60, label: '60 ngày' },
+                    { value: 90, label: '90 ngày' },
+                    { value: 0, label: 'Không hạn' },
                   ]}
                 />
-                {monTargetLikes !== 'ALL' && (
-                  <InputNumber
-                    min={5}
-                    max={500}
-                    value={monTargetLikes}
-                    onChange={(v) => setMonTargetLikes(v || 30)}
-                    addonAfter="lượt"
-                    className="w-32"
-                  />
-                )}
-              </div>
-              <div className="text-[11px] text-slate-500 mt-1">
-                {monTargetLikes === 'ALL'
-                  ? `Mỗi bài dùng tối đa ${systemSettings.maxPagesPerPost || 150} page (đổi trong Cài đặt), ưu tiên page ít dùng nhất hôm nay để mọi page được chia đều.`
-                  : 'Lấy đúng số page này, ưu tiên page ít dùng nhất hôm nay.'}
               </div>
             </div>
-            <Row gutter={12}>
-              <Col span={8}>
-                <label className="text-xs text-slate-300 mb-1 block">Cảm xúc</label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Cảm xúc</label>
                 <Select
                   value={monReaction}
                   onChange={(val) => setMonReaction(val)}
@@ -8624,174 +8633,149 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                     { value: 'CARE', label: 'Care' },
                   ]}
                 />
-              </Col>
-              <Col span={8}>
-                <label className="text-xs text-slate-300 mb-1 block">Chờ sau khi phát hiện</label>
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Bắt đầu buff</label>
                 <Select
                   value={monDelayMinutes}
                   onChange={(val) => setMonDelayMinutes(val)}
                   className="w-full"
                   options={[
-                    { value: 0, label: 'Buff ngay' },
-                    { value: 3, label: '3 phút' },
-                    { value: 5, label: '5 phút' },
-                    { value: 10, label: '10 phút' },
+                    { value: 0, label: 'Ngay khi thấy bài' },
+                    { value: 3, label: 'Sau 3 phút' },
+                    { value: 5, label: 'Sau 5 phút' },
+                    { value: 10, label: 'Sau 10 phút' },
                   ]}
                 />
-              </Col>
-              <Col span={8}>
-                <label className="text-xs text-slate-300 mb-1 block">Chu kỳ quét</label>
-                <Select
-                  value={monInterval}
-                  onChange={(val) => setMonInterval(val)}
-                  className="w-full"
-                  options={[
-                    { value: 5, label: '5 phút' },
-                    { value: 10, label: '10 phút' },
-                    { value: 15, label: '15 phút' },
-                    { value: 30, label: '30 phút' },
-                    { value: 60, label: '60 phút' },
-                  ]}
-                />
-              </Col>
-            </Row>
-            <div>
-              <label className="text-xs text-slate-300 mb-1 block">Via thực hiện</label>
-              <Select
-                value={monViaMode}
-                onChange={(val) => setMonViaMode(val)}
-                className="w-full"
-                options={[
-                  { value: 'ALL_VIAS', label: 'Tất cả via đang sống' },
-                  { value: 'CUSTOM', label: 'Chỉ via đầu tiên' },
-                ]}
-              />
+              </div>
             </div>
           </section>
 
-          {/* CẤU HÌNH GÓI VIP LIKE & TỰ NHIÊN HÓA (ORGANIC PACING) */}
-          <section className="space-y-3 pt-4 border-t border-slate-800">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-              <span>💎 Gói VIP Like & Tự nhiên hoá (Organic Pacing)</span>
-            </div>
-            <Row gutter={12}>
-              <Col span={12}>
-                <label className="text-xs text-slate-300 mb-1 block">Hạn mức bài mỗi ngày</label>
-                <InputNumber
-                  min={1}
-                  max={50}
-                  value={monMaxPostsPerDay}
-                  onChange={(v) => setMonMaxPostsPerDay(v || 5)}
-                  addonAfter="bài/ngày"
-                  className="w-full"
-                />
-                <span className="text-[10px] text-slate-500 block mt-0.5">Tránh spam cạn tài nguyên Fanpage</span>
-              </Col>
-              <Col span={12}>
-                <label className="text-xs text-slate-300 mb-1 block">Thời hạn gói VIP</label>
-                <Select
-                  value={monExpiryDays}
-                  onChange={(v) => setMonExpiryDays(v)}
-                  className="w-full"
-                  options={[
-                    { value: 7, label: '7 ngày (Dùng thử)' },
-                    { value: 15, label: '15 ngày' },
-                    { value: 30, label: '30 ngày (1 tháng)' },
-                    { value: 60, label: '60 ngày (2 tháng)' },
-                    { value: 90, label: '90 ngày (3 tháng)' },
-                    { value: 0, label: 'Không giới hạn (Vĩnh viễn)' },
-                  ]}
-                />
-                <span className="text-[10px] text-slate-500 block mt-0.5">Hết hạn tự dừng theo dõi</span>
-              </Col>
-            </Row>
-
-            <Row gutter={12}>
-              <Col span={12}>
-                <label className="text-xs text-slate-300 mb-1 block">Biên độ Like ngẫu nhiên</label>
-                <Select
-                  value={monVariancePercent}
-                  onChange={(v) => setMonVariancePercent(v)}
-                  className="w-full"
-                  options={[
-                    { value: 0, label: 'Cố định (Không đổi)' },
-                    { value: 5, label: '± 5% (Gần chuẩn)' },
-                    { value: 10, label: '± 10% (Khuyên dùng)' },
-                    { value: 15, label: '± 15% (Rất tự nhiên)' },
-                    { value: 20, label: '± 20% (Dao động rộng)' },
-                  ]}
-                />
-                <span className="text-[10px] text-slate-500 block mt-0.5">Số like mỗi bài dao động tự nhiên</span>
-              </Col>
-              <Col span={12}>
-                <label className="text-xs text-slate-300 mb-1 block">Rải đều Like (Drip-Feed)</label>
-                <div className="flex items-center gap-2 pt-0.5">
-                  <Switch
-                    checked={monEnableDripFeed}
-                    onChange={(checked) => setMonEnableDripFeed(checked)}
+          {/* TUỲ CHỌN BẬT/TẮT */}
+          <section className="divide-y divide-slate-800 border-y border-slate-800">
+            <div className="flex items-center justify-between gap-3 py-3">
+              <div>
+                <div className="text-sm text-slate-200">Rải đều like</div>
+                <div className="text-[11px] text-slate-500">Like vào từ từ như người thật</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {monEnableDripFeed && (
+                  <InputNumber
+                    size="small"
+                    min={5}
+                    max={120}
+                    value={monDripDurationMinutes}
+                    onChange={(v) => setMonDripDurationMinutes(v || 20)}
+                    addonAfter="phút"
+                    className="w-28"
                   />
-                  {monEnableDripFeed ? (
-                    <InputNumber
-                      min={5}
-                      max={120}
-                      value={monDripDurationMinutes}
-                      onChange={(v) => setMonDripDurationMinutes(v || 20)}
-                      addonAfter="phút"
-                      className="w-28"
-                    />
-                  ) : (
-                    <span className="text-xs text-slate-400">Buff nhanh theo đợt</span>
+                )}
+                <Switch checked={monEnableDripFeed} onChange={(checked) => setMonEnableDripFeed(checked)} />
+              </div>
+            </div>
+
+            <div className="py-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm text-slate-200">Bình luận</div>
+                  <div className="text-[11px] text-slate-500">Mỗi page một bình luận ngẫu nhiên (Spintax)</div>
+                </div>
+                <Switch checked={monEnableComment} onChange={setMonEnableComment} />
+              </div>
+
+              {monEnableComment && (
+                <div className="space-y-2 pt-1">
+                  <Input.TextArea
+                    rows={4}
+                    value={monCommentText}
+                    onChange={(e) => setMonCommentText(e.target.value)}
+                    placeholder="Mỗi dòng một mẫu, VD: {Đẹp quá|Xịn quá} {shop|bạn} ơi"
+                    className="font-mono text-xs"
+                  />
+                  <div className="flex items-center justify-end gap-3">
+                    <Button
+                      size="small"
+                      type="link"
+                      className="!p-0"
+                      onClick={() => {
+                        const sampleTmpls = SEEDING_NICHE_PRESETS['SALES']?.templates || [];
+                        setMonCommentText(sampleTmpls.join('\n'));
+                      }}
+                    >
+                      Dùng mẫu bán hàng
+                    </Button>
+                    <Button size="small" onClick={handleTestSpintaxInForm}>
+                      Xem thử
+                    </Button>
+                  </div>
+
+                  {spintaxSampleOutputs.length > 0 && (
+                    <div className="rounded-lg border border-slate-800 divide-y divide-slate-800/70">
+                      {spintaxSampleOutputs.map((s, idx) => (
+                        <div key={idx} className="px-3 py-1.5 text-xs text-slate-300">
+                          {s}
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
-                <span className="text-[10px] text-slate-500 block mt-0.5">Rải like trong 15-30p như người thật</span>
-              </Col>
-            </Row>
+              )}
+            </div>
           </section>
 
-          <section className="space-y-3 pt-4 border-t border-slate-800">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Bình luận</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">Mỗi page để lại một bình luận ngẫu nhiên, hỗ trợ Spintax.</div>
-              </div>
-              <Switch checked={monEnableComment} onChange={setMonEnableComment} />
-            </div>
-
-            {monEnableComment && (
-              <div className="space-y-2">
-                <Input.TextArea
-                  rows={4}
-                  value={monCommentText}
-                  onChange={(e) => setMonCommentText(e.target.value)}
-                  placeholder="Mỗi dòng một mẫu, VD: {Đẹp quá|Xịn quá} {shop|bạn} ơi"
-                  className="font-mono text-xs"
-                />
-                <div className="flex items-center justify-end gap-3">
-                  <Button
-                    size="small"
-                    type="link"
-                    className="!p-0"
-                    onClick={() => {
-                      const sampleTmpls = SEEDING_NICHE_PRESETS['SALES']?.templates || [];
-                      setMonCommentText(sampleTmpls.join('\n'));
-                    }}
-                  >
-                    Dùng mẫu bán hàng
-                  </Button>
-                  <Button size="small" onClick={handleTestSpintaxInForm}>
-                    Xem thử
-                  </Button>
+          {/* NÂNG CAO */}
+          <section>
+            <button
+              type="button"
+              onClick={() => setMonShowAdvanced((v) => !v)}
+              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200"
+            >
+              <CaretRightOutlined className={`text-[10px] transition-transform ${monShowAdvanced ? 'rotate-90' : ''}`} />
+              Nâng cao
+              {!monShowAdvanced && (
+                <span className="text-slate-600">
+                  · quét {monInterval}p · ±{monVariancePercent}% · {monViaMode === 'ALL_VIAS' ? 'tất cả via' : 'via đầu tiên'}
+                </span>
+              )}
+            </button>
+            {monShowAdvanced && (
+              <div className="grid grid-cols-3 gap-3 mt-3">
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Quét mỗi</label>
+                  <Select
+                    value={monInterval}
+                    onChange={(val) => setMonInterval(val)}
+                    className="w-full"
+                    options={[5, 10, 15, 30, 60].map((m) => ({ value: m, label: `${m} phút` }))}
+                  />
                 </div>
-
-                {spintaxSampleOutputs.length > 0 && (
-                  <div className="rounded-lg border border-slate-800 divide-y divide-slate-800/70">
-                    {spintaxSampleOutputs.map((s, idx) => (
-                      <div key={idx} className="px-3 py-1.5 text-xs text-slate-300">
-                        {s}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Dao động số like</label>
+                  <Select
+                    value={monVariancePercent}
+                    onChange={(v) => setMonVariancePercent(v)}
+                    className="w-full"
+                    options={[
+                      { value: 0, label: 'Không' },
+                      { value: 5, label: '±5%' },
+                      { value: 10, label: '±10%' },
+                      { value: 15, label: '±15%' },
+                      { value: 20, label: '±20%' },
+                    ]}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Via thực hiện</label>
+                  <Select
+                    value={monViaMode}
+                    onChange={(val) => setMonViaMode(val)}
+                    className="w-full"
+                    options={[
+                      { value: 'ALL_VIAS', label: 'Tất cả via sống' },
+                      { value: 'CUSTOM', label: 'Via đầu tiên' },
+                    ]}
+                  />
+                </div>
               </div>
             )}
           </section>
