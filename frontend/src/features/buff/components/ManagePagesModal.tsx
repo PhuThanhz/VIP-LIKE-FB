@@ -1,8 +1,8 @@
-import type { FanpageItem } from '../types';
+import { useMemo, useState } from 'react';
 import { App, Button, Card, Col, Input, Modal, Row, Segmented, Tag } from 'antd';
 import { CheckCircleFilled, DeleteOutlined, IdcardOutlined } from '@ant-design/icons';
+import type { FanpageItem } from '../types';
 import { extractCUser, extractPageId, getStoredPagesForVia, getViaKey } from '../utils';
-import { useMemo, useState } from 'react';
 
 export interface ManagePagesModalProps {
   managePagesModalOpen: boolean;
