@@ -349,6 +349,8 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
           concurrency,
           dripFeedMode,
           dripDurationMinutes,
+          // Frontend tự lưu 1 bản ghi lịch sử cho cả lượt chạy (gộp mọi nhóm Via) → backend chỉ lưu dự phòng khi trình duyệt đã ngắt kết nối
+          clientSavesLog: true,
         };
 
         const applyFinalDetails = (details: AutoBuffResultDetail[]) => {
@@ -524,6 +526,12 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
       const counts = summarizeBuffDetails(details);
       const hasAnyExecuted = details.some((d) => d.status !== 'WAITING');
       if (runTargetUrl && details.length > 0 && hasAnyExecuted) {
+        // Page còn "đang chờ" khi lượt đã kết thúc (vd: đã đủ KPI hoặc Via dừng sớm) → ghi là Bỏ qua thay vì treo "Đang xếp hàng chờ..." trong lịch sử
+        const loggedDetails = details.map((d) =>
+          d.status === 'WAITING' || d.status === 'RUNNING'
+            ? { ...d, status: 'SKIPPED' as const, message: 'Không chạy tới (lượt chạy đã kết thúc trước)' }
+            : d
+        );
         const newLog: BuffLogEntry = {
           id: 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
           createdAt: new Date().toISOString(),
@@ -537,7 +545,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
           engagementMode,
           commentCount: counts.comments,
           accountName: runAccountName,
-          details,
+          details: loggedDetails,
         };
         addBuffLog(newLog);
       }

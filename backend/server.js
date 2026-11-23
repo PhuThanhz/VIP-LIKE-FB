@@ -2010,6 +2010,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
     concurrency = 1,
     dripFeedMode = false,
     dripDurationMinutes = 30,
+    clientSavesLog = false,
   } = req.body;
 
   if (!cookieString || !targetUrl) {
@@ -2377,8 +2378,10 @@ app.post('/api/buff-like-stream', async (req, res) => {
       screenshotPath,
     }).catch((err) => console.warn('[TelegramAlert] ⚠️ Lỗi gửi thông báo stream xong:', err.message));
 
-    // Tự động lưu lịch sử buff vào MySQL ngay trên Server (đảm bảo không bao giờ bị mất log)
-    if (result && Array.isArray(result.details) && result.details.length > 0) {
+    // Tự động lưu lịch sử buff vào MySQL ngay trên Server (đảm bảo không bao giờ bị mất log).
+    // Nếu trình duyệt báo sẽ tự lưu (clientSavesLog) và vẫn còn kết nối thì bỏ qua để không ghi trùng 2 bản;
+    // khi trình duyệt đã ngắt (F5 / đóng tab) thì server vẫn lưu dự phòng.
+    if (result && Array.isArray(result.details) && result.details.length > 0 && !(clientSavesLog && !clientGone)) {
       db.saveBuffLogs({
         id: 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9),
         createdAt: new Date().toISOString(),
