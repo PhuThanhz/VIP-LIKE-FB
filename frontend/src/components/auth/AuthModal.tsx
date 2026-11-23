@@ -70,7 +70,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         hardwareHwid: hwid,
       });
       if (res.data?.success) {
-        message.success('🎉 Kích hoạt Bản Quyền VIPLIKE thành công!');
+        message.success('Kích hoạt Bản Quyền VIPLIKE thành công!');
         licenseForm.resetFields();
         onClose();
       } else {
@@ -110,7 +110,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
 
           <Tag color={admin ? 'gold' : 'blue'} className="px-2 py-0.5 font-semibold">
-            {admin ? '👑 QUẢN TRỊ VIÊN' : 'BÊN THUÊ TOOL'}
+            {admin ? 'QUẢN TRỊ VIÊN' : 'BÊN THUÊ TOOL'}
           </Tag>
 
           {hwidBox}

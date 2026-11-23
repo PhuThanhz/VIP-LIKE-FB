@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Form, Input, Button, Tabs, Avatar, message } from 'antd';
-import { UserOutlined, LockOutlined, ThunderboltFilled, CrownOutlined, KeyOutlined } from '@ant-design/icons';
+import { UserOutlined, LockOutlined, ThunderboltFilled, KeyOutlined } from '@ant-design/icons';
 import api from '../../config/axios';
 import { getMachineHwid } from '../../utils/tauriBridge';
 import { CurrentUser, parseAuthResponse, saveSession } from '../../auth/session';
@@ -54,7 +54,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       if (session) {
         saveSession(session.token, session.user);
         localStorage.setItem(LAST_USERNAME_KEY, values.username.trim());
-        message.success(`🎉 Chào mừng ${session.user.fullName} đã đăng nhập thành công!`);
+        message.success(`Chào mừng ${session.user.fullName} đã đăng nhập thành công!`);
         onLoginSuccess(session.user);
       } else {
         message.error({ content: res.data?.error || 'Đăng nhập không thành công', key: AUTH_MESSAGE_KEY });
@@ -78,7 +78,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         hardwareHwid: hwid,
       });
       if (res.data?.success) {
-        message.success('🎉 Kích hoạt Bản Quyền thành công! Vui lòng đăng nhập để tiếp tục.');
+        message.success('Kích hoạt Bản Quyền thành công! Vui lòng đăng nhập để tiếp tục.');
         licenseForm.resetFields();
         setActiveTab('login');
       } else {
@@ -96,11 +96,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       {/* Top Bar */}
       <header className="px-6 py-4 flex items-center justify-between border-b bg-slate-900/60 border-slate-800/80 backdrop-blur-xl">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-md shadow-cyan-500/20 text-white font-bold">
-            <ThunderboltFilled className="text-lg" />
+          <div className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-300 font-bold">
+            <ThunderboltFilled className="text-base text-slate-300" />
           </div>
           <div>
-            <div className="font-extrabold text-sm tracking-wider uppercase bg-gradient-to-r from-cyan-500 to-blue-600 bg-clip-text text-transparent">
+            <div className="font-extrabold text-sm tracking-wider uppercase text-slate-100">
               VIP LIKE
             </div>
             <div className="text-[10px] text-slate-400">Hệ Thống Tăng Tương Tác & Săn Bài Meta</div>
@@ -114,16 +114,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         <div className="w-full max-w-md">
           <Card
             variant="outlined"
-            className="shadow-2xl rounded-3xl !bg-slate-900/90 !border-slate-800 shadow-cyan-950/20"
+            className="shadow-2xl rounded-3xl !bg-slate-900/90 !border-slate-800 shadow-slate-950/40"
           >
             {/* Header Badge & Brand */}
-            <div className="text-center pb-4">
-              <Avatar
-                size={56}
-                icon={<CrownOutlined />}
-                className="bg-gradient-to-tr from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/25 mb-3"
-              />
-              <h1 className="text-xl font-black tracking-tight mb-1 text-white">
+            <div className="text-center pb-4 pt-2">
+              <h1 className="text-xl font-bold tracking-tight mb-1 text-white">
                 ĐĂNG NHẬP HỆ THỐNG
               </h1>
               <p className="text-xs text-slate-400">
@@ -186,9 +181,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         disabled={lockoutSec > 0}
                         block
                         size="large"
-                        className="h-11 rounded-xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-blue-500 font-bold border-0 shadow-lg shadow-cyan-500/25 mt-2"
+                        className="h-11 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 font-bold border-0 shadow-lg shadow-cyan-500/20 mt-2"
                       >
-                        {lockoutSec > 0 ? `Thử lại sau ${lockoutSec} giây` : '🚀 ĐĂNG NHẬP NGAY'}
+                        {lockoutSec > 0 ? `Thử lại sau ${lockoutSec} giây` : 'ĐĂNG NHẬP NGAY'}
                       </Button>
 
                     </Form>
@@ -196,7 +191,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 },
                 {
                   key: 'license',
-                  label: <span className="font-semibold px-2">🔑 Bản Quyền</span>,
+                  label: <span className="font-semibold px-2">Bản Quyền</span>,
                   children: (
                     <Form
                       form={licenseForm}
