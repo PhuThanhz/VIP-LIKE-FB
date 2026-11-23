@@ -1,5 +1,27 @@
 # Kế hoạch tách `BuffEngagement.tsx`
 
+## Trạng thái (23/11/2026)
+Đã xong trên nhánh `refactor/buff-engagement-split`: file giảm từ 8.959 xuống 5.108 dòng.
+
+| GĐ | Nội dung | Commit |
+|---|---|---|
+| 0 | Hàm tiện ích, hằng số, type, `PageCardItem` sang `features/buff/` | `601e767` |
+| 1a | `MonitorFormModal`, `ViaHealthModal`, `LogDetailModal` | `892587b` |
+| 1b | `ManagePagesModal` | `0a1ec47` |
+| 2 | Hook polling: `useBuffQueue`, `useBuffMonitors`, `useBmOverview`, `useSystemSettings` | `32afc8f` |
+| 3 | `HistoryTab` | `aba8a10` |
+| 4a | `RunningTab`, kèm đồng hồ 1 giây (giờ chỉ tab này render lại mỗi giây) | `71f6817` |
+| 4b | `ResumeBuffModal`, `AiSeedingModal` | `8f3b98b` |
+
+**Còn lại (GĐ 5, chưa làm):** tab "Tạo mới" và bộ chạy buff (khoảng 2.900 dòng state/handler cùng 1.640 dòng JSX).
+- **Vì sao chưa làm:** tab này dùng tới 112 biến của component cha. Tách thẳng ra thành component với 112 props thì không giảm render và còn khó đọc hơn.
+- **Cách đúng:**
+  - `useBuffRunner()`: gồm stream SSE, batch, dừng/chạy tiếp, khôi phục phiên sau F5, `liveLogs`, `runTiming`.
+  - `useFanpageSelection()`: gồm Via, Fanpage, chọn page, chống trùng.
+  - `useCreateForm()`: gồm link, reaction, bình luận, tốc độ.
+  - Có 3 hook này rồi mới tách `CreateBuffTab`.
+- **Điều kiện:** phải chạy buff thật để kiểm chứng: chạy đơn, chạy batch, dừng giữa chừng, F5 khôi phục, chạy tiếp/bù like.
+
 ## Vì sao tách
 `frontend/src/pages/BuffEngagement.tsx` dài khoảng 8.960 dòng và có 127 `useState`, tất cả nằm trong một component. Hệ quả:
 - **Render thừa:** bất kỳ state nào đổi (gõ một ký tự trong form, tiến độ stream, đồng hồ 1 giây) cũng làm cả cây render lại, kể cả những tab đang không hiện.
