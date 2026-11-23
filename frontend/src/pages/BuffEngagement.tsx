@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef, useCallback, lazy, Suspense, memo, type ReactNode } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback, lazy, Suspense, type ReactNode } from 'react';
 import {
   Card,
   Input,
@@ -16,15 +16,12 @@ import {
   Segmented,
   Switch,
   Dropdown,
-  Spin,
   Table,
   Tooltip,
 } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
 import {
   AimOutlined,
   PlusCircleOutlined,
-  EyeOutlined,
   MoreOutlined,
   ThunderboltFilled,
   ReloadOutlined,
@@ -37,7 +34,6 @@ import {
   UserOutlined,
   SearchOutlined,
   CheckOutlined,
-  PauseOutlined,
   StopOutlined,
   PlusOutlined,
   DeleteOutlined,
@@ -53,9 +49,6 @@ import {
   CommentOutlined,
   SettingOutlined,
   SafetyCertificateOutlined,
-  SendOutlined,
-  BellOutlined,
-  RocketFilled,
   ShareAltOutlined,
   ExclamationCircleOutlined,
   CodeOutlined,
@@ -77,17 +70,9 @@ import { useVisibleInterval } from '../hooks/useVisibleInterval';
 import api, { WORKER_BASE_URL } from '../config/axios';
 import PasteLinkInput from '../components/common/PasteLinkInput';
 import { triggerCookieExpiredAlert, useCookieAlert } from '../components/common/CookieAlertManager';
-import { TableSkeleton, PageSkeleton, CardSkeleton } from '../components/common/SaaSLoadingSkeleton';
+import { TableSkeleton, PageSkeleton } from '../components/common/SaaSLoadingSkeleton';
 import { parseFacebookCookie } from '../utils/cookieHelper';
 import { getInitialSeedVias, seedLocalStorageIfEmpty, getStoredCookieForVia } from '../config/seedHelper';
-
-const formatDuration = (totalSec: number): string => {
-  const sec = Math.max(0, Math.round(totalSec));
-  if (sec < 60) return `${sec}s`;
-  const m = Math.floor(sec / 60);
-  if (m < 60) return `${m}p ${sec % 60}s`;
-  return `${Math.floor(m / 60)}g ${m % 60}p`;
-};
 
 // Tách nhỏ bundle (Code-splitting) với React.lazy cho các phân hệ quản trị lớn
 const PostHunterTab = lazy(() => import('../components/buff/PostHunterTab'));
@@ -96,680 +81,59 @@ const ViaManagementPage = lazy(() => import('./ViaManagementPage'));
 const SystemSettingsPage = lazy(() => import('./SystemSettingsPage'));
 const LicenseManagementPage = lazy(() => import('./LicenseManagementPage'));
 
-interface FanpageItem {
-  id: string;
-  name: string;
-  url: string;
-  avatarUrl?: string;
-  viaAccountId?: number | 'CUSTOM';
-  viaName?: string;
-  viaCookie?: string;
-  viaStatus?: 'OK' | 'EXPIRED' | string;
-  isProfile?: boolean;
-}
+import type {
+  FanpageItem,
+  AutoBuffResultDetail,
+  AutoBuffProgress,
+  BuffStreamProgressEvent,
+  BuffRunResult,
+  ViaGroup,
+  BuffMonitor,
+  BatchOrder,
+  BuffLogEntry,
+  ReactionOption,
+  SpeedModeKey,
+} from '../features/buff/types';
+import {
+  LEGACY_BUFF_LOGS_STORAGE_KEY,
+  SEEDING_NICHE_PRESETS,
+  ENGAGEMENT_STORAGE_KEY,
+  REACTIONS,
+  SPEED_PRESETS,
+  VIA_PAGES_STORAGE_KEY,
+} from '../features/buff/constants';
+import {
+  formatDuration,
+  BuffStreamError,
+  runBuffStream,
+  groupPagesByVia,
+  summarizeBuffDetails,
+  getLogCounts,
+  playVictoryChime,
+  readLegacyBuffLogs,
+  mergeBuffLogs,
+  resolveSpintax,
+  isFacebookPostUrl,
+  normalizeFbPostUrlClient,
+  extractCUser,
+  extractPageId,
+  isPersonalCookieAccount,
+  formatDelaySeconds,
+  getSpeedLabel,
+  cleanPageName,
+  getInitials,
+  getAvatarGradient,
+  getViaKey,
+  getStoredPagesForVia,
+  saveStoredPagesForVia,
+} from '../features/buff/utils';
+import PageCardItem from '../features/buff/components/PageCardItem';
 
-interface AutoBuffResultDetail {
-  pageId: string;
-  pageName: string;
-  viaName?: string;
-  status: 'WAITING' | 'RUNNING' | 'SUCCESS' | 'ALREADY_LIKED' | 'UNVERIFIED' | 'NO_BUTTON' | 'ERROR' | 'FAILED' | 'SKIPPED';
-  likeStatus?: 'WAITING' | 'RUNNING' | 'SUCCESS' | 'ALREADY_LIKED' | 'UNVERIFIED' | 'NO_BUTTON' | 'ERROR' | 'FAILED' | 'SKIPPED';
-  commentStatus?: 'WAITING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'ERROR';
-  shareStatus?: 'WAITING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'ERROR';
-  commentText?: string;
-  message?: string;
-  error?: string;
-}
-
-interface AutoBuffProgress {
-  total: number;
-  success: number;
-  failed: number;
-  alreadyLiked: number;
-  percent: number;
-  currentRunningPageName?: string;
-  status: 'IDLE' | 'RUNNING' | 'DONE' | 'ERROR' | 'STOPPED';
-  details: AutoBuffResultDetail[];
-  logs?: string[];
-  autoRefilled?: number;
-  kpiReached?: boolean;
-  isStopped?: boolean;
-  error?: string;
-}
-
-interface BuffStreamProgressEvent {
-  type: 'PAGE_START' | 'PAGE_FINISH' | 'COOLDOWN_START' | 'COOLDOWN_END' | 'KPI_REACHED' | 'COOKIE_EXPIRED';
-  index?: number;
-  total?: number;
-  pageId?: string;
-  pageName?: string;
-  viaName?: string;
-  viaUid?: string;
-  percent?: number;
-  status?: AutoBuffResultDetail['status'];
-  likeStatus?: AutoBuffResultDetail['likeStatus'];
-  commentStatus?: AutoBuffResultDetail['commentStatus'];
-  commentText?: string;
-  message?: string;
-  error?: string;
-  durationSec?: number;
-  kpiTarget?: number;
-  success?: number;
-  autoRefilled?: number;
-  uid?: string;
-}
-
-interface BuffRunResult {
-  total: number;
-  success: number;
-  failed: number;
-  unverified?: number;
-  stopped?: boolean;
-  details: AutoBuffResultDetail[];
-}
-
-class BuffStreamError extends Error {
-  receivedAny: boolean;
-  constructor(message: string, receivedAny: boolean) {
-    super(message);
-    this.receivedAny = receivedAny;
-  }
-}
-
-// Gọi /api/buff-like-stream và đọc SSE. receivedAny cho biết worker đã bắt đầu xử lý hay chưa:
-// nếu đã nhận event thì KHÔNG được chạy lại nhóm đó (tránh like/comment lặp).
-async function runBuffStream(
-  payload: Record<string, unknown>,
-  onProgress: (event: BuffStreamProgressEvent) => void,
-  signal?: AbortSignal
-): Promise<BuffRunResult> {
-  let receivedAny = false;
-  try {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('viplike_token') : null;
-    const response = await fetch(`${WORKER_BASE_URL}/api/buff-like-stream`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(payload),
-      signal,
-    });
-    if (!response.ok || !response.body) {
-      let errText = `Worker stream error: ${response.status}`;
-      try {
-        const errJson = await response.json();
-        if (errJson?.error) errText = errJson.error;
-      } catch (_) {}
-      throw new BuffStreamError(errText, false);
-    }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const chunks = buffer.split('\n\n');
-      buffer = chunks.pop() || '';
-      for (const chunk of chunks) {
-        const eventType = chunk.match(/^event:\s*(\w+)/m)?.[1];
-        const raw = chunk.match(/^data:\s*(.*)$/m)?.[1];
-        if (!eventType || !raw) continue; // heartbeat
-        let data: any;
-        try {
-          data = JSON.parse(raw);
-        } catch {
-          continue;
-        }
-        receivedAny = true;
-        if (eventType === 'progress') {
-          onProgress(data);
-        } else if (eventType === 'cookie_expired') {
-          triggerCookieExpiredAlert({
-            uid: data?.uid,
-            viaName: data?.viaName,
-            reason: data?.message || data?.error,
-            isCheckpoint: data?.isCheckpoint,
-          });
-        } else if (eventType === 'done') {
-          return (data?.result || { total: 0, success: 0, failed: 0, details: [] }) as BuffRunResult;
-        } else if (eventType === 'error') {
-          if (data?.cookieDead || /hết hạn|checkpoint|đăng nhập|xác minh/i.test(data?.error || '')) {
-            triggerCookieExpiredAlert({
-              uid: data?.uid,
-              viaName: data?.viaName,
-              reason: data?.error,
-              isCheckpoint: data?.isCheckpoint || /checkpoint/i.test(data?.error || ''),
-            });
-          }
-          throw new BuffStreamError(data?.error || 'Lỗi khi thực hiện buff tương tác', true);
-        }
-      }
-    }
-    throw new BuffStreamError('Kết nối tới worker bị ngắt trước khi hoàn tất', receivedAny);
-  } catch (err: any) {
-    if (err instanceof BuffStreamError) throw err;
-    throw new BuffStreamError(err?.name === 'AbortError' ? 'Đã dừng' : err?.message || 'Lỗi kết nối stream', receivedAny);
-  }
-}
-
-interface ViaGroup {
-  viaName: string;
-  cookieString: string;
-  pages: FanpageItem[];
-}
-
-// Nhóm Page theo Via sở hữu: mỗi Page phải chạy bằng đúng cookie của Via quản lý nó
-function groupPagesByVia(pages: FanpageItem[], fallbackCookie: string, fallbackViaName: string): ViaGroup[] {
-  const groups: ViaGroup[] = [];
-  const byCookie = new Map<string, ViaGroup>();
-  for (const page of pages) {
-    const cookie = (page.viaCookie || fallbackCookie).trim();
-    if (!byCookie.has(cookie)) {
-      const group = { viaName: page.viaName || fallbackViaName, cookieString: cookie, pages: [] as FanpageItem[] };
-      byCookie.set(cookie, group);
-      groups.push(group);
-    }
-    byCookie.get(cookie)!.pages.push(page);
-  }
-  return groups;
-}
-
-function summarizeBuffDetails(details: AutoBuffResultDetail[]) {
-  return {
-    success: details.filter((d) => d.status === 'SUCCESS').length,
-    alreadyLiked: details.filter((d) => d.status === 'ALREADY_LIKED').length,
-    unverified: details.filter((d) => d.status === 'UNVERIFIED').length,
-    failed: details.filter((d) => d.status === 'ERROR' || d.status === 'NO_BUTTON').length,
-    comments: details.filter((d) => d.commentStatus === 'SUCCESS').length,
-  };
-}
-
-// Đếm lại từ details để log cũ (lưu thiếu SKIPPED/UNVERIFIED) vẫn hiển thị đúng
-function getLogCounts(log: BuffLogEntry) {
-  if (!log.details?.length) {
-    return {
-      total: log.totalPages || 0,
-      success: log.successCount || 0,
-      alreadyLiked: log.alreadyLikedCount || 0,
-      unverified: 0,
-      failed: log.failedCount || 0,
-      skipped: 0,
-      comments: log.commentCount || 0,
-    };
-  }
-  const c = summarizeBuffDetails(log.details);
-  const total = log.details.length;
-  return { ...c, total, skipped: total - c.success - c.alreadyLiked - c.unverified - c.failed };
-}
-
-// Âm thanh chuông báo chiến thắng khi buff hoàn tất
-function playVictoryChime() {
-  try {
-    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = new AudioContext();
-    const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
-    notes.forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.12);
-      gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.12);
-      gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + i * 0.12 + 0.04);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.12 + 0.35);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(ctx.currentTime + i * 0.12);
-      osc.stop(ctx.currentTime + i * 0.12 + 0.4);
-    });
-  } catch (e) {
-    // Audio might be muted or blocked by browser policy
-  }
-}
-
-export interface BuffMonitor {
-  id: string;
-  targetName: string;
-  targetUrl: string;
-  targetType: 'PAGE' | 'GROUP' | 'PROFILE';
-  checkIntervalMinutes: number;
-  expiresAt?: string | null;
-  dailyPostsCount?: number;
-  dailyStatsDate?: string | null;
-  buffConfig: {
-    targetLikes: number | 'ALL';
-    variancePercent?: number;
-    maxPostsPerDay?: number;
-    enableDripFeed?: boolean;
-    dripDurationMinutes?: number;
-    reactionType: string;
-    enableLike: boolean;
-    enableComment: boolean;
-    comments: string[];
-    delayMinutes: number;
-    viaMode: string;
-    cookieString?: string;
-  };
-  status: 'ACTIVE' | 'PAUSED';
-  totalDetected: number;
-  lastCheckedAt: string | null;
-  lastFoundPostUrl: string | null;
-  baselineDone?: boolean;
-  lastPostsFound?: number;
-  lastScanVia?: string | null;
-  createdAt: string;
-}
-
-export interface BatchOrder {
-  id: number;
-  url: string;
-  orderNumber: number;
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'PARTIAL' | 'PAUSED' | 'FAILED';
-  successLikes: number;
-  totalLikesTarget: number;
-  percent?: number;
-  currentRunningPageName?: string;
-  error?: string;
-  details?: AutoBuffResultDetail[];
-}
-
-export interface BuffLogEntry {
-  id: string;
-  createdAt: string;
-  type: 'SINGLE' | 'BATCH' | 'QUEUE';
-  targetUrl: string;
-  reactionType: string;
-  totalPages: number;
-  targetLikes?: number;
-  successCount: number;
-  alreadyLikedCount: number;
-  failedCount: number;
-  engagementMode?: 'LIKE_ONLY' | 'COMMENT_ONLY' | 'LIKE_AND_COMMENT';
-  commentCount?: number;
-  accountName?: string;
-  details: AutoBuffResultDetail[];
-}
-
-// Lịch sử nay lưu trên MySQL (API /buff-logs); key cũ chỉ còn dùng để chuyển dữ liệu lên một lần
-const LEGACY_BUFF_LOGS_STORAGE_KEY = 'toolzutter:buff-engagement-logs';
-
-const readLegacyBuffLogs = (): BuffLogEntry[] => {
-  try {
-    const raw = localStorage.getItem(LEGACY_BUFF_LOGS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-};
-
-// Gộp theo id, ưu tiên bản trong `primary`, sắp xếp mới nhất trước
-const mergeBuffLogs = (primary: BuffLogEntry[], secondary: BuffLogEntry[]): BuffLogEntry[] => {
-  const seen = new Set(primary.map((l) => l.id));
-  return [...primary, ...secondary.filter((l) => !seen.has(l.id))].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-};
-
-const SEEDING_NICHE_PRESETS: Record<string, { label: string; icon: string; templates: string[] }> = {
-  GENERAL: {
-    label: 'Tương Tác Xã Hội & Đẩy Reach',
-    icon: '',
-    templates: [
-'{Bài viết chia sẻ rất hay|Nội dung chất lượng quá|Bổ ích ghê} {ad ơi|ạ|nha bạn} {👏|🌟|❤️}',
-'{Đã lưu lại khi cần|Thả tim cho bài viết tuyệt vời này|Theo dõi page lâu rồi vẫn thích} {ạ|nhé|nè} {🥰|✨|🍀}',
-'{Chuẩn luôn|Rất đồng quan điểm với bài viết|Chia sẻ chính xác quá} {ạ|nha|bạn ơi} {💯|👌|🔥}',
-'{Chúc trang ngày càng phát triển|Luôn ủng hộ các bài viết của bạn|Tiếp tục phát huy nhé} {nha|ạ|nhé ad} {🚀|🎉|💖}',
-'{Quá tuyệt vời luôn|Rất đáng để học hỏi|Thích cách trình bày này ghê} {ạ|nè bạn|ơi} {🍀|✨|👍}',
-    ],
-  },
-  FASHION: {
-    label: 'Thời Trang & Làm Đẹp',
-    icon: '',
-    templates: [
-'{Shop ơi|Ad ơi} {check ib em|tư vấn em với} {size M|màu đen|mẫu này} {ạ|nha shop|với ạ} {❤️|✨|🛍️}',
-'{Vải mặc mát không shop|Chất này có co giãn không ạ|Form áo chuẩn không ad} {ơi|nha|nhé} {🥰|🌟}',
-'{Mới nhận hàng hôm qua|Vừa nhận được áo|Đồ đẹp lắm shop ơi} {ưng cái bụng ghê|chất vải mê ly|sẽ ủng hộ tiếp} {ạ|nha|💯} {👏|💖}',
-'{Mẫu này nữ cao 1m6 mặc vừa không shop|Cho mình hỏi còn size L không|Ship về Hà Nội/HCM mất mấy ngày} {ạ|vậy ad} {✨|🍀}',
-'{Đẹp quá|Nhìn mê chữ ê kéo dài luôn|Xinh xỉu luôn shop ơi} {nè|quá chừng|ạ} {😍|🔥|👌}',
-    ],
-  },
-  FNB: {
-    label: 'Ẩm Thực & Quán Xá',
-    icon: '',
-    templates: [
-'{Quán mở cửa tới mấy giờ|Menu này giá bao nhiêu|Có cần đặt bàn trước không} {vậy shop|ạ|ạ ad} {🍲|😋|✨}',
-'{Nhìn hấp dẫn quá|Thèm rớt nước miếng|Món này cay nhiều không} {bạn ơi|ạ|ad ơi} {🤤|❤️|👌}',
-'{Hôm trước vừa ghé ăn|Cuối tuần này phải rủ bạn ghé mới được|Đồ ăn ở đây ngon đỉnh} {nha mọi người|ạ|nè} {🌟|👍|🎉}',
-'{Địa chỉ ở đâu vậy bạn|Có ship qua Now/Grab/ShopeeFood không|Quán ở quận mấy} {ạ|ơi|nhé} {🛵|🍽️}',
-'{Lưu lại ngay|Cuối tuần set kèo đi thử|Trông chất lượng quá} {bạn ơi|ạ|nhé cả nhà} {👏|💯|🔥}',
-    ],
-  },
-  SERVICES: {
-    label: 'Dịch Vụ & BĐS & Khóa Học',
-    icon: '',
-    templates: [
-'{Cho mình xin thông tin chi tiết|Dự án này pháp lý thế nào|Học phí khóa này bao nhiêu} {ạ|vậy ad|ơi shop} {🏢|📋|💡}',
-'{Đã inbox ad tư vấn giúp em|Quan tâm dịch vụ bên mình|Ad check tin nhắn chờ giúp} {nhé|ạ|nha} {📩|🤝|✨}',
-'{Dịch vụ uy tín chuyên nghiệp|Đã từng trải nghiệm rất hài lòng|Ủng hộ team} {nha|ạ|nhe} {🌟|👏|💯}',
-'{Chính sách ưu đãi tháng này thế nào ad|Cho mình hỏi thời gian học/triển khai} {với ạ|nhé|nha} {📊|👍}',
-'{Nội dung chia sẻ rất thực tế|Kiến thức bổ ích quá|Cảm ơn team nhiều} {ạ|nha|nhé} {🔥|❤️|🍀}',
-    ],
-  },
-  TECH: {
-    label: 'Công Nghệ & Thiết Bị',
-    icon: '',
-    templates: [
-'{Mẫu này còn hàng không shop|Bản này có bảo hành chính hãng không|Có hỗ trợ ship COD không} {ạ|ad ơi|nhé} {📱|⚡|🔥}',
-'{Máy dùng mượt mà|Pin trâu thật sự|Shop đóng gói rất kỹ} {nha cả nhà|ạ|luôn} {👍|✨|🔋}',
-'{Giá bao gồm VAT chưa shop|Có hỗ trợ trả góp 0% không|Tặng kèm những phụ kiện gì} {ạ|vậy shop} {💳|📦}',
-'{Bền đẹp|Dùng 6 tháng rồi vẫn ngon lành|Đáng đồng tiền bát gạo} {nha|luôn bạn ơi|ạ} {💯|🌟}',
-    ],
-  },
-};
-
-function resolveSpintax(text: string): string {
-  const spintaxRegex = /\{([^{}]+)\}/g;
-  let result = text;
-  while (spintaxRegex.test(result)) {
-    result = result.replace(spintaxRegex, (_, choices) => {
-      const parts = choices.split('|');
-      return parts[Math.floor(Math.random() * parts.length)].trim();
-    });
-  }
-  return result;
-}
-
-const ENGAGEMENT_STORAGE_KEY = 'toolzutter:assisted-page-engagement';
-
-function isFacebookPostUrl(rawUrl: string) {
-  try {
-    const url = new URL(rawUrl.trim());
-    return (
-      url.protocol === 'https:' &&
-      (url.hostname === 'facebook.com' ||
-        url.hostname.endsWith('.facebook.com') ||
-        url.hostname === 'fb.com' ||
-        url.hostname.endsWith('.fb.com'))
-    );
-  } catch {
-    return false;
-  }
-}
-
-function normalizeFbPostUrlClient(rawUrl: string): string {
-  if (!rawUrl || typeof rawUrl !== 'string') return '';
-  try {
-    const parsed = new URL(rawUrl.trim());
-    if (/(^|\.)facebook\.com$/i.test(parsed.hostname) || /(^|\.)fb\.com$/i.test(parsed.hostname)) {
-      parsed.hostname = 'www.facebook.com';
-    }
-    const trackingPrefixes = [
-      'fbclid', 'mibextid', 'rdid', 'share_url', 'ref', 'ref_src', 'ref_url', 'paipv', 'eav', 'sfnsn', 'locale',
-      '__cft__', '__tn__', 'notif_t', 'notif_id', 'comment_id', 'reply_comment_id', 'extid', 'idorvanity',
-    ];
-    for (const key of Array.from(parsed.searchParams.keys())) {
-      if (trackingPrefixes.some((p) => key === p || key.startsWith(p))) {
-        parsed.searchParams.delete(key);
-      }
-    }
-    let clean = parsed.origin + parsed.pathname.replace(/\/+$/, '');
-    if (parsed.searchParams.toString()) {
-      clean += '?' + parsed.searchParams.toString();
-    }
-    return clean;
-  } catch {
-    return rawUrl.trim().replace(/[?&](?:mibextid|fbclid|rdid|share_url)=[^&]*/g, '').replace(/\/+$/, '');
-  }
-}
-
-function extractCUser(cookieString?: string) {
-  return cookieString?.match(/(?:^|;\s*)c_user=([^;]+)/i)?.[1]?.trim() || '';
-}
-
-function extractPageId(input: string): string | null {
-  if (!input) return null;
-  const trimmed = input.trim();
-  if (/^\d{8,}$/.test(trimmed)) {
-    return trimmed;
-  }
-  const idMatch = trimmed.match(/[?&]id=(\d+)/);
-  if (idMatch) return idMatch[1];
-  const profileMatch = trimmed.match(/profile\.php\?id=(\d+)/);
-  if (profileMatch) return profileMatch[1];
-  const trailingDigits = trimmed.match(/\/(\d{8,})\/?$/);
-  if (trailingDigits) return trailingDigits[1];
-  return null;
-}
-
-function isPersonalCookieAccount(account: any) {
-  return account?.accountType === 'PERSONAL_COOKIE' || account?.accountType === 'PERSONAL_PROFILE_COOKIE';
-}
-
-interface ReactionOption {
-  key: string;
-  label: string;
-  shortLabel: string;
-  emoji: string;
-  color: string;
-  isRandom: boolean;
-  desc?: string;
-}
-
-const REACTIONS: ReactionOption[] = [
-  { key: 'LIKE', label: 'Thích (Like)', shortLabel: 'Thích', emoji: '👍', color: '#1877f2', isRandom: false },
-  { key: 'LOVE', label: 'Yêu thích (Love)', shortLabel: 'Thả tim', emoji: '❤️', color: '#f33e58', isRandom: false },
-  { key: 'CARE', label: 'Thương thương (Care)', shortLabel: 'Thương', emoji: '🥰', color: '#f7b125', isRandom: false },
-  { key: 'HAHA', label: 'Haha (Cười vui)', shortLabel: 'Haha', emoji: '😆', color: '#f7b125', isRandom: false },
-  { key: 'WOW', label: 'Wow (Bất ngờ)', shortLabel: 'Wow', emoji: '😮', color: '#f7b125', isRandom: false },
-  { key: 'SAD', label: 'Buồn (Sad)', shortLabel: 'Buồn', emoji: '😢', color: '#f7b125', isRandom: false },
-  { key: 'ANGRY', label: 'Phẫn nộ (Angry)', shortLabel: 'Phẫn nộ', emoji: '😡', color: '#e9710f', isRandom: false },
-  {
-    key: 'RANDOM_POSITIVE',
-    label: 'Trộn cảm xúc tự nhiên (like • tim • thương)',
-    shortLabel: 'Trộn tự nhiên (like/tim)',
-    emoji: '',
-    color: '#3b82f6',
-    isRandom: true,
-    desc: '65% thích + 25% thả tim + 10% thương thương (khuyên dùng cho bài bán hàng)',
-  },
-  {
-    key: 'RANDOM_ALL',
-    label: 'Trộn đa dạng (tất cả cảm xúc Facebook)',
-    shortLabel: 'Trộn đa dạng',
-    emoji: '',
-    color: '#8b5cf6',
-    isRandom: true,
-    desc: 'Gồm cả Haha và Wow xen kẽ cho bài viết viral, giải trí',
-  },
-];
-
-type SpeedModeKey = 'SMART' | 'TURBO' | 'FAST' | 'NORMAL' | 'SAFE';
-
-/** Mức tốc độ duy nhất người dùng chọn; mỗi mức kèm giãn cách và mô phỏng người dùng mặc định */
-const SPEED_PRESETS: { key: SpeedModeKey; name: string; delayMs: number; human: boolean }[] = [
-  { key: 'TURBO', name: 'Siêu tốc', delayMs: 1200, human: false },
-  { key: 'FAST', name: 'Rất nhanh', delayMs: 1800, human: false },
-  { key: 'NORMAL', name: 'Chuẩn', delayMs: 2200, human: true },
-  { key: 'SMART', name: 'Tự động', delayMs: 2500, human: true },
-  { key: 'SAFE', name: 'An toàn', delayMs: 4500, human: true },
-];
-
-const formatDelaySeconds = (ms: number) => `${Number((ms / 1000).toFixed(1))}s`;
-
-/** Nhãn tốc độ dùng chung cho badge, dòng mô tả và panel Tóm tắt */
-const getSpeedLabel = (speedMode: string, customSpeed: boolean, delayMs: number, hasComment = false) => {
-  // Có bình luận thì giãn cách tối thiểu 12s, gọi "Rất nhanh · 12s" sẽ gây hiểu nhầm
-  if (hasComment) return `${formatDelaySeconds(delayMs)} (có bình luận)`;
-  const name = customSpeed ? 'Tùy chỉnh' : SPEED_PRESETS.find((p) => p.key === speedMode)?.name || 'Chuẩn';
-  return `${name} · ${formatDelaySeconds(delayMs)}`;
-};
-
-function cleanPageName(raw: string): string {
-  if (!raw || typeof raw !== 'string') return '';
-  let cleaned = raw
-    .replace(/^(?:Chưa đọc|Unread)[\s\S]*?[·•]\s*/i, '')
-    .replace(/(?:\r?\n|^)\s*\d+\s*(?:thông báo|tin nhắn|notifications?|messages?)[^\n]*/gi, '')
-    .replace(/(?:\r?\n|^)\s*(?:Chuyển sang|Chuyển ngay|Switch into|Switch now|Quản lý|Manage|Xem trang)[^\n]*/gi, '')
-    .replace(/^[·•\s-]+|[·•\s-]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned || raw.trim();
-}
-
-const getInitials = (name: string): string => {
-  if (!name) return 'FP';
-  const clean = cleanPageName(name);
-  const parts = clean.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-};
-
-const getAvatarGradient = (str: string): string => {
-  const gradients = ['bg-slate-600', 'bg-blue-700'];
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  return gradients[Math.abs(hash) % gradients.length];
-};
-
-interface PageCardItemProps {
-  page: FanpageItem;
-  isChecked: boolean;
-  isAlreadyLiked: boolean;
-  cleanName: string;
-  avatarUrl: string;
-  actorMode: 'VIAS' | 'FANPAGES';
-  selectedAccountId: string | number;
-  onToggle: (pageId: string) => void;
-}
-
-const PageCardItem = memo<PageCardItemProps>(({
-  page,
-  isChecked,
-  isAlreadyLiked,
-  cleanName,
-  avatarUrl,
-  actorMode,
-  selectedAccountId,
-  onToggle,
-}) => {
-  return (
-    <div
-      onClick={() => onToggle(page.id)}
-      className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all active:scale-[0.99] ${
-        isChecked
-          ? 'border-blue-500/80 bg-blue-950/40 text-white shadow-sm shadow-blue-500/10'
-          : 'border-slate-800 bg-slate-950/40 text-slate-300 hover:border-slate-700 hover:bg-slate-900/60'
-      }`}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <div className="relative w-7 h-7 shrink-0 rounded-lg overflow-hidden bg-slate-800 border border-slate-700/60 shadow-sm flex items-center justify-center">
-          {avatarUrl ? (
-            <img
-              src={avatarUrl}
-              alt={cleanName}
-              loading="lazy"
-              className="w-full h-full object-cover"
-              onError={(e) => {
-                (e.target as HTMLElement).style.display = 'none';
-                const fallback = (e.target as HTMLElement).nextElementSibling as HTMLElement;
-                if (fallback) fallback.classList.remove('hidden');
-              }}
-            />
-          ) : null}
-          <div
-            className={`w-full h-full text-on-accent font-semibold text-[10px] items-center justify-center ${
-              actorMode === 'VIAS' ? 'bg-emerald-600' : getAvatarGradient(cleanName)
-            } ${avatarUrl ? 'hidden' : 'flex'}`}
-          >
-            {getInitials(cleanName)}
-          </div>
-        </div>
-        <div className="min-w-0">
-          <div className="font-bold text-xs truncate max-w-[125px] sm:max-w-[135px]" title={cleanName}>
-            {cleanName}
-          </div>
-          <div className="flex items-center gap-1 text-[10px] font-mono text-slate-400 truncate">
-            <span>ID: {page.id}</span>
-            {isAlreadyLiked && (
-              <Tag color="orange" className="text-[9px] m-0 border-0 px-1 py-0 leading-tight">
-                Đã like
-              </Tag>
-            )}
-            {actorMode === 'VIAS' ? (
-              <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 font-sans font-medium">
-                Via
-              </span>
-            ) : (
-              page.viaName && selectedAccountId === 'ALL_VIAS' && (
-                <span className="text-[9px] px-1 py-0.2 rounded bg-blue-950/80 text-blue-300 border border-blue-800/80 font-sans font-medium">
-                  {page.viaName}
-                </span>
-              )
-            )}
-            {page.viaStatus === 'EXPIRED' ? (
-              <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-950/90 text-rose-300 border border-rose-800/80 font-sans font-medium inline-flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> Hết cookie
-              </span>
-            ) : page.viaStatus === 'OK' && selectedAccountId === 'ALL_VIAS' ? (
-              <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 font-sans font-medium inline-flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Live
-              </span>
-            ) : null}
-          </div>
-        </div>
-      </div>
-      <Checkbox
-        checked={isChecked}
-        onChange={(e) => {
-          e.stopPropagation();
-          onToggle(page.id);
-        }}
-      />
-    </div>
-  );
-});
-
-const VIA_PAGES_STORAGE_KEY = 'toolzutter:via_fanpages_map_v3';
-
-function getViaKey(account: any, customCookie?: string): string {
-  if (!account || account === 'CUSTOM') {
-    const c = extractCUser(customCookie);
-    return c ? `cuser_${c}` : 'custom_manual';
-  }
-  const c = extractCUser(account?.cookieString || account?.accessToken);
-  if (c) return `cuser_${c}`;
-  return `acc_${account?.id || 'unknown'}`;
-}
-
-function getStoredPagesForVia(viaKey: string): FanpageItem[] {
-  try {
-    const raw = localStorage.getItem(VIA_PAGES_STORAGE_KEY);
-    if (!raw) return [];
-    const map = JSON.parse(raw);
-    const pages = map[viaKey];
-    if (!Array.isArray(pages)) return [];
-    return pages.map((p) => ({
-      ...p,
-      name: cleanPageName(p.name),
-    }));
-  } catch {
-    return [];
-  }
-}
-
-function saveStoredPagesForVia(viaKey: string, pages: FanpageItem[]) {
-  try {
-    const raw = localStorage.getItem(VIA_PAGES_STORAGE_KEY);
-    const map = raw ? JSON.parse(raw) : {};
-    map[viaKey] = pages;
-    localStorage.setItem(VIA_PAGES_STORAGE_KEY, JSON.stringify(map));
-  } catch (e) {
-    console.error('Error saving via pages to localStorage:', e);
-  }
-}
+export type { BuffMonitor, BatchOrder, BuffLogEntry } from '../features/buff/types';
+export * from '../features/buff/types';
+export * from '../features/buff/constants';
+export * from '../features/buff/utils';
+export { PageCardItem };
 
 export interface BuffEngagementProps {
   activeTabKey?: string;
