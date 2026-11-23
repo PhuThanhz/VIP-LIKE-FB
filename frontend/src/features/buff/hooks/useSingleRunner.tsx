@@ -5,6 +5,7 @@ import {
   type FanpageItem,
   type SpeedModeKey,
 } from '../types';
+import { useRef } from 'react';
 import api, { WORKER_BASE_URL } from '../../../config/axios';
 import axios from 'axios';
 import {
@@ -119,6 +120,9 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
     queryClient,
     initialFinishedRestoreDoneRef,
   } = deps;
+
+  // Mọi sessionId nhóm Via của lượt chạy hiện tại, để nút Dừng dừng được tất cả nhóm đang chạy song song
+  const runSessionIdsRef = useRef<Set<string>>(new Set());
 
   // Mutation: Auto Buff Like (Playwright Bot - Real-time SSE Stream)
   const autoBuffMutation = useMutation({
@@ -256,13 +260,25 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
         }
       };
 
-      for (let gIdx = 0; gIdx < viaGroups.length; gIdx++) {
-        if (controller.signal.aborted) break;
+      // Chạy song song tối đa MAX_PARALLEL_VIAS nhóm Via (mỗi Via vẫn 1 luồng như cũ; backend còn tự giới hạn số lane).
+      // Trước đây các nhóm chạy lần lượt nên chạy 1 link chỉ dùng 1 Via tại một thời điểm → chậm ~2 lần so với Hàng đợi.
+      // Chỉ chạy song song khi backend chặn được KPI theo cả lượt (backend cũ trên máy khách vẫn chạy tuần tự như trước)
+      const liveCaps: string[] = await axios
+        .get(`${WORKER_BASE_URL}/api/buff-live/active`)
+        .then((r) => r.data?.capabilities || [])
+        .catch(() => []);
+      const MAX_PARALLEL_VIAS = liveCaps.includes('RUN_KPI_CAP') ? 2 : 1;
+      const activeSessionIds = new Set<string>();
+      runSessionIdsRef.current = new Set();
+      // Con trỏ bình luận dùng chung: 2 nhóm Via chạy cùng lúc không được dùng trùng câu theo cùng thứ tự
+      let commentCursor = 0;
+      const runGroup = async (gIdx: number, isFirstOfWorker: boolean): Promise<void> => {
+        if (controller.signal.aborted) return;
         const currentCounts = summarizeBuffDetails(liveDetails);
         const currentDone = currentCounts.success + currentCounts.alreadyLiked;
         if (currentDone >= targetKpi) {
           console.log(`[LiveBuff] 🎯 Đã đạt đủ KPI ${currentDone}/${targetKpi} like. Hoàn tất sớm!`);
-          break;
+          return;
         }
         const remainingNeeded = Math.max(1, targetKpi - currentDone);
         const group = viaGroups[gIdx];
@@ -306,26 +322,28 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
               viaGroups.push(fg);
             }
             publish(undefined);
-            continue;
+            return;
           }
         }
 
-        if (gIdx > 0) {
+        if (!isFirstOfWorker) {
           publish(`Chuyển sang Via [${group.viaName}] (nghỉ an toàn 3s)...`);
           await new Promise((resolve) => setTimeout(resolve, 3000));
-          if (controller.signal.aborted) break;
+          if (controller.signal.aborted) return;
         }
 
         const pageViaNameMap = new Map(group.pages.map((p) => [p.id, p.viaName]));
         const resolveEventViaName = (pageId?: string, evViaName?: string) =>
           evViaName || pageViaNameMap.get(String(pageId || '')) || group.viaName;
 
+        const commentStart = commentCursor;
+        commentCursor += group.pages.length;
         const selectedPagesPayload = group.pages.map((p, pIdx) => ({
           id: p.id,
           name: p.name,
           viaName: p.viaName || group.viaName,
           isProfile: p.isProfile ?? (actorMode === 'VIAS'),
-          comment: commentLines.length > 0 ? commentLines[(finishedPagesCount + pIdx) % commentLines.length] : '',
+          comment: commentLines.length > 0 ? commentLines[(commentStart + pIdx) % commentLines.length] : '',
         }));
         const payload = {
           sessionId: `${liveSessionId}_g${gIdx}`,
@@ -359,6 +377,8 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
           }
         };
 
+        activeSessionIds.add(payload.sessionId);
+        runSessionIdsRef.current.add(payload.sessionId);
         try {
           const result = await runBuffStream(
             payload,
@@ -405,7 +425,10 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
                 if (freshCounts.success >= targetKpi) {
                   addLiveLog(`🎯 [Đạt Chuẩn KPI] Đã hoàn thành chính xác ${freshCounts.success}/${targetKpi} Like! Tự động dừng chiến dịch ngay lập tức để không vượt mục tiêu.`);
                   controller.abort();
-                  axios.post(`${WORKER_BASE_URL}/api/buff-live/stop`, { sessionId: `${liveSessionId}_g${gIdx}` }).catch(() => {});
+                  // Dừng mọi nhóm Via đang chạy song song, không chỉ nhóm hiện tại
+                  for (const sid of activeSessionIds) {
+                    axios.post(`${WORKER_BASE_URL}/api/buff-live/stop`, { sessionId: sid }).catch(() => {});
+                  }
                   return;
                 }
               } else if (ev.type === 'COOLDOWN_START') {
@@ -467,7 +490,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
             }
             finishedPagesCount = liveDetails.filter((d) => d.status !== 'WAITING' && d.status !== 'RUNNING').length;
             publish(undefined);
-            continue;
+            return;
           }
 
           const canFallback = !streamErr.receivedAny && !controller.signal.aborted;
@@ -517,7 +540,25 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
           finishedPagesCount = liveDetails.filter((d) => d.status !== 'WAITING' && d.status !== 'RUNNING').length;
           publish(undefined);
         }
-      }
+        activeSessionIds.delete(payload.sessionId);
+      };
+
+      let nextGroupIdx = 0;
+      const runWorker = async () => {
+        let isFirst = true;
+        while (!controller.signal.aborted) {
+          const done = summarizeBuffDetails(liveDetails);
+          if (done.success + done.alreadyLiked >= targetKpi) return;
+          // Nhóm Via được thêm vào giữa chừng (Auto-Failover) cũng được worker còn rảnh lấy chạy tiếp
+          const gIdx = nextGroupIdx++;
+          if (gIdx >= viaGroups.length) return;
+          await runGroup(gIdx, isFirst);
+          isFirst = false;
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.max(1, Math.min(MAX_PARALLEL_VIAS, viaGroups.length)) }, () => runWorker())
+      );
 
       buffAbortRef.current = null;
       return { details: [...liveDetails], runTargetUrl, runAccountName, runTargetKpi: targetKpi, stopped: controller.signal.aborted };
@@ -596,6 +637,10 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
 
   const handleStopAutoBuff = () => {
     buffAbortRef.current?.abort();
+    // Dừng từng nhóm Via của lượt này (kể cả backend cũ chỉ dừng được theo sessionId), rồi gửi lệnh dừng chung
+    for (const sid of runSessionIdsRef.current) {
+      axios.post(`${WORKER_BASE_URL}/api/buff-live/stop`, { sessionId: sid }).catch(() => {});
+    }
     axios.post(`${WORKER_BASE_URL}/api/buff-live/stop`).catch(() => {});
     message.info('Đang dừng: worker sẽ dừng sau Page hiện tại.');
   };

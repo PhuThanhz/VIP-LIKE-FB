@@ -1951,14 +1951,17 @@ app.get('/api/readiness', async (req, res) => {
 });
 
 // Lấy thông tin phiên Buff trực tiếp đang chạy ngầm
+// Frontend chỉ chạy song song nhiều nhóm Via khi backend hỗ trợ chặn KPI theo cả lượt và dừng toàn bộ phiên
+const BUFF_LIVE_CAPABILITIES = ['RUN_KPI_CAP', 'STOP_ALL'];
+
 app.get('/api/buff-live/active', (req, res) => {
   try {
     const reqSessionId = req.query.sessionId;
     if (reqSessionId && activeLiveBuffSessions.has(reqSessionId)) {
-      return res.json({ success: true, activeSession: activeLiveBuffSessions.get(reqSessionId) });
+      return res.json({ success: true, capabilities: BUFF_LIVE_CAPABILITIES, activeSession: activeLiveBuffSessions.get(reqSessionId) });
     }
     if (!activeLiveBuffSession) {
-      return res.json({ success: true, activeSession: null });
+      return res.json({ success: true, capabilities: BUFF_LIVE_CAPABILITIES, activeSession: null });
     }
     // Tự động dọn dẹp nếu phiên đã xong và qua 30 phút
     if (
@@ -1966,9 +1969,9 @@ app.get('/api/buff-live/active', (req, res) => {
       Date.now() - new Date(activeLiveBuffSession.updatedAt).getTime() > 30 * 60 * 1000
     ) {
       activeLiveBuffSession = null;
-      return res.json({ success: true, activeSession: null });
+      return res.json({ success: true, capabilities: BUFF_LIVE_CAPABILITIES, activeSession: null });
     }
-    return res.json({ success: true, activeSession: activeLiveBuffSession });
+    return res.json({ success: true, capabilities: BUFF_LIVE_CAPABILITIES, activeSession: activeLiveBuffSession });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -1984,6 +1987,22 @@ app.post('/api/buff-live/stop', (req, res) => {
       sess.status = 'STOPPED';
       sess.updatedAt = new Date().toISOString();
       return res.json({ success: true, message: 'Đã gửi lệnh dừng tiến trình session ' + reqSessionId, activeSession: sess });
+    }
+    if (!reqSessionId) {
+      // Không chỉ định session → dừng MỌI nhóm Via đang chạy (chạy 1 link có thể chạy song song nhiều nhóm)
+      let stoppedCount = 0;
+      for (const sess of activeLiveBuffSessions.values()) {
+        if (sess && sess.status === 'RUNNING') {
+          sess.stopRequested = true;
+          sess.status = 'STOPPED';
+          sess.updatedAt = new Date().toISOString();
+          stoppedCount++;
+        }
+      }
+      if (stoppedCount > 0) {
+        console.log(`[BuffStream] 🛑 Đã nhận lệnh dừng ${stoppedCount} phiên buff trực tiếp đang chạy`);
+        return res.json({ success: true, message: `Đã gửi lệnh dừng ${stoppedCount} phiên buff trực tiếp`, activeSession: activeLiveBuffSession });
+      }
     }
     if (activeLiveBuffSession && activeLiveBuffSession.status === 'RUNNING') {
       activeLiveBuffSession.stopRequested = true;
@@ -2096,6 +2115,19 @@ app.post('/api/buff-like-stream', async (req, res) => {
 
   const sessionKey = sessionId || ('live_' + Date.now());
   const targetKpi = parseInt(kpiTarget || totalSelectedCount, 10) || selectedPages.length;
+
+  // KPI của CẢ lượt chạy: các nhóm Via cùng lượt có sessionId dạng "<runId>_g<n>" và có thể chạy song song.
+  // Cộng thành công của mọi nhóm cùng lượt → không vượt mục tiêu kể cả khi trình duyệt F5 / mất kết nối.
+  const runKpi = parseInt(totalSelectedCount, 10) || 0;
+  const runPrefix = /_g\d+$/.test(String(sessionKey)) ? String(sessionKey).replace(/_g\d+$/, '') : null;
+  const runKpiReached = () => {
+    if (!runPrefix || runKpi <= 0) return false;
+    let runSuccess = 0;
+    for (const sess of activeLiveBuffSessions.values()) {
+      if (sess && String(sess.sessionId || '').startsWith(runPrefix + '_g')) runSuccess += sess.success || 0;
+    }
+    return runSuccess >= runKpi;
+  };
 
   if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey && activeLiveBuffSession.status === 'RUNNING') {
     activeLiveBuffSession.updatedAt = new Date().toISOString();
@@ -2225,7 +2257,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
       }
       if (Boolean(curSession?.stopRequested)) return;
       const currentDone = curSession?.success || 0;
-      if (targetKpi > 0 && currentDone >= targetKpi) {
+      if ((targetKpi > 0 && currentDone >= targetKpi) || runKpiReached()) {
         if (curSession) curSession.stopRequested = true;
         return;
       }
@@ -2264,7 +2296,8 @@ app.post('/api/buff-like-stream', async (req, res) => {
               Boolean(fence?.isStale()) ||
               Boolean(liveSess?.stopRequested) ||
               isEmergencyStopped() ||
-              (targetKpi > 0 && liveDone >= targetKpi)
+              (targetKpi > 0 && liveDone >= targetKpi) ||
+              runKpiReached()
             );
           },
           onProgress: (evt) => {
