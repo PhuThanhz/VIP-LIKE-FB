@@ -1081,6 +1081,11 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   // Chế độ tương tác: Thả Cảm xúc, Viết Bình luận, hoặc Cả Hai
   const [engagementMode, setEngagementMode] = useState<'LIKE_AND_COMMENT' | 'LIKE_ONLY' | 'COMMENT_ONLY'>('LIKE_AND_COMMENT');
   const [commentListText, setCommentListText] = useState<string>('');
+  const [inlineCommentEditorOpen, setInlineCommentEditorOpen] = useState<boolean>(false);
+  const parsedCommentLines = useMemo(
+    () => commentListText.split('\n').map((s) => s.trim()).filter(Boolean),
+    [commentListText]
+  );
 
   // Buff Share: Tự động chia sẻ bài viết lên tường Fanpage
   const [enableShare, setEnableShare] = useState<boolean>(false);
@@ -4607,6 +4612,163 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           </div>
                         )}
 
+                        {/* 2.5. Thanh Seeding Studio Tinh Gọn (Nếu bật Bình luận) */}
+                        {engagementMode !== 'LIKE_ONLY' && (
+                          <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-slate-700/80 transition-all space-y-2.5">
+                            {/* Dòng tiêu đề + trạng thái + các nút thao tác */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800/60">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <div className="w-6 h-6 rounded-lg bg-blue-950/90 border border-blue-700/60 flex items-center justify-center text-blue-400 text-xs shrink-0">
+                                  <CommentOutlined />
+                                </div>
+                                <span className="text-xs font-bold text-slate-200">
+                                  Nội dung bình luận Seeding
+                                </span>
+                                {parsedCommentLines.length > 0 ? (
+                                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 font-bold">
+                                    {parsedCommentLines.length} câu đã nạp
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] px-2 py-0.5 rounded-md bg-amber-950/60 border border-amber-800/60 text-amber-300 font-medium">
+                                    Chưa có câu nào
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Nhóm nút hành động */}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <Button
+                                  size="small"
+                                  type="primary"
+                                  icon={<RobotOutlined spin={isAiGeneratingComments} />}
+                                  loading={isAiGeneratingComments}
+                                  onClick={handleGenerateAiComments}
+                                  className="bg-blue-600 hover:bg-blue-500 text-on-accent font-semibold text-xs h-7 px-2.5 rounded-lg border-none cursor-pointer"
+                                  title="Tự động viết bình luận bằng AI theo link bài viết"
+                                >
+                                  Tạo bằng AI
+                                </Button>
+                                <Button
+                                  size="small"
+                                  icon={<AppstoreOutlined />}
+                                  onClick={() => setAiStudioModalOpen(true)}
+                                  className="text-xs h-7 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-200 cursor-pointer font-medium"
+                                  title="Mở Studio chọn kịch bản theo ngành hàng hoặc trộn Spintax"
+                                >
+                                  Soạn &amp; Mẫu Seeding
+                                </Button>
+                                {parsedCommentLines.length > 0 && (
+                                  <>
+                                    <Button
+                                      size="small"
+                                      onClick={() => {
+                                        const shuffled = [...parsedCommentLines].sort(() => Math.random() - 0.5);
+                                        setCommentListText(shuffled.join('\n'));
+                                        message.info('Đã đảo ngẫu nhiên thứ tự bình luận!');
+                                      }}
+                                      className="text-xs h-7 px-2 rounded-lg bg-slate-900 border-slate-700 text-slate-300 cursor-pointer"
+                                      title="Đảo ngẫu nhiên thứ tự câu"
+                                    >
+                                      Đảo
+                                    </Button>
+                                    <Button
+                                      size="small"
+                                      onClick={() => {
+                                        setCommentListText('');
+                                        message.info('Đã xóa trắng danh sách bình luận');
+                                      }}
+                                      className="text-xs h-7 px-2 rounded-lg bg-slate-900 border-slate-700 text-rose-400 hover:text-rose-300 cursor-pointer"
+                                      title="Xóa trắng"
+                                    >
+                                      Xóa
+                                    </Button>
+                                  </>
+                                )}
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  onClick={() => setInlineCommentEditorOpen(!inlineCommentEditorOpen)}
+                                  className="text-xs h-7 px-2 text-cyan-400 hover:text-cyan-300 cursor-pointer font-medium"
+                                >
+                                  {inlineCommentEditorOpen ? 'Thu gọn' : 'Nhập nhanh'}
+                                </Button>
+                              </div>
+                            </div>
+
+                            {/* Preview ngắn khi đã có câu và chưa mở nhập nhanh */}
+                            {parsedCommentLines.length > 0 && !inlineCommentEditorOpen && (
+                              <div
+                                onClick={() => setAiStudioModalOpen(true)}
+                                className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 transition-all cursor-pointer group"
+                                title="Bấm để mở Studio xem toàn bộ và chỉnh sửa"
+                              >
+                                <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                                  <span>Xem trước ({parsedCommentLines.length} câu):</span>
+                                  <span className="text-cyan-400 group-hover:underline text-[11px]">Mở studio chỉnh sửa &rarr;</span>
+                                </div>
+                                <div className="space-y-1">
+                                  {parsedCommentLines.slice(0, 2).map((line, idx) => (
+                                    <div key={idx} className="text-xs text-slate-200 truncate flex items-center gap-1.5 font-mono">
+                                      <span className="text-slate-500 font-bold select-none text-[10px]">#{idx + 1}</span>
+                                      <span className="truncate">{line}</span>
+                                    </div>
+                                  ))}
+                                  {parsedCommentLines.length > 2 && (
+                                    <div className="text-[11px] text-slate-500 italic">
+                                      ... và còn {parsedCommentLines.length - 2} câu bình luận khác
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Khi chưa có câu nào: Gợi ý kịch bản 1-click */}
+                            {parsedCommentLines.length === 0 && !inlineCommentEditorOpen && (
+                              <div className="flex items-center gap-2 flex-wrap py-0.5">
+                                <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                                  <BulbOutlined className="text-amber-400" /> Kịch bản mẫu 1-click:
+                                </span>
+                                {seedingPresets.map((pr) => (
+                                  <button
+                                    key={pr.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setCommentListText(pr.comments.join('\n'));
+                                      message.success(`Đã nạp kịch bản: ${pr.name} (${pr.comments.length} câu)`);
+                                    }}
+                                    className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-800 hover:border-slate-700 transition-all cursor-pointer"
+                                  >
+                                    {pr.badge ? `[${pr.badge}] ` : ''}{pr.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Ô nhập nhanh mở rộng (nếu người dùng bấm "Nhập nhanh") */}
+                            {inlineCommentEditorOpen && (
+                              <div className="space-y-2 pt-1">
+                                <Input.TextArea
+                                  rows={3}
+                                  value={commentListText}
+                                  onChange={(e) => setCommentListText(e.target.value)}
+                                  placeholder="Mỗi dòng một câu bình luận (ví dụ: Bài viết rất hay và ý nghĩa ạ!)..."
+                                  className="font-sans text-xs bg-slate-900/90 text-slate-100 border-slate-700 rounded-xl placeholder:text-slate-500 focus:border-cyan-400"
+                                />
+                                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                                  <span>Mỗi nick Facebook sẽ lấy 1 câu bình luận theo thứ tự hoặc ngẫu nhiên.</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setInlineCommentEditorOpen(false)}
+                                    className="text-cyan-400 hover:underline cursor-pointer bg-transparent border-none p-0"
+                                  >
+                                    Thu gọn lại
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* 3. Khối Cài Đặt Nâng Cao & Tốc Độ (Thu Gọn / Collapsible) */}
                         <div className="rounded-xl border border-slate-800 bg-slate-950/60 overflow-hidden">
                           <div
@@ -4853,89 +5015,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           )}
                         </div>
 
-                        {/* 4. Khối Bình Luận Seeding Studio (Nếu bật Comment) */}
-                        {engagementMode !== 'LIKE_ONLY' && (
-                          <div className="space-y-2.5 p-3.5 rounded-xl bg-slate-950/80 border border-blue-900/50">
-                            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                              <span className="text-xs font-bold text-blue-300 flex items-center gap-1.5">
-                                <CommentOutlined /> Nội dung bình luận ({commentListText.split('\n').filter((s) => s.trim()).length} dòng)
-                              </span>
-                              <div className="flex items-center gap-1.5">
-                                <Button
-                                  size="small"
-                                  type="primary"
-                                  icon={<RobotOutlined spin={isAiGeneratingComments} />}
-                                  loading={isAiGeneratingComments}
-                                  onClick={handleGenerateAiComments}
-                                  className="bg-blue-600 hover:bg-blue-500 text-on-accent font-bold text-xs h-7 px-2.5 rounded-lg border-none cursor-pointer"
-                                >
-                                  Tạo bình luận bằng AI
-                                </Button>
-                                <Button
-                                  size="small"
-                                  onClick={() => setAiStudioModalOpen(true)}
-                                  className="text-xs h-7 px-2 rounded-lg bg-slate-800 border-slate-700 text-slate-200 cursor-pointer"
-                                >
-                                  Mẫu Seeding
-                                </Button>
-                                <Button
-                                  size="small"
-                                  onClick={() => {
-                                    const lines = commentListText.split('\n').filter((s) => s.trim());
-                                    const shuffled = [...lines].sort(() => Math.random() - 0.5);
-                                    setCommentListText(shuffled.join('\n'));
-                                    message.info('Đã đảo ngẫu nhiên thứ tự bình luận!');
-                                  }}
-                                  className="text-xs h-7 px-2 rounded-lg bg-slate-800 border-slate-700 text-slate-200 cursor-pointer"
-                                >
-                                  Đảo
-                                </Button>
-                                {commentListText.trim() && (
-                                  <Button
-                                    size="small"
-                                    onClick={() => {
-                                      setCommentListText('');
-                                      message.info('Đã xóa trắng danh sách bình luận');
-                                    }}
-                                    className="text-xs h-7 px-2 rounded-lg bg-slate-800 border-slate-700 text-rose-300 hover:text-rose-200 cursor-pointer"
-                                  >
-                                    Xóa
-                                  </Button>
-                                )}
-                              </div>
-                            </div>
 
-                            {/* Kho kịch bản Seeding có sẵn (1-Click Apply) */}
-                            {seedingPresets.length > 0 && (
-                              <div className="flex items-center gap-1.5 flex-wrap p-2 rounded-lg bg-slate-900/60 border border-slate-800">
-                                <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
-                                  <BulbOutlined className="text-cyan-400 text-xs" /> Gợi ý kịch bản:
-                                </span>
-                                {seedingPresets.map((pr) => (
-                                  <button
-                                    key={pr.id}
-                                    type="button"
-                                    onClick={() => {
-                                      setCommentListText(pr.comments.join('\n'));
-                                      message.success(`Đã nạp kho seeding: ${pr.name}`);
-                                    }}
-                                    className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-blue-950/60 hover:bg-blue-900/80 text-blue-300 border border-blue-800/50 transition-colors cursor-pointer"
-                                  >
-                                    {pr.badge ? `[${pr.badge}] ` : ''}{pr.name}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-
-                            <Input.TextArea
-                              rows={5}
-                              value={commentListText}
-                              onChange={(e) => setCommentListText(e.target.value)}
-                              placeholder={`Nhập hoặc dán các câu bình luận (mỗi câu 1 dòng):\nBài viết hay và rất ý nghĩa ạ! \nThông tin rất bổ ích, cảm ơn bạn đã chia sẻ \n...`}
-                              className="font-sans text-xs bg-slate-900 text-slate-100 border-slate-700 rounded-xl placeholder:text-slate-500 focus:border-blue-400"
-                            />
-                          </div>
-                        )}
                       </div>
 
                       <div className="app-surface p-5 space-y-4">
@@ -8337,6 +8417,40 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             </div>
           </div>
 
+          {/* 3.5. Soạn thảo & Danh sách câu bình luận áp dụng thực tế */}
+          <div className="space-y-2 p-3.5 rounded-xl bg-slate-950 border border-slate-800">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                <EditOutlined className="text-cyan-400" />
+                Danh sách câu bình luận áp dụng ({parsedCommentLines.length} câu):
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-400">Mỗi dòng một câu</span>
+                {commentListText.trim() && (
+                  <Button
+                    size="small"
+                    type="link"
+                    danger
+                    onClick={() => {
+                      setCommentListText('');
+                      message.info('Đã xóa trắng danh sách bình luận');
+                    }}
+                    className="text-[11px] p-0 h-auto"
+                  >
+                    Xóa trắng
+                  </Button>
+                )}
+              </div>
+            </div>
+            <Input.TextArea
+              rows={4}
+              value={commentListText}
+              onChange={(e) => setCommentListText(e.target.value)}
+              placeholder="Bạn có thể dán hoặc tự gõ thêm các câu bình luận riêng tại đây (mỗi dòng một câu)..."
+              className="font-sans text-xs bg-slate-900 border-slate-700 text-slate-100 rounded-xl placeholder:text-slate-500"
+            />
+          </div>
+
           {/* 4. Hành động Nạp Vào Chiến Dịch */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
             <div className="flex items-center gap-2 text-xs text-slate-400">
@@ -8345,6 +8459,12 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             </div>
 
             <div className="flex items-center gap-2">
+              <Button
+                onClick={() => setAiStudioModalOpen(false)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700 font-semibold rounded-xl text-xs h-9"
+              >
+                Hoàn tất &amp; Đóng
+              </Button>
               <Button
                 icon={<RobotOutlined spin={isAiGeneratingComments} />}
                 loading={isAiGeneratingComments}
