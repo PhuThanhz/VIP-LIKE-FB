@@ -82,12 +82,23 @@ function saveBuffQueue(queueData) {
   syncBuffQueueToMysql(queueData).catch(() => {});
 }
 
+// Dấu vân tay từng mục hàng đợi đã ghi vào MySQL (id → các trường được đồng bộ).
+// saveBuffQueue được gọi rất thường xuyên (cả khi worker đang chạy) → chỉ ghi mục thực sự thay đổi.
+const syncedQueueSignatures = new Map();
+
 async function syncBuffQueueToMysql(queueData) {
   try {
     const p = db.getPool();
     const items = queueData?.items || [];
     for (const it of items) {
       if (!it.id) continue;
+      const sig = JSON.stringify([
+        it.targetUrl || it.normalizedUrl || '',
+        it.targetLikes, it.reactionType, it.delayMinutes, Boolean(it.enableComment), it.comments || [],
+        it.status, it.progress?.done ?? it.result?.success ?? 0,
+        it.runAfter || null, it.addedAt || null, it.finishedAt || null,
+      ]);
+      if (syncedQueueSignatures.get(it.id) === sig) continue;
       const targetUrl = it.targetUrl || it.normalizedUrl || '';
       const targetLikes = Number(it.targetLikes) || 30;
       const reactionType = it.reactionType || 'RANDOM_POSITIVE';
@@ -135,6 +146,7 @@ async function syncBuffQueueToMysql(queueData) {
           completedAt,
         ]
       );
+      syncedQueueSignatures.set(it.id, sig);
     }
   } catch (_) {}
 }
@@ -289,9 +301,24 @@ async function syncCompletedQueueTasksToBuffLogs(force = false) {
   }
 }
 
+// Dấu vân tay các mục buff_history đã có trong MySQL (url → lastBuffedAt|totalSuccess).
+// Trước đây mỗi lần lưu lại INSERT toàn bộ lịch sử → bảng phình thành hàng chục nghìn dòng trùng.
+const syncedHistorySignatures = new Map();
+let historySignaturesSeeded = false;
+const historySignature = (item) => `${item?.lastBuffedAt || ''}|${item?.totalSuccess || 0}`;
+function seedHistorySignatures(data) {
+  if (historySignaturesSeeded) return;
+  historySignaturesSeeded = true;
+  // Lịch sử đang có lúc khởi động đã được đồng bộ ở các lần lưu trước → chỉ ghi nhận, không ghi lại
+  for (const [url, item] of Object.entries(data || {})) syncedHistorySignatures.set(url, historySignature(item));
+}
+
 function loadBuffHistory() {
   const data = store.read('buff_history');
-  if (data && typeof data === 'object' && !Array.isArray(data)) return data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    seedHistorySignatures(data);
+    return data;
+  }
   return store.write('buff_history', {});
 }
 
@@ -305,6 +332,8 @@ async function syncBuffHistoryToMysql(historyData) {
     const p = db.getPool();
     const entries = Object.entries(historyData || {});
     for (const [url, item] of entries) {
+      const sig = historySignature(item);
+      if (syncedHistorySignatures.get(url) === sig) continue; // không đổi kể từ lần đồng bộ trước
       const targetUrl = item.url || item.normalizedUrl || url;
       const reaction = item.reactionType || 'LIKE';
       const status = 'COMPLETED';
@@ -314,7 +343,9 @@ async function syncBuffHistoryToMysql(historyData) {
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [1, targetUrl, 'ALL_PAGES', `Đã tương tác (${item.totalSuccess || 1} lượt)`, reaction, status, createdAt]
       );
+      syncedHistorySignatures.set(url, sig);
     }
+    historySignaturesSeeded = true;
   } catch (_) {}
 }
 
