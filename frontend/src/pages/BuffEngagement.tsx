@@ -3960,63 +3960,28 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     (bmOverview?.stats?.runningCount || 0) > 0
   );
 
+  const isBuffTab = ['buff-like', 'buff-running', 'buff-queue', 'buff-history', 'buff-hunter'].includes(activeTabKey);
+
+  const emergencyStopButton = (
+    <Tooltip title="Ngắt ngay mọi tiến trình đang chạy để bảo vệ tài khoản">
+      <Button
+        danger
+        type="primary"
+        icon={<StopOutlined />}
+        onClick={handleEmergencyStop}
+        className="bg-rose-600 hover:bg-rose-500 text-white font-bold animate-pulse shadow-lg shadow-rose-600/40"
+      >
+        Dừng khẩn cấp
+      </Button>
+    </Tooltip>
+  );
+
   return (
     <div className="space-y-5 max-w-[1440px] mx-auto px-2 sm:px-4 md:px-6 pb-28 md:pb-12">
-      {/* THANH TRẠNG THÁI DÀN VIA */}
-      <div className="app-surface p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="font-semibold text-slate-100 text-sm sm:text-base">Dàn Via & Fanpage</div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400 mt-1.5">
-            <span className="inline-flex items-center gap-1.5">
-              Via:
-              <span className="font-semibold text-emerald-400">{bmOverview?.liveVias ?? fbAccounts.length} hoạt động</span>
-              {bmOverview?.deadVias > 0 && (
-                <span className="font-semibold text-rose-400">· {bmOverview.deadVias} lỗi</span>
-              )}
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              Fanpage: <strong className="text-slate-200 font-semibold">{scannedPages.length}</strong>
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              Đã chống trùng: <strong className="text-slate-200 font-semibold">{bmOverview?.antiOverlap?.totalProtectedInteractions || 0}</strong>
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              Telegram:
-              <span className={bmOverview?.system?.telegramConfigured ? 'text-emerald-400 font-semibold' : 'text-slate-500'}>
-                {bmOverview?.system?.telegramConfigured ? 'Đã kết nối' : 'Chưa cấu hình'}
-              </span>
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          <Button loading={checkingViaHealth} onClick={handleRunViaHealthCheck}>
-            Kiểm tra Via
-          </Button>
-          {bmOverview?.system?.isEmergencyStopped ? (
-            <Button
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              onClick={handleResumeSystem}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md shadow-emerald-600/30"
-            >
-              Khôi phục hoạt động
-            </Button>
-          ) : isAnyBuffRunning && (
-            <Tooltip title="Đang có bài buff chạy! Bấm để lập tức ngắt tiến trình nhằm bảo vệ tài khoản">
-              <Button
-                danger
-                type="primary"
-                icon={<StopOutlined />}
-                onClick={handleEmergencyStop}
-                className="bg-rose-600 hover:bg-rose-500 text-white font-bold animate-pulse shadow-lg shadow-rose-600/40"
-              >
-                Dừng khẩn cấp
-              </Button>
-            </Tooltip>
-          )}
-        </div>
-      </div>
+      {/* Ngoài các tab Like & Bình luận (không có thanh tab), vẫn giữ nút dừng khẩn cấp khi đang chạy */}
+      {!isBuffTab && isAnyBuffRunning && !bmOverview?.system?.isEmergencyStopped && (
+        <div className="flex justify-end">{emergencyStopButton}</div>
+      )}
 
       {/* CẢNH BÁO VIA HẾT HẠN COOKIE / CHECKPOINT */}
       {deadViaList.length > 0 && (
@@ -4074,7 +4039,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       )}
 
       {/* Thanh điều hướng phân hệ VIPLIKE RADIANT (Linear/Apple-Tier Segmented Dock) */}
-      {(activeTabKey === 'buff-like' || activeTabKey === 'buff-running' || activeTabKey === 'buff-queue' || activeTabKey === 'buff-history' || activeTabKey === 'buff-hunter') && (
+      {isBuffTab && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-800/60">
           <div
             role="tablist"
@@ -4106,15 +4071,14 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               },
               {
                 key: 'buff-history',
-                label: 'Lịch sử tương tác',
+                label: 'Lịch sử',
                 icon: HistoryOutlined,
                 iconColor: 'text-indigo-400',
-                count: buffLogs.length,
+                count: 0,
               },
               {
                 key: 'buff-hunter',
                 label: 'Săn bài tự động',
-                tag: 'VIP Like',
                 icon: AimOutlined,
                 iconColor: 'text-rose-400',
                 count: monitors.length,
@@ -4147,13 +4111,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                   {/* Nhãn tính năng */}
                   <span>{t.label}</span>
 
-                  {/* Tag VIP cho Săn bài */}
-                  {t.tag && (
-                    <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30 leading-none">
-                      {t.tag}
-                    </span>
-                  )}
-
                   {/* Đèn báo live radar cho Tiến trình chạy */}
                   {t.isPulse && (
                     <span className="relative flex h-2 w-2 ml-0.5">
@@ -4184,18 +4141,18 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             })}
           </div>
 
-          {/* Widget trạng thái tài nguyên bên phải */}
-          <div className="hidden lg:flex items-center gap-2 pr-1">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/70 border border-slate-800/80 text-[11px] text-slate-400 shadow-inner">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-              </span>
-              <span className="text-slate-300 font-medium">Hạ tầng:</span>
-              <span className="text-cyan-300 font-mono font-semibold">{fbAccounts.length} Via</span>
-              <span className="text-slate-600">·</span>
-              <span className="text-cyan-300 font-mono font-semibold">{scannedPages.length} Page</span>
-            </div>
+          {/* Bên phải: số Via/Page (bấm để kiểm tra Via) + dừng khẩn cấp khi đang chạy */}
+          <div className="flex items-center gap-2 pr-1 shrink-0">
+            <Tooltip title="Bấm để kiểm tra tình trạng cookie của các Via">
+              <Button size="small" loading={checkingViaHealth} onClick={handleRunViaHealthCheck} className="text-xs">
+                <span className={`inline-block h-1.5 w-1.5 rounded-full ${bmOverview?.deadVias > 0 ? 'bg-rose-400' : 'bg-emerald-400'}`} />
+                <span className="text-slate-300">{bmOverview?.liveVias ?? fbAccounts.length} Via</span>
+                {bmOverview?.deadVias > 0 && <span className="text-rose-400">· {bmOverview.deadVias} lỗi</span>}
+                <span className="text-slate-500">·</span>
+                <span className="text-slate-300">{scannedPages.length} Page</span>
+              </Button>
+            </Tooltip>
+            {isAnyBuffRunning && !bmOverview?.system?.isEmergencyStopped && emergencyStopButton}
           </div>
         </div>
       )}
@@ -4242,15 +4199,47 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                             </div>
                           </div>
 
-                          <Segmented
-                            size="middle"
-                            value={buffMode}
-                            onChange={(val) => setBuffMode(val as 'SINGLE' | 'BATCH')}
-                            options={[
-                              { label: '1 link', value: 'SINGLE' },
-                              { label: 'Nhiều link', value: 'BATCH' },
-                            ]}
-                          />
+                          <div className="flex items-center gap-2">
+                            {/* Mẫu nhanh: gom 3 preset vào 1 nút để bớt một hàng nút trên form */}
+                            <Dropdown
+                              trigger={['click']}
+                              menu={{
+                                items: [
+                                  {
+                                    key: 'all-pages',
+                                    icon: <ThunderboltFilled className="text-blue-400" />,
+                                    label: `Like bằng toàn bộ Page (${scannedPages.length})`,
+                                    onClick: handleQuickPresetLike24,
+                                  },
+                                  {
+                                    key: 'ai-seeding',
+                                    icon: <RobotOutlined className="text-purple-400" />,
+                                    label: 'Like + bình luận AI',
+                                    onClick: handleQuickPresetAiSeeding,
+                                  },
+                                  {
+                                    key: 'vias',
+                                    icon: <UserOutlined className="text-emerald-400" />,
+                                    label: `Dùng nick cá nhân (${fbAccounts.length})`,
+                                    onClick: handleQuickPresetVias,
+                                  },
+                                ],
+                              }}
+                            >
+                              <Button icon={<ThunderboltFilled className="text-amber-400" />}>
+                                Mẫu nhanh <DownOutlined className="text-[10px]" />
+                              </Button>
+                            </Dropdown>
+                            <Segmented
+                              size="middle"
+                              value={buffMode}
+                              onChange={(val) => setBuffMode(val as 'SINGLE' | 'BATCH')}
+                              options={[
+                                { label: '1 link', value: 'SINGLE' },
+                                { label: 'Nhiều link', value: 'BATCH' },
+                              ]}
+                            />
+                          </div>
                         </div>
 
                         {/* Input link hoặc danh sách link */}
@@ -4294,15 +4283,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
                             {/* Thanh Chọn Nhanh Số Lượng Like Ngay Dưới Ô Nhập Link (Không cần cuộn chuột) */}
                             {scannedPages.length > 0 && (
-                              <div className="mt-3 p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                                    <ThunderboltFilled className="text-amber-400" /> Mục tiêu Like:
-                                  </span>
-                                  <span className="text-[11px] text-cyan-400 font-mono font-bold">
-                                    {selectedPageIds.length > 0 ? `${selectedPageIds.length} Like` : 'Chưa chọn'}
-                                  </span>
-                                </div>
+                              <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <span className="text-xs font-semibold text-slate-300">Số like</span>
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   {[30, 50, 100, 200, 300]
                                     .filter((n) => n <= scannedPages.length)
@@ -4319,7 +4301,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                               : 'bg-slate-900 text-slate-300 border-slate-700/80 hover:border-blue-400 hover:text-white'
                                           }`}
                                         >
-                                          {num} Like
+                                          {num}
                                         </button>
                                       );
                                     })}
@@ -4483,45 +4465,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                             </div>
                           </div>
                         )}
-
-                        {/* 3 CẤU HÌNH NHANH (SMART PRESET TOOLBAR) */}
-                        <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                          <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
-                            <ThunderboltFilled className="text-amber-400" /> Cấu hình nhanh
-                          </span>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Tooltip title="Chuyển sang 1 link, chỉ like 👍 và chọn tất cả Page của mọi Via">
-                              <button
-                                type="button"
-                                onClick={handleQuickPresetLike24}
-                                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-950/60 to-slate-900 hover:from-blue-900/60 hover:to-slate-800 border border-blue-500/30 hover:border-blue-400 text-blue-200 text-xs font-semibold transition-all cursor-pointer shadow-sm hover:shadow-blue-500/10 active:scale-[0.98] flex items-center gap-1.5"
-                              >
-                                <ThunderboltFilled className="text-blue-400" />
-                                <span>Toàn bộ Page ({scannedPages.length})</span>
-                              </button>
-                            </Tooltip>
-                            <Tooltip title="Chuyển sang Like + bình luận, trộn cảm xúc tự nhiên, chọn tất cả Page; AI viết bình luận theo nội dung bài">
-                              <button
-                                type="button"
-                                onClick={handleQuickPresetAiSeeding}
-                                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-950/60 to-slate-900 hover:from-purple-900/60 hover:to-slate-800 border border-purple-500/30 hover:border-purple-400 text-purple-200 text-xs font-semibold transition-all cursor-pointer shadow-sm hover:shadow-purple-500/10 active:scale-[0.98] flex items-center gap-1.5"
-                              >
-                                <RobotOutlined className="text-purple-400" />
-                                <span>Like + bình luận AI</span>
-                              </button>
-                            </Tooltip>
-                            <Tooltip title="Dùng nick cá nhân của mọi Via thay cho Page; giữ nguyên hình thức và cảm xúc đang chọn">
-                              <button
-                                type="button"
-                                onClick={handleQuickPresetVias}
-                                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-950/60 to-slate-900 hover:from-emerald-900/60 hover:to-slate-800 border border-emerald-500/30 hover:border-emerald-400 text-emerald-200 text-xs font-semibold transition-all cursor-pointer shadow-sm hover:shadow-emerald-500/10 active:scale-[0.98] flex items-center gap-1.5"
-                              >
-                                <UserOutlined className="text-emerald-400" />
-                                <span>Nick cá nhân ({fbAccounts.length})</span>
-                              </button>
-                            </Tooltip>
-                          </div>
-                        </div>
                       </div>
 
                       {/* BẢNG CẤU HÌNH TINH CHỈNH TƯƠNG TÁC */}
@@ -4581,38 +4524,19 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                         </div>
 
                         {/* Tùy chọn Buff Share (Chia sẻ lên tường Fanpage) */}
-                        <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700 transition-all flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-base shadow-sm shadow-emerald-500/10">
-                              <ShareAltOutlined />
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-bold text-slate-200">Chia sẻ bài viết lên tường Fanpage (Buff Share)</span>
-                                <Tag color="green" className="m-0 text-[10px] font-bold border-0 px-1.5 py-0 rounded">MỚI • VIRAL</Tag>
-                              </div>
-                              <p className="text-[11px] text-slate-400 m-0 mt-0.5">Fanpage tự động bấm Chia sẻ ngay về dòng thời gian, kéo reach và tương tác chéo cực mạnh</p>
-                            </div>
-                          </div>
-                          <Switch checked={enableShare} onChange={setEnableShare} />
+                        <div className="px-3 py-2.5 rounded-xl border border-slate-800/80 flex items-center justify-between gap-3">
+                          <Tooltip title="Fanpage tự bấm Chia sẻ bài lên dòng thời gian của mình để tăng reach">
+                            <span className="text-xs font-medium text-slate-200 flex items-center gap-2 cursor-help">
+                              <ShareAltOutlined className="text-slate-400" /> Chia sẻ lên tường Fanpage
+                            </span>
+                          </Tooltip>
+                          <Switch size="small" checked={enableShare} onChange={setEnableShare} />
                         </div>
 
                         {/* 2. Reaction Picker: 7 Cảm xúc Facebook + 2 Thẻ Trộn Tự Nhiên */}
                         {engagementMode !== 'COMMENT_ONLY' && (
                           <div className="space-y-2.5">
-                            <div className="flex items-center justify-between">
-                              <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                                <span>Cảm xúc tăng (Reaction):</span>
-                              </label>
-                              <Tag color="cyan" className="m-0 text-[11px] font-semibold rounded-md border-0 px-2 py-0.5">
-                                Đang chọn:{' '}
-                                {(() => {
-                                  const cur = REACTIONS.find((r) => r.key === selectedReaction);
-                                  if (!cur) return selectedReaction;
-                                  return cur.isRandom ? cur.shortLabel : `${cur.emoji} ${cur.shortLabel}`;
-                                })()}
-                              </Tag>
-                            </div>
+                            <label className="text-xs font-semibold text-slate-300 block">Cảm xúc</label>
 
                             {/* Hàng 1: 7 Cảm xúc chuẩn Facebook */}
                             <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 p-2 rounded-xl bg-slate-950/80 border border-slate-800">
@@ -4642,35 +4566,24 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               {REACTIONS.filter((r) => r.isRandom).map((r) => {
                                 const isSelected = selectedReaction === r.key;
                                 return (
+                                  <Tooltip key={r.key} title={r.desc}>
                                   <button
-                                    key={r.key}
                                     type="button"
                                     onClick={() => setSelectedReaction(r.key)}
-                                    className={`p-2.5 rounded-xl flex items-center gap-2.5 transition-all cursor-pointer border text-left ${
+                                    className={`px-3 py-2 rounded-xl flex items-center gap-2 transition-all cursor-pointer border text-left w-full ${
                                       isSelected
                                         ? 'bg-blue-950/40 border-blue-500 text-white shadow-md shadow-blue-500/20'
                                         : 'bg-slate-950/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                                     }`}
                                   >
-                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border transition-colors ${
-                                      isSelected
-                                        ? 'bg-blue-500/20 border-blue-500/50 text-blue-300'
-                                        : 'bg-slate-900 border-slate-800 text-slate-400'
-                                    }`}>
-                                      {r.key === 'RANDOM_POSITIVE' ? (
-                                        <InteractionOutlined className="text-base" />
-                                      ) : (
-                                        <AppstoreOutlined className="text-base" />
-                                      )}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <div className="text-xs font-bold text-slate-200 flex items-center gap-1">
-                                        <span>{r.shortLabel}</span>
-                                        {isSelected && <Tag color="blue" className="text-[9px] px-1 py-0 m-0 border-0">Đang bật</Tag>}
-                                      </div>
-                                      <div className="text-[10px] text-slate-400 truncate mt-0.5">{r.desc}</div>
-                                    </div>
+                                    {r.key === 'RANDOM_POSITIVE' ? (
+                                      <InteractionOutlined className={isSelected ? 'text-blue-300' : 'text-slate-400'} />
+                                    ) : (
+                                      <AppstoreOutlined className={isSelected ? 'text-blue-300' : 'text-slate-400'} />
+                                    )}
+                                    <span className="text-xs font-semibold text-slate-200 truncate">{r.shortLabel}</span>
                                   </button>
+                                  </Tooltip>
                                 );
                               })}
                             </div>
@@ -4697,12 +4610,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                             </span>
                           </div>
 
-                          {!showAdvancedSettings && (
-                            <div className="px-3 pb-2.5 text-[11px] text-slate-400 flex items-center gap-1.5">
-                              <CheckCircleOutlined className="text-emerald-400 text-xs shrink-0" />
-                              <span>Đang dùng tốc độ <strong>{getSpeedLabel(speedMode, customSpeed, delayMs, engagementMode !== 'LIKE_ONLY')}</strong>, {concurrency} luồng song song.</span>
-                            </div>
-                          )}
 
                           {showAdvancedSettings && (
                             <div className="p-3 pt-0 border-t border-slate-800/80 space-y-2.5 mt-1">
@@ -5624,9 +5531,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   />
                                 </div>
                               )}
-                              <p className="text-xs text-slate-500 m-0">
-                                Hàng đợi tự động xử lý lần lượt theo lịch, hệ thống phân phối đều giữa các Via.
-                              </p>
                             </div>
                           )}
 
@@ -5681,13 +5585,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   ? `Thêm ${parsedBatchLinks.length} bài vào hàng đợi`
                                   : 'Xác nhận thêm vào hàng đợi'}
                               </Button>
-                              <Button
-                                type="text"
-                                onClick={() => setRunMode('NOW')}
-                                className="w-full text-xs text-slate-400 hover:text-blue-400"
-                              >
-                                ← Chuyển sang chế độ chạy ngay lập tức
-                              </Button>
                             </div>
                           ) : buffMode === 'SINGLE' ? (
                             <div className="space-y-2">
@@ -5707,18 +5604,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   : selectedPageIds.length === 0
                                   ? 'Chọn số Like ở bước 1 hoặc 3'
                                   : 'Bắt đầu chạy ngay'}
-                              </Button>
-                              <Button
-                                type="dashed"
-                                icon={<ClockCircleOutlined />}
-                                onClick={() => {
-                                  setRunMode('QUEUE');
-                                  handleEnqueueFromForm();
-                                }}
-                                disabled={selectedPageIds.length === 0 || !targetPostUrl.trim()}
-                                className="w-full h-9 rounded-xl text-xs font-semibold text-amber-400 border-amber-500/40 hover:border-amber-400 bg-amber-950/20"
-                              >
-                                Hoặc đưa vào Hàng đợi để chạy ngầm
                               </Button>
                             </div>
                           ) : (
@@ -5746,18 +5631,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   Dừng toàn bộ hàng loạt
                                 </Button>
                               )}
-                              <Button
-                                type="dashed"
-                                icon={<ClockCircleOutlined />}
-                                onClick={() => {
-                                  setRunMode('QUEUE');
-                                  handleEnqueueFromForm();
-                                }}
-                                disabled={parsedBatchLinks.length === 0 || selectedPageIds.length === 0}
-                                className="w-full h-9 rounded-xl text-xs font-semibold text-amber-400 border-amber-500/40 hover:border-amber-400 bg-amber-950/20"
-                              >
-                                Hoặc đưa toàn bộ {parsedBatchLinks.length} bài vào Hàng đợi
-                              </Button>
                             </div>
                           )}
                         </div>
@@ -5821,11 +5694,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               Xem chi tiết tiến trình ➔
                             </Button>
                           </div>
-
-                          <div className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/40 p-2.5 rounded-lg border border-slate-800 flex items-start gap-1.5">
-                            <InfoCircleOutlined className="text-cyan-400 mt-0.5 shrink-0" />
-                            <span><b>Mẹo:</b> Ô nhập link bên trái đã được làm trống. Bạn có thể dán tiếp link khác và bấm <b>"Đưa bài mới này vào hàng đợi"</b> để tự động chạy nối tiếp mà không cần chờ!</span>
-                          </div>
                         </div>
                       ) : autoBuffProgress.status === 'DONE' ? (
                         <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-950/20 space-y-3">
@@ -5856,17 +5724,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                             </Button>
                           </div>
                         </div>
-                      ) : (
-                        <div className="p-5 rounded-xl border border-dashed border-slate-800 text-center text-slate-400 space-y-2 bg-slate-950/30">
-                          <div className="w-10 h-10 mx-auto rounded-xl bg-blue-950/60 border border-blue-700/40 flex items-center justify-center text-xl text-blue-400">
-                            <PlayCircleOutlined />
-                          </div>
-                          <div className="text-xs font-semibold text-slate-200">Sẵn sàng chạy tương tác</div>
-                          <div className="text-[11px] text-slate-400 max-w-xs mx-auto leading-relaxed">
-                            Dán link bài viết và bấm <b>Bắt đầu</b>. Hệ thống sẽ tự động chuyển sang tab <b>Tiến trình chạy</b> để bạn quan sát từng lượt thả cảm xúc theo thời gian thực.
-                          </div>
-                        </div>
-                      )}
+                      ) : null}
                     </div>
                   </Col>
                 </Row>
