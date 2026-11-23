@@ -2146,31 +2146,6 @@ async function executePostShare(tab, workerTag = '') {
 /**
  * Thực hiện chuỗi tương tác (đổi danh tính, thả like, viết bình luận, chia sẻ) cho 1 Fanpage trên 1 Tab
  */
-/**
- * Kiểm tra Via (tài khoản mẹ) còn đăng nhập trong chính context hiện tại hay không, KHÔNG mang danh tính Page (i_user).
- * Dùng cùng context nên đi cùng proxy/thiết bị của Via, không tạo phiên đăng nhập mới.
- * Trả về false khi không chắc chắn để giữ hành vi an toàn cũ (dừng Via).
- */
-async function isViaSessionAliveInContext(context, workerTag = '') {
-  let probe = null;
-  try {
-    await context.clearCookies({ name: 'i_user' }).catch(() => { });
-    probe = await context.newPage();
-    await probe.goto('https://www.facebook.com/settings/?tab=account', { waitUntil: 'domcontentloaded', timeout: 20000 });
-    const probeUrl = probe.url();
-    if (probeUrl.includes('/login') || probeUrl.includes('/checkpoint')) return false;
-    const hasLoginForm = await probe
-      .evaluate(() => Boolean(document.querySelector('input[name="email"], input[name="pass"], #login_form')))
-      .catch(() => true);
-    return !hasLoginForm;
-  } catch (e) {
-    console.warn(`[FB-Buff]${workerTag} ⚠️ Không kiểm tra được phiên Via (${e.message}), coi như Via lỗi để an toàn.`);
-    return false;
-  } finally {
-    if (probe) await probe.close().catch(() => { });
-  }
-}
-
 async function executePageInteraction({
   tab,
   context,
@@ -2219,26 +2194,6 @@ async function executePageInteraction({
   const curUrl = tab.url();
   if (isLoginPageOnTab || curUrl.includes('/login') || curUrl.includes('/checkpoint')) {
     const isCp = curUrl.includes('/checkpoint');
-
-    // Màn hình đăng nhập khi đang dùng danh tính Page có thể chỉ do Facebook từ chối riêng Page đó (mất quyền quản trị,
-    // Page bị hạn chế...), Via mẹ vẫn sống. Trước đây trường hợp này dừng cả Via → bỏ dở các Page còn lại và hụt KPI.
-    if (!isCp && pageInfo?.id && String(pageInfo.id) !== String(uid)) {
-      const viaAlive = await isViaSessionAliveInContext(context, workerTag);
-      if (viaAlive) {
-        console.warn(`[FB-Buff]${workerTag} ⚠️ Page "${pageInfo.name}" bị Facebook yêu cầu đăng nhập nhưng Via vẫn hoạt động → chỉ bỏ qua Page này.`);
-        return {
-          item: {
-            pageId: pageInfo.id,
-            pageName: pageInfo.name,
-            status: 'ERROR',
-            likeStatus: 'ERROR',
-            commentStatus: 'SKIPPED',
-            shareStatus: 'SKIPPED',
-            error: 'Facebook không cho dùng danh tính Page này (có thể Page đã mất quyền quản trị hoặc bị hạn chế). Đã bỏ qua Page, Via vẫn hoạt động.',
-          },
-        };
-      }
-    }
     console.error(`[FB-Buff]${workerTag} 🚨 PHÁT HIỆN COOKIE HẾT HẠN / ĐÃ ĐĂNG XUẤT (Xuất hiện màn hình đăng nhập Facebook)!`);
     return {
       cookieDead: true,
