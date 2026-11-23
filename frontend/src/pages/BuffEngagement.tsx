@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef, useCallback, lazy, Suspense, type ReactNode } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import {
   Card,
   Input,
@@ -28,7 +28,6 @@ import {
   PlayCircleOutlined,
   CheckCircleFilled,
   CheckCircleOutlined,
-  CloseCircleFilled,
   ExportOutlined,
   RobotOutlined,
   UserOutlined,
@@ -41,7 +40,6 @@ import {
   LoadingOutlined,
   ThunderboltOutlined,
   PauseCircleOutlined,
-  CaretRightOutlined,
   HistoryOutlined,
   ClockCircleOutlined,
   InfoCircleOutlined,
@@ -128,6 +126,9 @@ import {
   saveStoredPagesForVia,
 } from '../features/buff/utils';
 import PageCardItem from '../features/buff/components/PageCardItem';
+import MonitorFormModal from '../features/buff/components/MonitorFormModal';
+import ViaHealthModal from '../features/buff/components/ViaHealthModal';
+import LogDetailModal from '../features/buff/components/LogDetailModal';
 
 
 export interface BuffEngagementProps {
@@ -750,32 +751,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   // POST HUNTER & AUTO-MONITORS STATE & HANDLERS
   // ─────────────────────────────────────────────────────────────────────────────
   const [monitors, setMonitors] = useState<BuffMonitor[]>([]);
-  const [loadingMonitors, setLoadingMonitors] = useState<boolean>(false);
   const [isMonitorModalOpen, setIsMonitorModalOpen] = useState<boolean>(false);
-  const [editingMonitorId, setEditingMonitorId] = useState<string | null>(null);
-
-  // Monitor Form state
-  const [monTargetUrl, setMonTargetUrl] = useState<string>('');
-  const [monTargetName, setMonTargetName] = useState<string>('');
-  const [monTargetType, setMonTargetType] = useState<'PAGE' | 'GROUP' | 'PROFILE'>('PAGE');
-  const [monInterval, setMonInterval] = useState<number>(10);
-  const [monTargetLikes, setMonTargetLikes] = useState<number | 'ALL'>('ALL');
-  const [monReaction, setMonReaction] = useState<string>('RANDOM_POSITIVE');
-  const [monEnableComment, setMonEnableComment] = useState<boolean>(false);
-  const [monCommentText, setMonCommentText] = useState<string>(
-    '{Sản phẩm|Mẫu này} đẹp quá shop ơi! {Tư vấn|Inbox} em nhé! ❤️\n' +
-    'Đẹp xuất sắc luôn ạ! Chúc shop {bão đơn|buôn may bán đắt} nha! 🌟\n' +
-    'Chất lượng tuyệt vời, giá cả hợp lý! Đã ủng hộ shop nhiều lần 👍'
-  );
-  const [monDelayMinutes, setMonDelayMinutes] = useState<number>(3);
-  const [monViaMode, setMonViaMode] = useState<string>('ALL_VIAS');
-  const [monMaxPostsPerDay, setMonMaxPostsPerDay] = useState<number>(5);
-  const [monVariancePercent, setMonVariancePercent] = useState<number>(10);
-  const [monEnableDripFeed, setMonEnableDripFeed] = useState<boolean>(false);
-  const [monDripDurationMinutes, setMonDripDurationMinutes] = useState<number>(20);
-  const [monExpiryDays, setMonExpiryDays] = useState<number>(30);
-  const [spintaxSampleOutputs, setSpintaxSampleOutputs] = useState<string[]>([]);
-  const [monShowAdvanced, setMonShowAdvanced] = useState<boolean>(false);
+  const [monitorModalTarget, setMonitorModalTarget] = useState<{ editing?: BuffMonitor; prefillUrl?: string }>({});
 
 
   const [postHunterPaused, setPostHunterPaused] = useState<boolean>(false);
@@ -975,95 +952,8 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   };
 
   const handleOpenAddMonitorModal = (existing?: BuffMonitor, prefillUrl?: string) => {
-    if (existing) {
-      setEditingMonitorId(existing.id);
-      setMonTargetUrl(existing.targetUrl);
-      setMonTargetName(existing.targetName);
-      setMonTargetType(existing.targetType || 'PAGE');
-      setMonInterval(existing.checkIntervalMinutes || 10);
-      setMonTargetLikes(existing.buffConfig?.targetLikes || 'ALL');
-      setMonReaction(existing.buffConfig?.reactionType || 'RANDOM_POSITIVE');
-      setMonEnableComment(Boolean(existing.buffConfig?.enableComment));
-      setMonCommentText(
-        Array.isArray(existing.buffConfig?.comments) && existing.buffConfig.comments.length > 0
-          ? existing.buffConfig.comments.join('\n')
-          : '{Sản phẩm|Mẫu này} đẹp quá shop ơi! {Tư vấn|Inbox} em nhé! ❤️\nĐẹp xuất sắc luôn ạ! 🌟'
-      );
-      setMonDelayMinutes(existing.buffConfig?.delayMinutes || 3);
-      setMonViaMode(existing.buffConfig?.viaMode || 'ALL_VIAS');
-      setMonMaxPostsPerDay(existing.buffConfig?.maxPostsPerDay || 5);
-      setMonVariancePercent(existing.buffConfig?.variancePercent ?? 10);
-      setMonEnableDripFeed(Boolean(existing.buffConfig?.enableDripFeed));
-      setMonDripDurationMinutes(existing.buffConfig?.dripDurationMinutes || 20);
-      const remainingDays = (existing as any).expiresAt
-        ? Math.max(1, Math.round((new Date((existing as any).expiresAt).getTime() - Date.now()) / (24 * 3600 * 1000)))
-        : 30;
-      setMonExpiryDays(remainingDays);
-    } else {
-      setEditingMonitorId(null);
-      setMonTargetUrl(prefillUrl || '');
-      setMonTargetName('');
-      setMonTargetType('PAGE');
-      setMonInterval(10);
-      setMonTargetLikes(100);
-      setMonReaction('RANDOM_POSITIVE');
-      setMonEnableComment(false);
-      setMonDelayMinutes(3);
-      setMonViaMode('ALL_VIAS');
-      setMonMaxPostsPerDay(5);
-      setMonVariancePercent(10);
-      setMonEnableDripFeed(false);
-      setMonDripDurationMinutes(20);
-      setMonExpiryDays(30);
-    }
-    setSpintaxSampleOutputs([]);
+    setMonitorModalTarget({ editing: existing, prefillUrl });
     setIsMonitorModalOpen(true);
-  };
-
-  const handleSaveMonitor = async () => {
-    if (!monTargetUrl.trim()) {
-      message.warning('Vui lòng nhập Link trang Fanpage / Group / Profile cần theo dõi!');
-      return;
-    }
-    setLoadingMonitors(true);
-    try {
-      const commentsList = monCommentText.split('\n').map((s) => s.trim()).filter(Boolean);
-      const expiresAt = monExpiryDays > 0 ? new Date(Date.now() + monExpiryDays * 24 * 3600 * 1000).toISOString() : null;
-      const payload = {
-        id: editingMonitorId || undefined,
-        targetUrl: monTargetUrl.trim(),
-        targetName: monTargetName.trim() || undefined,
-        targetType: monTargetType,
-        checkIntervalMinutes: monInterval,
-        expiresAt,
-        buffConfig: {
-          targetLikes: monTargetLikes,
-          variancePercent: monVariancePercent,
-          maxPostsPerDay: monMaxPostsPerDay,
-          enableDripFeed: monEnableDripFeed,
-          dripDurationMinutes: monDripDurationMinutes,
-          reactionType: monReaction,
-          enableLike: true,
-          enableComment: monEnableComment,
-          comments: commentsList,
-          delayMinutes: monDelayMinutes,
-          viaMode: monViaMode,
-        },
-        status: 'ACTIVE',
-      };
-      const res = await axios.post(`${WORKER_BASE_URL}/api/buff-monitors`, payload);
-      if (res.data?.success) {
-        message.success(editingMonitorId ? 'Đã cập nhật mục tiêu theo dõi!' : 'Đã thêm mục tiêu theo dõi tự động mới!');
-        setIsMonitorModalOpen(false);
-        fetchBuffMonitors();
-      } else {
-        message.error(res.data?.error || 'Lỗi lưu mục tiêu theo dõi');
-      }
-    } catch (err: any) {
-      message.error(err.response?.data?.error || err.message);
-    } finally {
-      setLoadingMonitors(false);
-    }
   };
 
   const handleDeleteMonitor = (id: string) => {
@@ -1147,20 +1037,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     }
   };
 
-  const handleTestSpintaxInForm = () => {
-    const lines = monCommentText.split('\n').map((s) => s.trim()).filter(Boolean);
-    if (lines.length === 0) {
-      message.warning('Vui lòng nhập ít nhất 1 dòng bình luận hoặc Spintax!');
-      return;
-    }
-    const samples: string[] = [];
-    for (let i = 0; i < 4; i++) {
-      const picked = lines[i % lines.length];
-      samples.push(resolveSpintax(picked));
-    }
-    setSpintaxSampleOutputs(samples);
-    message.info('Đã tạo 4 mẫu bình luận ngẫu nhiên từ cấu trúc Spintax!');
-  };
 
   // AI Seeding Studio & Spintax State
   const [aiStudioModalOpen, setAiStudioModalOpen] = useState(false);
@@ -7162,200 +7038,17 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
 
       {/* Modal Xem Chi Tiết Log Lịch Sử Tương Tác */}
-      <Modal
-        open={!!selectedLogDetail}
-        onCancel={() => setSelectedLogDetail(null)}
-        footer={[
-          <Button key="close" onClick={() => setSelectedLogDetail(null)} className="rounded-xl">
-            Đóng
-          </Button>,
-          selectedLogDetail && (
-            <Button
-              key="buff-again"
-              type="primary"
-              className="bg-blue-600 hover:bg-blue-500 font-bold rounded-xl"
-              onClick={() => {
-                setTargetPostUrl(selectedLogDetail.targetUrl);
-                setSelectedReaction(selectedLogDetail.reactionType);
-                setSelectedLogDetail(null);
-                setActiveTabKey('buff-like');
-                message.info('Đã nạp lại bài viết này vào form để tiếp tục.');
-              }}
-            >
-              Nạp bài này để Buff tiếp
-            </Button>
-          ),
-        ]}
-        width={760}
-        centered
-        destroyOnHidden
-        title={
-          <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
-            <HistoryOutlined className="text-blue-400 text-lg" />
-            <div>
-              <div className="font-bold text-base text-slate-100">
-                Chi tiết lịch sử
-              </div>
-              <div className="text-[11px] text-slate-400 font-normal">
-                Thời gian:{' '}
-                <span className="font-mono text-slate-300">
-                  {selectedLogDetail ? new Date(selectedLogDetail.createdAt).toLocaleString('vi-VN') : ''}
-                </span>{' '}
-                • Chế độ:{' '}
-                <span className="font-semibold text-blue-400">
-                  {selectedLogDetail?.type === 'QUEUE'
-                    ? 'Hàng đợi tự động (Queue)'
-                    : selectedLogDetail?.type === 'BATCH'
-                    ? 'Hàng loạt (Batch)'
-                    : 'Đơn lẻ (Single)'}
-                </span>
-              </div>
-            </div>
-          </div>
-        }
-      >
-        {selectedLogDetail && (
-          <div className="py-2 space-y-4 text-xs">
-            {/* Target Post Info */}
-            <div className="p-3.5 bg-slate-950/50 border border-slate-800 rounded-xl space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-200">Link bài viết mục tiêu:</span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="small"
-                    icon={<CopyOutlined />}
-                    onClick={() => {
-                      navigator.clipboard.writeText(selectedLogDetail.targetUrl);
-                      message.success('Đã sao chép link!');
-                    }}
-                    className="text-xs"
-                  >
-                    Sao chép
-                  </Button>
-                  <Button
-                    size="small"
-                    type="primary"
-                    ghost
-                    icon={<ExportOutlined />}
-                    onClick={() => window.open(selectedLogDetail.targetUrl, '_blank')}
-                    className="text-xs"
-                  >
-                    Mở Facebook
-                  </Button>
-                </div>
-              </div>
-              <div className="font-mono text-blue-400 break-all bg-slate-900 p-2 rounded-lg border border-slate-800">
-                {selectedLogDetail.targetUrl}
-              </div>
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <span className="text-slate-500">Cảm xúc:</span>
-                {(() => {
-                  const rObj = REACTIONS.find((r) => r.key === selectedLogDetail.reactionType) || REACTIONS[0];
-                  return (
-                    <Tag className="font-bold">
-                      {rObj.emoji} {rObj.label}
-                    </Tag>
-                  );
-                })()}
-                {selectedLogDetail.accountName && (
-                  <>
-                    <span className="text-slate-400">•</span>
-                    <span className="text-slate-500">Tài khoản mẹ:</span>
-                    <Tag color="cyan">{selectedLogDetail.accountName}</Tag>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Quick Metrics */}
-            {(() => {
-              const counts = getLogCounts(selectedLogDetail);
-              return (
-            <div className="grid grid-cols-4 gap-2">
-              <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
-                <div className="text-[10px] text-slate-500 font-bold uppercase">Tổng Page</div>
-                <div className="text-lg font-semibold text-slate-100">{counts.total}</div>
-              </div>
-              <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-center">
-                <div className="text-[10px] text-emerald-400 font-bold uppercase">Thành công</div>
-                <div className="text-lg font-semibold text-emerald-400">{counts.success}</div>
-              </div>
-              <div className="p-2.5 rounded-xl bg-blue-950/40 border border-blue-800/60 text-center">
-                <div className="text-[10px] text-blue-400 font-bold uppercase">Đã Like Trước</div>
-                <div className="text-lg font-semibold text-blue-400">{counts.alreadyLiked}</div>
-              </div>
-              <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-center">
-                <div className="text-[10px] text-rose-400 font-bold uppercase">Thất bại / Lỗi</div>
-                <div className="text-lg font-semibold text-rose-400">{counts.failed}</div>
-                {counts.unverified + counts.skipped > 0 && (
-                  <div className="text-[10px] text-slate-400">
-                    {counts.unverified > 0 && `${counts.unverified} chưa xác minh`}
-                    {counts.unverified > 0 && counts.skipped > 0 && ' • '}
-                    {counts.skipped > 0 && `${counts.skipped} bỏ qua / dừng`}
-                  </div>
-                )}
-              </div>
-            </div>
-              );
-            })()}
-
-            {/* Detailed Table of Pages */}
-            <div className="space-y-2">
-              <div className="font-bold text-slate-200 flex items-center justify-between">
-                <span>Chi tiết từng Fanpage ({selectedLogDetail.details.length} Page):</span>
-              </div>
-              <div className="max-h-72 overflow-y-auto space-y-1.5 border border-slate-800 rounded-xl p-2 bg-slate-950/50">
-                {selectedLogDetail.details.map((detail, idx) => {
-                  let statusTag: ReactNode;
-                  if (detail.status === 'SUCCESS') {
-                    statusTag = <Tag color="success" icon={<CheckCircleFilled />}>Thành công</Tag>;
-                  } else if (detail.status === 'ALREADY_LIKED') {
-                    statusTag = <Tag color="blue" icon={<CheckOutlined />}>Đã like trước đó</Tag>;
-                  } else if (detail.status === 'NO_BUTTON') {
-                    statusTag = <Tag color="warning">Không thấy nút Like</Tag>;
-                  } else if (detail.status === 'ERROR') {
-                    statusTag = <Tag color="error" icon={<CloseCircleFilled />}>Lỗi</Tag>;
-                  } else if (detail.status === 'UNVERIFIED') {
-                    statusTag = <Tag color="gold">Chưa xác minh</Tag>;
-                  } else if (detail.status === 'SKIPPED') {
-                    statusTag = <Tag color="default">Bỏ qua / Đã dừng</Tag>;
-                  } else {
-                    statusTag = <Tag color="default">Chưa chạy</Tag>;
-                  }
-
-                  return (
-                    <div
-                      key={detail.pageId + idx}
-                      className="p-2 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-bold text-slate-400 font-mono text-[10px]">#{idx + 1}</span>
-                        <div className="min-w-0">
-                          <div className="font-semibold text-slate-100 truncate">{detail.pageName}</div>
-                          {detail.commentText && (
-                            <div className="text-[11px] text-blue-400 italic truncate max-w-[320px] font-medium">
-                              "{detail.commentText}"
-                            </div>
-                          )}
-                          <div className="font-mono text-[10px] text-slate-400">ID: {detail.pageId}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {detail.message && (
-                          <span className="text-[11px] text-slate-400 hidden sm:inline truncate max-w-[200px]" title={detail.message}>
-                            {detail.message}
-                          </span>
-                        )}
-                        {statusTag}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <LogDetailModal
+        log={selectedLogDetail}
+        onClose={() => setSelectedLogDetail(null)}
+        onReuse={(log) => {
+          setTargetPostUrl(log.targetUrl);
+          setSelectedReaction(log.reactionType);
+          setSelectedLogDetail(null);
+          setActiveTabKey('buff-like');
+          message.info('Đã nạp lại bài viết này vào form để tiếp tục.');
+        }}
+      />
 
       {/* Modal Khai Báo & Quản Lý i_user (Fanpage) cho Từng Via */}
       <Modal
@@ -7875,341 +7568,22 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       </Modal>
 
       {/* MODAL: THÊM / CẬP NHẬT MỤC TIÊU THEO DÕI POST HUNTER */}
-      <Modal
+      <MonitorFormModal
         open={isMonitorModalOpen}
-        onCancel={() => setIsMonitorModalOpen(false)}
-        title={editingMonitorId ? 'Sửa mục tiêu theo dõi' : 'Thêm mục tiêu theo dõi'}
-        footer={[
-          <Button key="cancel" onClick={() => setIsMonitorModalOpen(false)}>
-            Huỷ
-          </Button>,
-          <Button key="submit" type="primary" loading={loadingMonitors} onClick={handleSaveMonitor}>
-            {editingMonitorId ? 'Lưu thay đổi' : 'Bắt đầu theo dõi'}
-          </Button>,
-        ]}
-        width={560}
-        className="dark-modal"
-      >
-        <div className="space-y-5 py-1 text-slate-200">
-          {/* MỤC TIÊU */}
-          <section className="space-y-3">
-            <Input
-              autoFocus
-              size="large"
-              placeholder="Dán link Fanpage hoặc Group"
-              value={monTargetUrl}
-              onChange={(e) => {
-                const url = e.target.value;
-                setMonTargetUrl(url);
-                if (/facebook\.com\/groups\//i.test(url)) setMonTargetType('GROUP');
-                else if (/facebook\.com\//i.test(url) && monTargetType === 'GROUP') setMonTargetType('PAGE');
-              }}
-            />
-            <div className="flex gap-2">
-              <Input
-                placeholder="Tên gợi nhớ (tuỳ chọn)"
-                value={monTargetName}
-                onChange={(e) => setMonTargetName(e.target.value)}
-                className="flex-1"
-              />
-              <Select
-                value={monTargetType}
-                onChange={(val) => setMonTargetType(val)}
-                className="w-36"
-                options={[
-                  { value: 'PAGE', label: 'Fanpage' },
-                  { value: 'GROUP', label: 'Group' },
-                  { value: 'PROFILE', label: 'Trang cá nhân' },
-                ]}
-              />
-            </div>
-            {monTargetType === 'GROUP' && (
-              <div className="text-[11px] text-slate-500">Group riêng tư: cần ít nhất một via là thành viên.</div>
-            )}
-          </section>
-
-          {/* GÓI VIP */}
-          <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-4">
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-slate-400 mb-1 block">Like mỗi bài</label>
-                <InputNumber
-                  min={5}
-                  max={500}
-                  value={monTargetLikes === 'ALL' ? null : monTargetLikes}
-                  onChange={(v) => setMonTargetLikes(v ? Number(v) : 'ALL')}
-                  placeholder={`Tối đa ${systemSettings.maxPagesPerPost || 150}`}
-                  className="!w-full"
-                />
-                <button
-                  type="button"
-                  className={`mt-1 text-[11px] ${monTargetLikes === 'ALL' ? 'text-cyan-400' : 'text-slate-500 hover:text-cyan-400'}`}
-                  onClick={() => setMonTargetLikes('ALL')}
-                >
-                  {monTargetLikes === 'ALL' ? `✓ Đang dùng tối đa ${systemSettings.maxPagesPerPost || 150} page` : 'Dùng tối đa'}
-                </button>
-              </div>
-              <div>
-                <label className="text-xs text-slate-400 mb-1 block">Bài mỗi ngày</label>
-                <InputNumber
-                  min={1}
-                  max={50}
-                  value={monMaxPostsPerDay}
-                  onChange={(v) => setMonMaxPostsPerDay(v || 5)}
-                  className="!w-full"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-400 mb-1 block">Thời hạn</label>
-                <Select
-                  value={monExpiryDays}
-                  onChange={(v) => setMonExpiryDays(v)}
-                  className="w-full"
-                  options={[
-                    ...([7, 15, 30, 60, 90, 0].includes(monExpiryDays) ? [] : [{ value: monExpiryDays, label: `Còn ${monExpiryDays} ngày` }]),
-                    { value: 7, label: '7 ngày' },
-                    { value: 15, label: '15 ngày' },
-                    { value: 30, label: '30 ngày' },
-                    { value: 60, label: '60 ngày' },
-                    { value: 90, label: '90 ngày' },
-                    { value: 0, label: 'Không hạn' },
-                  ]}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-slate-400 mb-1 block">Cảm xúc</label>
-                <Select
-                  value={monReaction}
-                  onChange={(val) => setMonReaction(val)}
-                  className="w-full"
-                  options={[
-                    { value: 'RANDOM_POSITIVE', label: 'Like / Love / Care' },
-                    { value: 'LIKE', label: 'Like' },
-                    { value: 'LOVE', label: 'Love' },
-                    { value: 'CARE', label: 'Care' },
-                  ]}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-400 mb-1 block">Bắt đầu buff</label>
-                <Select
-                  value={monDelayMinutes}
-                  onChange={(val) => setMonDelayMinutes(val)}
-                  className="w-full"
-                  options={[
-                    { value: 0, label: 'Ngay khi thấy bài' },
-                    { value: 3, label: 'Sau 3 phút' },
-                    { value: 5, label: 'Sau 5 phút' },
-                    { value: 10, label: 'Sau 10 phút' },
-                  ]}
-                />
-              </div>
-            </div>
-          </section>
-
-          {/* TUỲ CHỌN BẬT/TẮT */}
-          <section className="divide-y divide-slate-800 border-y border-slate-800">
-            <div className="flex items-center justify-between gap-3 py-3">
-              <div>
-                <div className="text-sm text-slate-200">Rải đều like</div>
-                <div className="text-[11px] text-slate-500">Like vào từ từ như người thật</div>
-              </div>
-              <div className="flex items-center gap-2">
-                {monEnableDripFeed && (
-                  <InputNumber
-                    size="small"
-                    min={5}
-                    max={120}
-                    value={monDripDurationMinutes}
-                    onChange={(v) => setMonDripDurationMinutes(v || 20)}
-                    addonAfter="phút"
-                    className="w-28"
-                  />
-                )}
-                <Switch checked={monEnableDripFeed} onChange={(checked) => setMonEnableDripFeed(checked)} />
-              </div>
-            </div>
-
-            <div className="py-3 space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm text-slate-200">Bình luận</div>
-                  <div className="text-[11px] text-slate-500">Mỗi page một bình luận ngẫu nhiên (Spintax)</div>
-                </div>
-                <Switch checked={monEnableComment} onChange={setMonEnableComment} />
-              </div>
-
-              {monEnableComment && (
-                <div className="space-y-2 pt-1">
-                  <Input.TextArea
-                    rows={4}
-                    value={monCommentText}
-                    onChange={(e) => setMonCommentText(e.target.value)}
-                    placeholder="Mỗi dòng một mẫu, VD: {Đẹp quá|Xịn quá} {shop|bạn} ơi"
-                    className="font-mono text-xs"
-                  />
-                  <div className="flex items-center justify-end gap-3">
-                    <Button
-                      size="small"
-                      type="link"
-                      className="!p-0"
-                      onClick={() => {
-                        const sampleTmpls = SEEDING_NICHE_PRESETS['SALES']?.templates || [];
-                        setMonCommentText(sampleTmpls.join('\n'));
-                      }}
-                    >
-                      Dùng mẫu bán hàng
-                    </Button>
-                    <Button size="small" onClick={handleTestSpintaxInForm}>
-                      Xem thử
-                    </Button>
-                  </div>
-
-                  {spintaxSampleOutputs.length > 0 && (
-                    <div className="rounded-lg border border-slate-800 divide-y divide-slate-800/70">
-                      {spintaxSampleOutputs.map((s, idx) => (
-                        <div key={idx} className="px-3 py-1.5 text-xs text-slate-300">
-                          {s}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* NÂNG CAO */}
-          <section>
-            <button
-              type="button"
-              onClick={() => setMonShowAdvanced((v) => !v)}
-              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200"
-            >
-              <CaretRightOutlined className={`text-[10px] transition-transform ${monShowAdvanced ? 'rotate-90' : ''}`} />
-              Nâng cao
-              {!monShowAdvanced && (
-                <span className="text-slate-600">
-                  · quét {monInterval}p · ±{monVariancePercent}% · {monViaMode === 'ALL_VIAS' ? 'tất cả via' : 'via đầu tiên'}
-                </span>
-              )}
-            </button>
-            {monShowAdvanced && (
-              <div className="grid grid-cols-3 gap-3 mt-3">
-                <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Quét mỗi</label>
-                  <Select
-                    value={monInterval}
-                    onChange={(val) => setMonInterval(val)}
-                    className="w-full"
-                    options={[5, 10, 15, 30, 60].map((m) => ({ value: m, label: `${m} phút` }))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Dao động số like</label>
-                  <Select
-                    value={monVariancePercent}
-                    onChange={(v) => setMonVariancePercent(v)}
-                    className="w-full"
-                    options={[
-                      { value: 0, label: 'Không' },
-                      { value: 5, label: '±5%' },
-                      { value: 10, label: '±10%' },
-                      { value: 15, label: '±15%' },
-                      { value: 20, label: '±20%' },
-                    ]}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-400 mb-1 block">Via thực hiện</label>
-                  <Select
-                    value={monViaMode}
-                    onChange={(val) => setMonViaMode(val)}
-                    className="w-full"
-                    options={[
-                      { value: 'ALL_VIAS', label: 'Tất cả via sống' },
-                      { value: 'CUSTOM', label: 'Via đầu tiên' },
-                    ]}
-                  />
-                </div>
-              </div>
-            )}
-          </section>
-        </div>
-      </Modal>
+        editing={monitorModalTarget.editing}
+        prefillUrl={monitorModalTarget.prefillUrl}
+        maxPagesPerPost={systemSettings?.maxPagesPerPost || 150}
+        workerBaseUrl={WORKER_BASE_URL}
+        onClose={() => setIsMonitorModalOpen(false)}
+        onSaved={fetchBuffMonitors}
+      />
 
       {/* MODAL: BÁO CÁO SỨC KHỎE DÀN VIA TRONG BM */}
-      <Modal
+      <ViaHealthModal
         open={isHealthModalOpen}
-        onCancel={() => setIsHealthModalOpen(false)}
-        title={
-          <div className="flex items-center gap-2 text-base font-bold text-slate-100 pb-2 border-b border-slate-800">
-            <SafetyCertificateOutlined className="text-emerald-400 text-lg" />
-            <span>Báo Cáo Sức Khỏe Dàn Via Facebook (Live/Die Status)</span>
-          </div>
-        }
-        footer={[
-          <Button key="close" type="primary" onClick={() => setIsHealthModalOpen(false)} className="rounded-xl">
-            Đóng
-          </Button>,
-        ]}
-        width={720}
-        className="dark-modal"
-      >
-        <div className="space-y-4 py-2 text-slate-200">
-          <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
-            <span>Tổng số Via kiểm tra: <strong className="text-slate-100">{viaHealthResults.length}</strong></span>
-            <span className="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-              Hoạt Động: {viaHealthResults.filter((r) => r.isLive).length}
-            </span>
-            <span className="inline-flex items-center gap-1.5 text-rose-400 font-semibold">
-              <span className="w-2 h-2 rounded-full bg-rose-400"></span>
-              Sự Cố / Hết Hạn: {viaHealthResults.filter((r) => !r.isLive).length}
-            </span>
-          </div>
-
-          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {viaHealthResults.map((v, idx) => (
-              <div
-                key={idx}
-                className={`p-3 rounded-xl border flex items-center justify-between gap-3 text-xs ${
-                  v.isLive
-                    ? 'bg-slate-900/80 border-emerald-800/40'
-                    : 'bg-rose-950/20 border-rose-800/40'
-                }`}
-              >
-                <div className="space-y-1 min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-100">{v.viaName || `Via ${v.uid}`}</span>
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-medium ${
-                      v.isLive
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                        : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                    }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${v.isLive ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
-                      {v.isLive ? 'LIVE' : v.status === 'CHECKPOINT' ? 'CHECKPOINT' : 'EXPIRED'}
-                    </span>
-                    {v.proxyUrl && (
-                      <Tag color="purple" className="text-[10px] font-mono">
-                        Proxy: {v.proxyUrl.split('@').pop() || 'Private'}
-                      </Tag>
-                    )}
-                  </div>
-                  <div className="text-[11px] text-slate-400 font-mono">UID: {v.uid || 'N/A'} {v.name && `· Tên Facebook: ${v.name}`}</div>
-                  {v.error && <div className="text-[11px] text-rose-400">{v.error}</div>}
-                </div>
-                <div className="shrink-0 text-right text-[11px] text-slate-500 font-mono">
-                  {new Date(v.checkedAt).toLocaleTimeString('vi-VN')}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </Modal>
+        results={viaHealthResults}
+        onClose={() => setIsHealthModalOpen(false)}
+      />
 
       {/* MODAL: XÁC NHẬN CHẠY TIẾP / BÙ LIKE */}
       <Modal
