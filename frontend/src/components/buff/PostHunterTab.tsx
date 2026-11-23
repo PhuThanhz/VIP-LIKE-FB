@@ -526,6 +526,7 @@ export default function PostHunterTab({
           columns={columns}
           dataSource={filteredMonitors}
           tableLayout="fixed"
+          scroll={{ x: 860 }}
           pagination={filteredMonitors.length > 10 ? { pageSize: 10, showTotal: (t) => `${t} mục tiêu` } : false}
           locale={{
             emptyText:
