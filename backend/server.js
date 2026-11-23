@@ -1954,6 +1954,62 @@ app.get('/api/readiness', async (req, res) => {
 // Frontend chỉ chạy song song nhiều nhóm Via khi backend hỗ trợ chặn KPI theo cả lượt và dừng toàn bộ phiên
 const BUFF_LIVE_CAPABILITIES = ['RUN_KPI_CAP', 'STOP_ALL'];
 
+/**
+ * Gộp các nhóm Via cùng một lượt chạy (sessionId "<runId>_g<n>", có thể chạy song song) thành 1 phiên
+ * để màn hình Tiến trình sau khi F5 hiện đúng tổng số like của cả lượt, không chỉ 1 Via.
+ * Phiên không thuộc lượt nhiều nhóm thì trả nguyên.
+ */
+function getMergedLiveSession(sess) {
+  if (!sess || !/_g\d+$/.test(String(sess.sessionId || ''))) return sess;
+  const runPrefix = String(sess.sessionId).replace(/_g\d+$/, '');
+  const group = [...activeLiveBuffSessions.values()].filter(
+    (s) => s && String(s.sessionId || '').startsWith(runPrefix + '_g')
+  );
+  if (group.length <= 1) return sess;
+
+  const sum = (key) => group.reduce((acc, s) => acc + (Number(s[key]) || 0), 0);
+  const runKpi = Math.max(0, ...group.map((s) => Number(s.runKpi) || 0));
+  const total = runKpi > 0 ? runKpi : sum('total');
+  const success = sum('success');
+  const alreadyLiked = sum('alreadyLiked');
+  const anyRunning = group.some((s) => s.status === 'RUNNING');
+  const status = anyRunning
+    ? 'RUNNING'
+    : group.some((s) => s.status === 'STOPPED') ? 'STOPPED'
+    : group.some((s) => s.status === 'ERROR') ? 'ERROR'
+    : 'DONE';
+  const seenPages = new Set();
+  const details = [];
+  for (const s of group) {
+    for (const d of s.details || []) {
+      const key = String(d.pageId || '');
+      if (key && seenPages.has(key)) continue;
+      if (key) seenPages.add(key);
+      details.push(d);
+    }
+  }
+  const times = (key) => group.map((s) => new Date(s[key] || 0).getTime()).filter((t) => t > 0);
+  return {
+    ...sess,
+    sessionId: runPrefix,
+    status,
+    total,
+    success,
+    alreadyLiked,
+    failed: sum('failed'),
+    done: sum('done'),
+    percent: Math.min(100, Math.round(((success + alreadyLiked) / Math.max(1, total)) * 100)),
+    startedAt: times('startedAt').length ? new Date(Math.min(...times('startedAt'))).toISOString() : sess.startedAt,
+    updatedAt: times('updatedAt').length ? new Date(Math.max(...times('updatedAt'))).toISOString() : sess.updatedAt,
+    currentRunningPageName: group.filter((s) => s.status === 'RUNNING' && s.currentRunningPageName).map((s) => s.currentRunningPageName).join(' · '),
+    details,
+    logs: group.flatMap((s) => (Array.isArray(s.logs) ? s.logs : [])),
+    kpiReached: group.some((s) => s.kpiReached) || (runKpi > 0 && success >= runKpi),
+    stopRequested: group.some((s) => s.stopRequested),
+    groupCount: group.length,
+  };
+}
+
 app.get('/api/buff-live/active', (req, res) => {
   try {
     const reqSessionId = req.query.sessionId;
@@ -1963,15 +2019,16 @@ app.get('/api/buff-live/active', (req, res) => {
     if (!activeLiveBuffSession) {
       return res.json({ success: true, capabilities: BUFF_LIVE_CAPABILITIES, activeSession: null });
     }
+    const view = getMergedLiveSession(activeLiveBuffSession);
     // Tự động dọn dẹp nếu phiên đã xong và qua 30 phút
     if (
-      activeLiveBuffSession.status !== 'RUNNING' &&
-      Date.now() - new Date(activeLiveBuffSession.updatedAt).getTime() > 30 * 60 * 1000
+      view.status !== 'RUNNING' &&
+      Date.now() - new Date(view.updatedAt).getTime() > 30 * 60 * 1000
     ) {
       activeLiveBuffSession = null;
       return res.json({ success: true, capabilities: BUFF_LIVE_CAPABILITIES, activeSession: null });
     }
-    return res.json({ success: true, capabilities: BUFF_LIVE_CAPABILITIES, activeSession: activeLiveBuffSession });
+    return res.json({ success: true, capabilities: BUFF_LIVE_CAPABILITIES, activeSession: view });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -2150,6 +2207,7 @@ app.post('/api/buff-like-stream', async (req, res) => {
       currentRunningPageName: '',
       details: [],
       stopRequested: false,
+      runKpi,
     };
   }
   activeLiveBuffSessions.set(sessionKey, activeLiveBuffSession);
