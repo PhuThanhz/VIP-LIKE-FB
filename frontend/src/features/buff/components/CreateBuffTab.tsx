@@ -1,4 +1,5 @@
 import { AppstoreOutlined, BulbOutlined, CheckCircleFilled, ClockCircleOutlined, CommentOutlined, ControlOutlined, DownOutlined, EditOutlined, ExclamationCircleOutlined, ExportOutlined, InfoCircleOutlined, InteractionOutlined, LikeOutlined, LoadingOutlined, ReloadOutlined, RobotOutlined, RocketOutlined, SafetyCertificateOutlined, SearchOutlined, SettingOutlined, ShareAltOutlined, ThunderboltFilled, UpOutlined, UserOutlined } from '@ant-design/icons';
+import { useState } from 'react';
 import { Button, Checkbox, Col, Dropdown, Input, InputNumber, Progress, Row, Segmented, Select, Switch, Tag, Tooltip } from 'antd';
 import PageCardItem from './PageCardItem';
 import PasteLinkInput from '../../../components/common/PasteLinkInput';
@@ -124,6 +125,15 @@ export default function CreateBuffTab({ controller }: { controller: BuffControll
     viaGroupCounts,
   } = controller;
 
+  // Ô "Số khác" ở hàng chọn nhanh số like (chỉ áp dụng khi bấm Enter / rời ô để không chọn lại page mỗi lần gõ)
+  const QUICK_LIKE_COUNTS = [10, 30, 50, 100, 200, 300];
+  const [customLikeCount, setCustomLikeCount] = useState<number | null>(null);
+  const applyCustomLikeCount = () => {
+    if (customLikeCount && customLikeCount > 0 && selectedPageIds.length !== customLikeCount) {
+      handleSelectRandomPages(customLikeCount);
+    }
+  };
+
   return (
               <div className="space-y-5">
                 <Row gutter={[20, 20]} align="top">
@@ -242,7 +252,7 @@ export default function CreateBuffTab({ controller }: { controller: BuffControll
                               <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                                 <span className="text-xs font-semibold text-slate-300">Số like</span>
                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                  {[30, 50, 100, 200, 300]
+                                  {QUICK_LIKE_COUNTS
                                     .filter((n) => n <= scannedPages.length)
                                     .map((num) => {
                                       const isSelected = selectedPageIds.length === num;
@@ -261,6 +271,24 @@ export default function CreateBuffTab({ controller }: { controller: BuffControll
                                         </button>
                                       );
                                     })}
+                                  <InputNumber
+                                    size="small"
+                                    min={1}
+                                    max={scannedPages.length}
+                                    precision={0}
+                                    placeholder="Số khác"
+                                    value={customLikeCount}
+                                    onChange={(v) => setCustomLikeCount(v ? Number(v) : null)}
+                                    onPressEnter={applyCustomLikeCount}
+                                    onBlur={applyCustomLikeCount}
+                                    className={`!w-[88px] ${
+                                      selectedPageIds.length > 0 &&
+                                      selectedPageIds.length === customLikeCount &&
+                                      !QUICK_LIKE_COUNTS.includes(customLikeCount)
+                                        ? '!border-blue-500'
+                                        : ''
+                                    }`}
+                                  />
                                   <button
                                     type="button"
                                     onClick={handleSelectAllUnliked}
