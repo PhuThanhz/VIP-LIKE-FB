@@ -2156,7 +2156,9 @@ app.post('/api/buff-like-stream', async (req, res) => {
     }
 
     if (activeLiveBuffSession && activeLiveBuffSession.sessionId === sessionKey) {
-      activeLiveBuffSession.total = Math.max(targetKpi, allPages.length);
+      // Mục tiêu hiển thị = KPI người dùng đặt. allPages gồm cả kho Page dự phòng để bù lỗi (có thể hàng trăm),
+      // trước đây lấy max(...) làm UI sau khi tải lại trang báo "Mục tiêu 516 nick" thay vì 10.
+      activeLiveBuffSession.total = targetKpi > 0 ? targetKpi : allPages.length;
     }
 
     const viaGroupsMap = new Map();

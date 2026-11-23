@@ -87,6 +87,9 @@ export default function RunningTab({
   handleStopQueueTask,
 }: RunningTabProps) {
   const { message } = App.useApp();
+  // commentStatus 'SKIPPED' nghĩa là KHÔNG bình luận → không được tính là lượt có bình luận
+  const hasRealComment = (d: { commentStatus?: string; commentText?: string }) =>
+    Boolean((d.commentStatus && d.commentStatus !== 'SKIPPED') || d.commentText);
   const [runningFilter, setRunningFilter] = useState<'ALL' | 'SUCCESS' | 'ALREADY_LIKED' | 'FAILED' | 'RUNNING' | 'WAITING'>('ALL');
   const [runningSearch, setRunningSearch] = useState<string>('');
   const [showLiveTerminal, setShowLiveTerminal] = useState<boolean>(true);
@@ -577,14 +580,14 @@ export default function RunningTab({
                               <div className="flex flex-col gap-1.5">
                                 <div className="px-3 py-1 rounded-lg bg-slate-950/60 border border-slate-800 flex items-center gap-1.5">
                                   <span className="text-slate-400">
-                                    {autoBuffProgress.details.some((d) => d.commentStatus || d.commentText) || runningTargetInfo?.engagementMode === 'COMMENT_ONLY' || engagementMode === 'COMMENT_ONLY'
+                                    {autoBuffProgress.details.some(hasRealComment) || runningTargetInfo?.engagementMode === 'COMMENT_ONLY' || engagementMode === 'COMMENT_ONLY'
                                       ? 'Chế độ:'
                                       : 'Cảm xúc:'}
                                   </span>
                                   <span className="font-bold text-slate-100">
                                     {(() => {
                                       const isCmt =
-                                        autoBuffProgress.details.some((d) => d.commentStatus || d.commentText) ||
+                                        autoBuffProgress.details.some(hasRealComment) ||
                                         runningTargetInfo?.engagementMode === 'COMMENT_ONLY' ||
                                         engagementMode === 'COMMENT_ONLY';
                                       if (isCmt && engagementMode !== 'LIKE_AND_COMMENT') return 'Chỉ bình luận';
@@ -747,7 +750,7 @@ export default function RunningTab({
                                 ) : isExhausted ? (
                                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950/70 border border-amber-500/50 text-amber-300 text-xs font-bold shadow-sm shadow-amber-950/50">
                                     <CheckCircleOutlined className="text-amber-400" />
-                                    <span>Đã duyệt hết nick ({autoBuffProgress.details.length} nick)</span>
+                                    <span className="whitespace-nowrap">Chưa đủ {autoBuffProgress.success}/{autoBuffProgress.total || autoBuffProgress.details.length}</span>
                                   </div>
                                 ) : (
                                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-950/70 border border-rose-500/50 text-rose-300 text-xs font-bold">
@@ -783,16 +786,16 @@ export default function RunningTab({
                                       <span>
                                         {(() => {
                                           const isCmt =
-                                            autoBuffProgress.details.some((d) => d.commentStatus || d.commentText) ||
+                                            autoBuffProgress.details.some(hasRealComment) ||
                                             runningTargetInfo?.engagementMode === 'COMMENT_ONLY' ||
                                             engagementMode === 'COMMENT_ONLY';
                                           const unit = isCmt ? 'bình luận' : 'like';
                                           return (
                                             <>
-                                              Đã duyệt xong {autoBuffProgress.details.length} nick trong đợt này (Đạt <b className="text-emerald-300">{autoBuffProgress.success} {unit} thành công</b>{autoBuffProgress.alreadyLiked > 0 ? `, ${autoBuffProgress.alreadyLiked} đã tương tác trước` : ''}).
+                                              Đã chạy {autoBuffProgress.details.length} nick trong đợt này (Đạt <b className="text-emerald-300">{autoBuffProgress.success} {unit} thành công</b>{autoBuffProgress.alreadyLiked > 0 ? `, ${autoBuffProgress.alreadyLiked} đã tương tác trước` : ''}).
                                               {autoBuffProgress.total > autoBuffProgress.details.length && (
                                                 <span className="text-slate-300 ml-1">
-                                                  (Kho Via hiện tại chỉ có {autoBuffProgress.details.length} nick chưa tương tác bài này).
+                                                  Còn thiếu {Math.max(0, autoBuffProgress.total - autoBuffProgress.success - autoBuffProgress.alreadyLiked)} {unit} do một số Page lỗi hoặc bị bỏ qua. Bấm &quot;Tiếp tục chạy nốt&quot; để bù.
                                                 </span>
                                               )}
                                             </>
@@ -904,7 +907,7 @@ export default function RunningTab({
                         const failed = isBatch ? totalBatchFailed : (autoBuffProgress.failed || 0);
                         const isExhaustedBox = isBatch ? (totalBatchSuccess < totalBatchLikesTarget) : (autoBuffProgress.details.length > 0 && success + failed < total && total > 0);
                         const isCmt =
-                          autoBuffProgress.details.some((d) => d.commentStatus || d.commentText) ||
+                          autoBuffProgress.details.some(hasRealComment) ||
                           runningTargetInfo?.engagementMode === 'COMMENT_ONLY' ||
                           engagementMode === 'COMMENT_ONLY';
                         const unitName = isCmt ? 'bình luận' : 'like';
