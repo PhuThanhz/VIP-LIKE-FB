@@ -81,6 +81,8 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     key: 'buff-hunter',
+    // Mở từ thanh tab trong trang "Like & Bình luận", không lặp lại trên Sidebar
+    parent: 'buff-like',
     label: 'Săn Bài & VIP Like',
     title: 'Săn Bài & VIP Like (Tự Động Theo Dõi Page/Group)',
     subtitle: 'Theo dõi 20 Fanpage/Group mục tiêu, tự động săn bài mới để buff và báo cáo tổng quan cuối ngày',

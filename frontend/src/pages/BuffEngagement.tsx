@@ -558,7 +558,7 @@ interface ReactionOption {
 
 const REACTIONS: ReactionOption[] = [
   { key: 'LIKE', label: 'Thích (Like)', shortLabel: 'Thích', emoji: '👍', color: '#1877f2', isRandom: false },
-  { key: 'LOVE', label: 'Yêu thích (Love)', shortLabel: 'Thả Tim', emoji: '❤️', color: '#f33e58', isRandom: false },
+  { key: 'LOVE', label: 'Yêu thích (Love)', shortLabel: 'Thả tim', emoji: '❤️', color: '#f33e58', isRandom: false },
   { key: 'CARE', label: 'Thương thương (Care)', shortLabel: 'Thương', emoji: '🥰', color: '#f7b125', isRandom: false },
   { key: 'HAHA', label: 'Haha (Cười vui)', shortLabel: 'Haha', emoji: '😆', color: '#f7b125', isRandom: false },
   { key: 'WOW', label: 'Wow (Bất ngờ)', shortLabel: 'Wow', emoji: '😮', color: '#f7b125', isRandom: false },
@@ -566,23 +566,44 @@ const REACTIONS: ReactionOption[] = [
   { key: 'ANGRY', label: 'Phẫn nộ (Angry)', shortLabel: 'Phẫn nộ', emoji: '😡', color: '#e9710f', isRandom: false },
   {
     key: 'RANDOM_POSITIVE',
-    label: 'Trộn Cảm Xúc Tự Nhiên (Like • Tim • Thương)',
-    shortLabel: 'Trộn Tự Nhiên (Like/Tim)',
+    label: 'Trộn cảm xúc tự nhiên (like • tim • thương)',
+    shortLabel: 'Trộn tự nhiên (like/tim)',
     emoji: '',
     color: '#3b82f6',
     isRandom: true,
-    desc: '65% Thích + 25% Thả Tim + 10% Thương Thương (Khuyên dùng cho bài bán hàng)',
+    desc: '65% thích + 25% thả tim + 10% thương thương (khuyên dùng cho bài bán hàng)',
   },
   {
     key: 'RANDOM_ALL',
-    label: 'Trộn Đa Dạng (Tất cả cảm xúc Facebook)',
-    shortLabel: 'Trộn Đa Dạng',
+    label: 'Trộn đa dạng (tất cả cảm xúc Facebook)',
+    shortLabel: 'Trộn đa dạng',
     emoji: '',
     color: '#8b5cf6',
     isRandom: true,
-    desc: 'Bao gồm cả Haha & Wow xen kẽ cho bài viết viral, giải trí',
+    desc: 'Gồm cả Haha và Wow xen kẽ cho bài viết viral, giải trí',
   },
 ];
+
+type SpeedModeKey = 'SMART' | 'TURBO' | 'FAST' | 'NORMAL' | 'SAFE';
+
+/** Mức tốc độ duy nhất người dùng chọn; mỗi mức kèm giãn cách và mô phỏng người dùng mặc định */
+const SPEED_PRESETS: { key: SpeedModeKey; name: string; delayMs: number; human: boolean }[] = [
+  { key: 'TURBO', name: 'Siêu tốc', delayMs: 1200, human: false },
+  { key: 'FAST', name: 'Rất nhanh', delayMs: 1800, human: false },
+  { key: 'NORMAL', name: 'Chuẩn', delayMs: 2200, human: true },
+  { key: 'SMART', name: 'Tự động', delayMs: 2500, human: true },
+  { key: 'SAFE', name: 'An toàn', delayMs: 4500, human: true },
+];
+
+const formatDelaySeconds = (ms: number) => `${Number((ms / 1000).toFixed(1))}s`;
+
+/** Nhãn tốc độ dùng chung cho badge, dòng mô tả và panel Tóm tắt */
+const getSpeedLabel = (speedMode: string, customSpeed: boolean, delayMs: number, hasComment = false) => {
+  // Có bình luận thì giãn cách tối thiểu 12s, gọi "Rất nhanh · 12s" sẽ gây hiểu nhầm
+  if (hasComment) return `${formatDelaySeconds(delayMs)} (có bình luận)`;
+  const name = customSpeed ? 'Tùy chỉnh' : SPEED_PRESETS.find((p) => p.key === speedMode)?.name || 'Chuẩn';
+  return `${name} · ${formatDelaySeconds(delayMs)}`;
+};
 
 function cleanPageName(raw: string): string {
   if (!raw || typeof raw !== 'string') return '';
@@ -793,8 +814,10 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
   const [pageSearchQuery, setPageSearchQuery] = useState('');
   const [viaFilter, setViaFilter] = useState<string>('ALL');
   const [likeFilter, setLikeFilter] = useState<'ALL' | 'UNLIKED' | 'LIKED'>('ALL');
-  const [speedMode, setSpeedMode] = useState<'SMART' | 'TURBO' | 'FAST' | 'NORMAL' | 'SAFE'>('FAST');
+  const [speedMode, setSpeedMode] = useState<SpeedModeKey>('FAST');
   const [delayMs, setDelayMs] = useState<number>(1800);
+  // "Tùy chỉnh" chỉ tồn tại ở giao diện: speedMode gửi backend giữ nguyên, người dùng tự chọn giãn cách
+  const [customSpeed, setCustomSpeed] = useState<boolean>(false);
   const [enableHumanBehavior, setEnableHumanBehavior] = useState<boolean>(true);
   const [fastSwitch, setFastSwitch] = useState<boolean>(true);
   const [antiCheckpointGuard, setAntiCheckpointGuard] = useState<boolean>(true);
@@ -1825,7 +1848,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         setDelayMs(12000); // 12 giây an toàn khi có bình luận
       }
     } else if (delayMs >= 12000) {
-      setDelayMs(speedMode === 'TURBO' ? 1200 : speedMode === 'FAST' ? 1800 : speedMode === 'SAFE' ? 4500 : 2200);
+      setDelayMs(SPEED_PRESETS.find((p) => p.key === speedMode)?.delayMs ?? 2200);
     }
   }, [engagementMode, speedMode]);
 
@@ -3902,7 +3925,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     setActorMode('FANPAGES');
     setSelectedAccountId('ALL_VIAS');
     setSelectedPageIds(scannedPages.map((p) => p.id));
-    message.success(`Đã kích hoạt Preset: Thả Like toàn bộ ${scannedPages.length} Fanpage!`);
+    message.success(`Đã áp dụng: 1 link · Chỉ like 👍 · Chọn tất cả ${scannedPages.length} Page của mọi Via`);
   };
 
   const handleQuickPresetAiSeeding = async () => {
@@ -3912,10 +3935,12 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     setActorMode('FANPAGES');
     setSelectedAccountId('ALL_VIAS');
     setSelectedPageIds(scannedPages.map((p) => p.id));
+    const applied = `Đã áp dụng: 1 link · Like + bình luận · Trộn cảm xúc tự nhiên · ${scannedPages.length} Page`;
     if (targetPostUrl.trim()) {
+      message.success(`${applied}. AI đang viết bình luận theo nội dung bài...`);
       handleGenerateAiComments();
     } else {
-      message.info('Đã bật chế độ Seeding (Like + Bình Luận AI). Vui lòng dán link bài viết để AI đọc nội dung!');
+      message.info(`${applied}. Dán link bài viết để AI đọc nội dung và viết bình luận.`);
     }
   };
 
@@ -3923,7 +3948,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
     setBuffMode('SINGLE');
     setActorMode('VIAS');
     setSelectedAccountId('ALL_VIAS');
-    message.success(`Đã chuyển sang Dàn ${fbAccounts.length} Via cá nhân!`);
+    message.success(`Đã áp dụng: 1 link · Dùng ${fbAccounts.length} nick cá nhân thay cho Page (giữ nguyên hình thức và cảm xúc)`);
   };
 
   // Kiểm tra xem hiện tại có bất kỳ tác vụ buff nào đang chạy không (0 bài thì làm mờ nút)
@@ -3965,14 +3990,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         </div>
 
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          <Button
-            onClick={() => {
-              fetchSettings();
-              setActiveTabKey('system-settings');
-            }}
-          >
-            Cài đặt
-          </Button>
           <Button loading={checkingViaHealth} onClick={handleRunViaHealthCheck}>
             Kiểm tra Via
           </Button>
@@ -3985,7 +4002,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             >
               Khôi phục hoạt động
             </Button>
-          ) : isAnyBuffRunning ? (
+          ) : isAnyBuffRunning && (
             <Tooltip title="Đang có bài buff chạy! Bấm để lập tức ngắt tiến trình nhằm bảo vệ tài khoản">
               <Button
                 danger
@@ -3993,16 +4010,6 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                 icon={<StopOutlined />}
                 onClick={handleEmergencyStop}
                 className="bg-rose-600 hover:bg-rose-500 text-white font-bold animate-pulse shadow-lg shadow-rose-600/40"
-              >
-                Dừng khẩn cấp
-              </Button>
-            </Tooltip>
-          ) : (
-            <Tooltip title="Hiện không có tác vụ nào đang chạy (0 bài). Nút sẽ tự động bật sáng khi có bài bắt đầu buff để tránh bấm nhầm!">
-              <Button
-                disabled
-                icon={<StopOutlined />}
-                className="opacity-40 cursor-not-allowed border-slate-700 text-slate-500 bg-slate-900/40"
               >
                 Dừng khẩn cấp
               </Button>
@@ -4228,7 +4235,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                       ? 'Nhóm Facebook'
                                       : targetPostUrl.includes('/reel')
                                       ? 'Video Reels'
-                                      : 'Bài Viết'}
+                                      : 'Bài viết'}
                                   </span>
                                 )}
                               </div>
@@ -4480,33 +4487,39 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                         {/* 3 CẤU HÌNH NHANH (SMART PRESET TOOLBAR) */}
                         <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                           <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
-                            <ThunderboltFilled className="text-amber-400" /> Cấu hình nhanh:
+                            <ThunderboltFilled className="text-amber-400" /> Cấu hình nhanh
                           </span>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <button
-                              type="button"
-                              onClick={handleQuickPresetLike24}
-                              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-950/60 to-slate-900 hover:from-blue-900/60 hover:to-slate-800 border border-blue-500/30 hover:border-blue-400 text-blue-200 text-xs font-semibold transition-all cursor-pointer shadow-sm hover:shadow-blue-500/10 active:scale-[0.98] flex items-center gap-1.5"
-                            >
-                              <ThunderboltFilled className="text-blue-400" />
-                              <span>Toàn bộ Page ({scannedPages.length})</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleQuickPresetAiSeeding}
-                              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-950/60 to-slate-900 hover:from-purple-900/60 hover:to-slate-800 border border-purple-500/30 hover:border-purple-400 text-purple-200 text-xs font-semibold transition-all cursor-pointer shadow-sm hover:shadow-purple-500/10 active:scale-[0.98] flex items-center gap-1.5"
-                            >
-                              <RobotOutlined className="text-purple-400" />
-                              <span>Like + Bình luận AI</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleQuickPresetVias}
-                              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-950/60 to-slate-900 hover:from-emerald-900/60 hover:to-slate-800 border border-emerald-500/30 hover:border-emerald-400 text-emerald-200 text-xs font-semibold transition-all cursor-pointer shadow-sm hover:shadow-emerald-500/10 active:scale-[0.98] flex items-center gap-1.5"
-                            >
-                              <UserOutlined className="text-emerald-400" />
-                              <span>Nick cá nhân ({fbAccounts.length})</span>
-                            </button>
+                            <Tooltip title="Chuyển sang 1 link, chỉ like 👍 và chọn tất cả Page của mọi Via">
+                              <button
+                                type="button"
+                                onClick={handleQuickPresetLike24}
+                                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-950/60 to-slate-900 hover:from-blue-900/60 hover:to-slate-800 border border-blue-500/30 hover:border-blue-400 text-blue-200 text-xs font-semibold transition-all cursor-pointer shadow-sm hover:shadow-blue-500/10 active:scale-[0.98] flex items-center gap-1.5"
+                              >
+                                <ThunderboltFilled className="text-blue-400" />
+                                <span>Toàn bộ Page ({scannedPages.length})</span>
+                              </button>
+                            </Tooltip>
+                            <Tooltip title="Chuyển sang Like + bình luận, trộn cảm xúc tự nhiên, chọn tất cả Page; AI viết bình luận theo nội dung bài">
+                              <button
+                                type="button"
+                                onClick={handleQuickPresetAiSeeding}
+                                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-950/60 to-slate-900 hover:from-purple-900/60 hover:to-slate-800 border border-purple-500/30 hover:border-purple-400 text-purple-200 text-xs font-semibold transition-all cursor-pointer shadow-sm hover:shadow-purple-500/10 active:scale-[0.98] flex items-center gap-1.5"
+                              >
+                                <RobotOutlined className="text-purple-400" />
+                                <span>Like + bình luận AI</span>
+                              </button>
+                            </Tooltip>
+                            <Tooltip title="Dùng nick cá nhân của mọi Via thay cho Page; giữ nguyên hình thức và cảm xúc đang chọn">
+                              <button
+                                type="button"
+                                onClick={handleQuickPresetVias}
+                                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-950/60 to-slate-900 hover:from-emerald-900/60 hover:to-slate-800 border border-emerald-500/30 hover:border-emerald-400 text-emerald-200 text-xs font-semibold transition-all cursor-pointer shadow-sm hover:shadow-emerald-500/10 active:scale-[0.98] flex items-center gap-1.5"
+                              >
+                                <UserOutlined className="text-emerald-400" />
+                                <span>Nick cá nhân ({fbAccounts.length})</span>
+                              </button>
+                            </Tooltip>
                           </div>
                         </div>
                       </div>
@@ -4538,7 +4551,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               }`}
                             >
                               <LikeOutlined className="text-base" />
-                              <span className="text-xs font-bold">Chỉ Thả Like/Tim</span>
+                              <span className="text-xs font-bold">Chỉ thả like/tim</span>
                             </button>
                             <button
                               type="button"
@@ -4550,7 +4563,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               }`}
                             >
                               <CommentOutlined className="text-base" />
-                              <span className="text-xs font-bold">Like + Bình luận</span>
+                              <span className="text-xs font-bold">Like + bình luận</span>
                             </button>
                             <button
                               type="button"
@@ -4562,7 +4575,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               }`}
                             >
                               <EditOutlined className="text-base" />
-                              <span className="text-xs font-bold">Chỉ Bình luận</span>
+                              <span className="text-xs font-bold">Chỉ bình luận</span>
                             </button>
                           </div>
                         </div>
@@ -4673,10 +4686,10 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                             <div className="flex items-center gap-2">
                               <ControlOutlined className="text-cyan-400 text-sm" />
                               <span className="text-xs font-bold text-slate-200">
-                                Cài Đặt Nâng Cao &amp; Tốc Độ (Tùy chọn)
+                                Cài đặt nâng cao &amp; tốc độ (tùy chọn)
                               </span>
                               <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950/80 border border-cyan-800/60 px-2 py-0.5 rounded-full">
-                                {speedMode === 'SMART' ? 'Smart Pacing' : speedMode === 'TURBO' ? 'Siêu Tốc' : speedMode === 'FAST' ? 'Nhanh' : speedMode === 'SAFE' ? 'An Toàn' : 'Chuẩn'} • {concurrency} luồng • {delayMs / 1000}s • {dripFeedMode ? `${dripDurationMinutes}p Drip` : 'Chạy ngay'}
+                                {getSpeedLabel(speedMode, customSpeed, delayMs, engagementMode !== 'LIKE_ONLY')} • {concurrency} luồng • {dripFeedMode ? `rải đều ${dripDurationMinutes} phút` : 'chạy ngay'}
                               </span>
                             </div>
                             <span className="text-xs text-cyan-400 font-semibold flex items-center gap-1">
@@ -4687,7 +4700,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           {!showAdvancedSettings && (
                             <div className="px-3 pb-2.5 text-[11px] text-slate-400 flex items-center gap-1.5">
                               <CheckCircleOutlined className="text-emerald-400 text-xs shrink-0" />
-                              <span>Đang chạy ở chế độ <strong>{speedMode === 'SMART' ? 'Smart Pacing (Thích ứng an toàn)' : speedMode === 'TURBO' ? 'Siêu Tốc' : speedMode === 'FAST' ? 'Nhanh Mượt' : speedMode === 'SAFE' ? 'An Toàn' : 'Chuẩn'}</strong> ({concurrency} luồng song song, giãn cách {delayMs / 1000}s).</span>
+                              <span>Đang dùng tốc độ <strong>{getSpeedLabel(speedMode, customSpeed, delayMs, engagementMode !== 'LIKE_ONLY')}</strong>, {concurrency} luồng song song.</span>
                             </div>
                           )}
 
@@ -4695,48 +4708,44 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                             <div className="p-3 pt-0 border-t border-slate-800/80 space-y-2.5 mt-1">
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
                                 {/* TỐC ĐỘ BUFF (SPEED MODE PRESET) */}
-                                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-cyan-800/60 text-xs shadow-sm sm:col-span-2 gap-2">
-                                  <div>
-                                    <span className="text-cyan-300 font-bold block flex items-center gap-1">
-                                      <ThunderboltFilled className="text-cyan-400" /> Tốc Độ Buff (Speed Mode):
+                                <div className="flex flex-col items-stretch p-3 rounded-xl bg-slate-950/80 border border-cyan-800/60 text-xs shadow-sm sm:col-span-2 gap-2">
+                                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                                    <span className="text-cyan-300 font-bold flex items-center gap-1">
+                                      <ThunderboltFilled className="text-cyan-400" /> Tốc độ
                                     </span>
-                                    <span className="text-[10px] text-slate-400">Tối ưu Playwright, bỏ qua ảnh nặng, phản hồi tức thì</span>
+                                    <span className="text-[11px] text-slate-400">
+                                      {engagementMode !== 'LIKE_ONLY'
+                                        ? `Có bình luận nên nghỉ tối thiểu 12s giữa 2 lượt (đang: ${formatDelaySeconds(delayMs)})`
+                                        : `Nghỉ ${formatDelaySeconds(delayMs)} giữa 2 lượt like`}
+                                    </span>
                                   </div>
                                   <Segmented
+                                    block
                                     size="small"
-                                    value={speedMode}
-                                      onChange={(val) => {
-                                        const mode = val as 'SMART' | 'TURBO' | 'FAST' | 'NORMAL' | 'SAFE';
-                                        setSpeedMode(mode);
-                                        if (mode === 'SMART') {
-                                          setDelayMs(2500);
-                                          setEnableHumanBehavior(true);
-                                          setFastSwitch(true);
-                                        } else if (mode === 'TURBO') {
-                                          setDelayMs(1200);
-                                          setEnableHumanBehavior(false);
-                                          setFastSwitch(true);
-                                        } else if (mode === 'FAST') {
-                                          setDelayMs(1800);
-                                          setEnableHumanBehavior(false);
-                                          setFastSwitch(true);
-                                        } else if (mode === 'NORMAL') {
-                                          setDelayMs(2200);
-                                          setEnableHumanBehavior(true);
-                                          setFastSwitch(true);
-                                        } else if (mode === 'SAFE') {
-                                          setDelayMs(4500);
-                                          setEnableHumanBehavior(true);
-                                          setFastSwitch(true);
-                                        }
-                                      }}
-                                      options={[
-                                        { label: 'Siêu Tốc (1.2s)', value: 'TURBO' },
-                                        { label: 'Cực Nhanh (1.8s)', value: 'FAST' },
-                                        { label: 'Chuẩn (2.2s)', value: 'NORMAL' },
-                                        { label: 'Tự Động (2.5s)', value: 'SMART' },
-                                        { label: 'An Toàn (4.5s)', value: 'SAFE' },
-                                      ]}
+                                    value={customSpeed ? 'CUSTOM' : speedMode}
+                                    onChange={(val) => {
+                                      if (val === 'CUSTOM') {
+                                        // Giữ giãn cách hiện tại, backend chạy theo nhịp chuẩn
+                                        setCustomSpeed(true);
+                                        setSpeedMode('NORMAL');
+                                        return;
+                                      }
+                                      const preset = SPEED_PRESETS.find((p) => p.key === val);
+                                      if (!preset) return;
+                                      setCustomSpeed(false);
+                                      setSpeedMode(preset.key);
+                                      setDelayMs(engagementMode !== 'LIKE_ONLY' ? Math.max(delayMs, 12000) : preset.delayMs);
+                                      setEnableHumanBehavior(preset.human);
+                                      setFastSwitch(true);
+                                    }}
+                                    options={[
+                                      ...SPEED_PRESETS.map((p) => ({
+                                        label: p.name,
+                                        value: p.key,
+                                        title: `${p.name}: nghỉ ${formatDelaySeconds(p.delayMs)} giữa 2 lượt like`,
+                                      })),
+                                      { label: 'Tùy chỉnh', value: 'CUSTOM', title: 'Tự chọn thời gian nghỉ giữa 2 lượt' },
+                                    ]}
                                     className="bg-slate-900 border border-slate-700 text-slate-200"
                                   />
                                 </div>
@@ -4745,7 +4754,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   <div className="sm:col-span-2 flex items-center gap-2 p-2 rounded-lg bg-cyan-950/40 border border-cyan-800/40 text-[11px] text-cyan-300">
                                     <SafetyCertificateOutlined className="text-cyan-400 text-sm shrink-0" />
                                     <span>
-                                      <b>Safe Human Pacing đang bật:</b> Tự động giãn nhịp ({selectedPageIds.length <= 30 ? '~2.2s' : selectedPageIds.length <= 80 ? '~2.6s' : '~3.0s'}), thời gian đọc bài ~1.2s và nghỉ hạ nhiệt sau mỗi 25 page để vừa nhanh vừa hạn chế bị Facebook gắn cờ spam.
+                                      <b>Tốc độ tự động đang bật:</b> Tự động giãn nhịp ({selectedPageIds.length <= 30 ? '~2.2s' : selectedPageIds.length <= 80 ? '~2.6s' : '~3.0s'}), thời gian đọc bài ~1.2s và nghỉ hạ nhiệt sau mỗi 25 page để vừa nhanh vừa hạn chế bị Facebook gắn cờ spam.
                                     </span>
                                   </div>
                                 )}
@@ -4753,7 +4762,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   <div className="sm:col-span-2 flex items-center gap-2 p-2 rounded-lg bg-amber-950/40 border border-amber-700/50 text-[11px] text-amber-300">
                                     <ThunderboltFilled className="text-amber-400 text-sm shrink-0" />
                                     <span>
-                                      <b>Lưu ý an toàn:</b> Bạn đang chọn {selectedPageIds.length} Page với tốc độ {speedMode === 'TURBO' ? 'Siêu Tốc' : 'Cực Nhanh'}. Khuyên dùng <b>Chuẩn</b> hoặc <b>Tự Động</b> khi chạy số lượng rất lớn để tránh bị Facebook hạn chế thao tác.
+                                      <b>Lưu ý an toàn:</b> Bạn đang chọn {selectedPageIds.length} Page với tốc độ {speedMode === 'TURBO' ? 'Siêu tốc' : 'Rất nhanh'}. Khuyên dùng <b>Chuẩn</b> hoặc <b>Tự động</b> khi chạy số lượng rất lớn để tránh bị Facebook hạn chế thao tác.
                                     </span>
                                   </div>
                                 )}
@@ -4772,34 +4781,33 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   </Checkbox>
                                 </div>
 
-                                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs shadow-sm">
-                                  <div>
-                                    <span className="text-slate-200 font-bold block">Giãn cách:</span>
-                                    <span className="text-[10px] text-slate-400">Nghỉ giữa 2 nick</span>
+                                {/* Giãn cách chỉ hiện khi chọn "Tùy chỉnh" hoặc có bình luận (các mức tốc độ đã kèm sẵn giãn cách) */}
+                                {(customSpeed || engagementMode !== 'LIKE_ONLY') && (
+                                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs shadow-sm">
+                                    <div>
+                                      <span className="text-slate-200 font-bold block">Giãn cách</span>
+                                      <span className="text-[10px] text-slate-400">Nghỉ giữa 2 lượt</span>
+                                    </div>
+                                    <Select
+                                      size="small"
+                                      value={delayMs}
+                                      onChange={(val) => setDelayMs(val)}
+                                      className="w-36"
+                                      options={
+                                        engagementMode !== 'LIKE_ONLY'
+                                          ? [
+                                              { value: 12000, label: '12s (khuyên dùng)' },
+                                              { value: 16000, label: '16s (an toàn cao)' },
+                                              { value: 25000, label: '25s (rất an toàn)' },
+                                            ]
+                                          : [1200, 1800, 2200, 2500, 3500, 4500, 5000, 8000].map((v) => ({
+                                              value: v,
+                                              label: formatDelaySeconds(v),
+                                            }))
+                                      }
+                                    />
                                   </div>
-                                  <Select
-                                    size="small"
-                                    value={delayMs}
-                                    onChange={(val) => setDelayMs(val)}
-                                    className="w-36"
-                                    options={
-                                      engagementMode !== 'LIKE_ONLY'
-                                        ? [
-                                            { value: 12000, label: '12s (Khuyên dùng)' },
-                                            { value: 16000, label: '16s (An toàn cao)' },
-                                            { value: 25000, label: '25s (Siêu an toàn)' },
-                                          ]
-                                        : [
-                                            { value: 1200, label: '1.2s (Siêu Tốc)' },
-                                            { value: 1800, label: '1.8s (Cực Nhanh)' },
-                                            { value: 2200, label: '2.2s (Nhanh Mượt)' },
-                                            { value: 2500, label: '2.5s (Chuẩn Ổn Định)' },
-                                            { value: 3500, label: '3.5s (Tự Động)' },
-                                            { value: 5000, label: '5.0s (Bền Via)' },
-                                          ]
-                                    }
-                                  />
-                                </div>
+                                )}
 
                                 <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-blue-900/60 text-xs shadow-sm">
                                   <div>
@@ -4817,21 +4825,22 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   </Checkbox>
                                 </div>
 
-                                <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-cyan-900/60 text-xs shadow-sm">
-                                  <div>
-                                    <span className="text-cyan-300 font-bold block flex items-center gap-1">
+                                <div className="flex flex-col items-stretch gap-2 p-3 rounded-xl bg-slate-950/80 border border-cyan-900/60 text-xs shadow-sm sm:col-span-2">
+                                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                                    <span className="text-cyan-300 font-bold flex items-center gap-1">
                                       <ThunderboltFilled className="text-cyan-400" /> Luồng chạy song song
                                     </span>
-                                    <span className="text-[10px] text-slate-400">Chạy đa luồng tăng tốc x2 - x3</span>
+                                    <span className="text-[11px] text-slate-400">Nhiều luồng chạy nhanh hơn x2 - x3</span>
                                   </div>
                                   <Segmented
+                                    block
                                     size="small"
                                     value={concurrency}
                                     onChange={(val) => setConcurrency(Number(val))}
                                     options={[
-                                      { label: '1 Luồng', value: 1 },
-                                      { label: '2 Luồng (Khuyên dùng)', value: 2 },
-                                      { label: '3 Luồng', value: 3 },
+                                      { label: '1 luồng', value: 1 },
+                                      { label: '2 luồng (khuyên dùng)', value: 2 },
+                                      { label: '3 luồng', value: 3 },
                                     ]}
                                     className="bg-slate-900 border border-slate-700 text-slate-200"
                                   />
@@ -5058,7 +5067,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                                 {actorMode === 'VIAS'
-                                  ? `Gộp ${fbAccounts.length} Nick Via (${selectedPageIds.length}/${scannedPages.length})`
+                                  ? `Gộp ${fbAccounts.length} nick Via (${selectedPageIds.length}/${scannedPages.length})`
                                   : `Gộp ${fbAccounts.length} Via (${scannedPages.length} Fanpage)`}
                               </span>
                             )}
@@ -5106,7 +5115,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           <div className="space-y-3 p-3.5 rounded-xl border border-slate-800 bg-slate-950/70">
                             <div className="flex items-center justify-between">
                               <label className="text-xs font-bold text-slate-200">
-                                Nhập Cookie nick Facebook mẹ:
+                                Nhập cookie nick Facebook mẹ:
                               </label>
                               <span className="text-[11px] text-slate-400">
                                 (Chứa <b>c_user</b> & <b>xs</b>)
@@ -5229,7 +5238,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                           <div className="space-y-2.5 pt-1">
                             <div className="flex items-center justify-between">
                               <span className="text-xs font-bold text-slate-200">
-                                {actorMode === 'VIAS' ? 'Chọn Nick Via tương tác:' : 'Chọn Fanpage tương tác:'}{' '}
+                                {actorMode === 'VIAS' ? 'Chọn nick Via tương tác:' : 'Chọn Fanpage tương tác:'}{' '}
                                 <span className="text-blue-400 font-mono font-bold">
                                   ({selectedPageIds.length}/{scannedPages.length})
                                 </span>
@@ -5533,7 +5542,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                               v: `${selectedPageIds.length} ${actorMode === 'VIAS' ? 'nick cá nhân' : 'Page'}`,
                               muted: selectedPageIds.length === 0,
                             },
-                            { k: 'Tốc độ', v: `${concurrency} luồng · ${delayMs / 1000}s` },
+                            { k: 'Tốc độ', v: `${getSpeedLabel(speedMode, customSpeed, delayMs, engagementMode !== 'LIKE_ONLY')} · ${concurrency} luồng` },
                             {
                               k: 'Dự kiến',
                               v: runEstimate
@@ -5697,7 +5706,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                                   ? 'Dán link bài viết ở bước 1'
                                   : selectedPageIds.length === 0
                                   ? 'Chọn số Like ở bước 1 hoặc 3'
-                                  : 'Bắt đầu Chạy Ngay'}
+                                  : 'Bắt đầu chạy ngay'}
                               </Button>
                               <Button
                                 type="dashed"
