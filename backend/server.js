@@ -5328,7 +5328,8 @@ app.listen(PORT, async () => {
   // Check the MySQL Workbench connection right at startup
   const dbStatus = await db.testConnection();
   if (dbStatus.connected) {
-    console.log(`✅ Connected to MySQL Workbench (Database: ${db.dbConfig.database}) SUCCESSFULLY!`);
+    if (db.DB_DRIVER === 'sqlite') console.log(`✅ Using embedded SQLite database (${db.SQLITE_FILE})`);
+    else console.log(`✅ Connected to MySQL Workbench (Database: ${db.dbConfig.database}) SUCCESSFULLY!`);
     // Auto-load the 508 seed Fanpages if the facebook_page_accesses table is empty
     autoSeedPagesIfEmpty().catch(() => {});
     // Auto-sync completed Queue campaigns into the engagement History

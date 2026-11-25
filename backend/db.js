@@ -36,11 +36,19 @@ function saveAccountsCache(accounts) {
   }
 }
 
+// Driver: 'mysql' (dev / own server) or 'sqlite' (embedded, nothing to install).
+// The packaged desktop app (VIPLIKE_DATA_DIR set by Tauri) uses SQLite unless a DB_HOST is configured in <data>/.env.
+const IS_PACKAGED = Boolean(process.env.VIPLIKE_DATA_DIR);
+const DB_DRIVER = (
+  process.env.DB_DRIVER || (IS_PACKAGED && !process.env.DB_HOST ? 'sqlite' : 'mysql')
+).toLowerCase() === 'sqlite' ? 'sqlite' : 'mysql';
+const SQLITE_FILE = process.env.SQLITE_FILE || path.join(dataDir, 'viplike.db');
+
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '3306', 10),
   user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '26082003',
+  password: process.env.DB_PASSWORD ?? (IS_PACKAGED ? '' : '26082003'),
   database: process.env.DB_NAME || 'viplike_radiant',
   waitForConnections: true,
   connectionLimit: 25,
@@ -58,9 +66,95 @@ let pool = null;
 
 function getPool() {
   if (!pool) {
-    pool = mysql.createPool(dbConfig);
+    if (DB_DRIVER === 'sqlite') {
+      const { createSqlitePool } = require('./sqlite-pool');
+      const isNew = !fs.existsSync(SQLITE_FILE);
+      pool = createSqlitePool(SQLITE_FILE);
+      console.log(`[DB] 💾 Using embedded SQLite: ${SQLITE_FILE}`);
+      if (isNew) importLocalCachesIntoSqlite(pool);
+    } else {
+      pool = mysql.createPool(dbConfig);
+    }
   }
   return pool;
+}
+
+/**
+ * First SQLite start on a machine that ran an older build (MySQL missing → data only in JSON caches):
+ * copy those caches into the new database so no Via / license / history is lost.
+ */
+function importLocalCachesIntoSqlite(p) {
+  const db = p.raw;
+  const { toSqlDateTime } = require('./sqlite-pool');
+  const dt = (v) => {
+    if (!v) return null;
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : toSqlDateTime(d);
+  };
+  try {
+    db.exec('BEGIN');
+    const accounts = loadAccountsCache();
+    const insAcc = db.prepare(
+      `INSERT OR IGNORE INTO social_accounts (id, user_id, platform, platform_account_id, access_token, page_name,
+        account_type, proxy_url, token_status, token_checked_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const a of accounts) {
+      if (!a || a.id === undefined || a.id === null) continue;
+      insAcc.run(
+        Number(a.id), a.userId ?? 1, a.platform || 'FACEBOOK_PROFILE', String(a.platformAccountId || ''),
+        a.cookieString || a.accessToken || '', a.pageName || '', a.accountType || 'PERSONAL_PROFILE_COOKIE',
+        a.proxyUrl || '', a.tokenStatus || 'OK', dt(a.tokenCheckedAt),
+        dt(a.createdAt) || toSqlDateTime(new Date()), dt(a.updatedAt) || toSqlDateTime(new Date())
+      );
+    }
+
+    const licFile = path.join(dataDir, 'licenses_cache.json');
+    let licenses = [];
+    try {
+      if (fs.existsSync(licFile)) licenses = JSON.parse(fs.readFileSync(licFile, 'utf8')) || [];
+    } catch (_) {}
+    const insLic = db.prepare(
+      `INSERT OR IGNORE INTO software_licenses (license_key, customer_name, customer_contact, hardware_hwid, package_type,
+        max_vias, status, activated_at, expires_at, notes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const l of Array.isArray(licenses) ? licenses : []) {
+      if (!l || !l.licenseKey || !dt(l.expiresAt)) continue;
+      insLic.run(
+        l.licenseKey, l.customerName || '', l.customerContact || '', l.hardwareHwid || null, l.packageType || '1_MONTH',
+        l.maxVias || 50, l.status || 'ACTIVE', dt(l.activatedAt), dt(l.expiresAt), l.notes || '',
+        dt(l.createdAt) || toSqlDateTime(new Date())
+      );
+    }
+
+    const logsFile = path.join(dataDir, 'buff_logs_cache.json');
+    let logs = [];
+    try {
+      if (fs.existsSync(logsFile)) logs = JSON.parse(fs.readFileSync(logsFile, 'utf8')) || [];
+    } catch (_) {}
+    const insLog = db.prepare(
+      `INSERT OR IGNORE INTO buff_logs (id, run_type, target_url, reaction_type, engagement_mode, account_name, total_pages,
+        target_likes, success_count, already_liked_count, failed_count, comment_count, details, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const l of Array.isArray(logs) ? logs : []) {
+      if (!l || !l.id || !l.targetUrl) continue;
+      insLog.run(
+        String(l.id), l.type || 'SINGLE', l.targetUrl, l.reactionType || 'LIKE', l.engagementMode || null,
+        l.accountName || null, Number(l.totalPages) || 0, l.targetLikes ?? null, Number(l.successCount) || 0,
+        Number(l.alreadyLikedCount) || 0, Number(l.failedCount) || 0, Number(l.commentCount) || 0,
+        JSON.stringify(Array.isArray(l.details) ? l.details : []), dt(l.createdAt) || toSqlDateTime(new Date())
+      );
+    }
+    db.exec('COMMIT');
+    console.log(
+      `[DB] 📥 Imported local caches into SQLite: ${accounts.length} accounts, ${licenses.length || 0} licenses, ${logs.length || 0} logs`
+    );
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (_) {}
+    console.warn('[DB] ⚠️ Could not import local caches into SQLite:', e.message);
+  }
 }
 
 let performanceIndexesReady = false;
@@ -118,12 +212,11 @@ async function testConnection() {
       success: true,
       connected: true,
       usingCache: false,
-      config: {
-        host: dbConfig.host,
-        port: dbConfig.port,
-        database: dbConfig.database,
-        user: dbConfig.user,
-      },
+      driver: DB_DRIVER,
+      config:
+        DB_DRIVER === 'sqlite'
+          ? { driver: 'sqlite', file: SQLITE_FILE, database: path.basename(SQLITE_FILE) }
+          : { host: dbConfig.host, port: dbConfig.port, database: dbConfig.database, user: dbConfig.user },
       tables: tables.map((r) => Object.values(r)[0]),
     };
   } catch (err) {
@@ -134,6 +227,7 @@ async function testConnection() {
       connected: false,
       usingCache: cachedAccounts.length > 0,
       cachedCount: cachedAccounts.length,
+      driver: DB_DRIVER,
       config: {
         host: dbConfig.host,
         port: dbConfig.port,
@@ -1391,6 +1485,8 @@ async function syncUsersToDb(users = []) {
 
 module.exports = {
   dbConfig,
+  DB_DRIVER,
+  SQLITE_FILE,
   getPool,
   testConnection,
   getSocialAccounts,

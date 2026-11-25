@@ -4,5 +4,6 @@ export interface DbStatus {
   cachedCount?: number;
   loading: boolean;
   database?: string;
+  driver?: 'mysql' | 'sqlite';
   error?: string;
 }

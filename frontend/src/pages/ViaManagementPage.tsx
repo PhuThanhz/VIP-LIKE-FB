@@ -124,6 +124,7 @@ export interface ViaManagementPageProps {
     usingCache?: boolean;
     cachedCount?: number;
     database?: string;
+    driver?: 'mysql' | 'sqlite';
     error?: string;
   };
   onCheckDb?: () => void;
@@ -1724,7 +1725,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                 dbStatus.connected ? 'bg-emerald-400' : dbStatus.usingCache ? 'bg-amber-400' : 'bg-rose-500'
               }`}
             />
-            {dbStatus.connected ? 'Synced' : dbStatus.usingCache ? 'Using cache' : 'Disconnected'}
+            {dbStatus.connected ? (dbStatus.driver === 'sqlite' ? 'Saved on this machine' : 'Synced') : dbStatus.usingCache ? 'Using cache' : 'Disconnected'}
           </div>
           <div className="text-xs text-slate-500 mt-1">
             {dbStatus.usingCache && !dbStatus.connected ? `${accounts.length} temporary profiles` : 'Click to recheck'}

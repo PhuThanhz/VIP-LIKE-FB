@@ -28,6 +28,7 @@ const RUNTIME_FILES = [
   'server.js',
   'paths.js',
   'db.js',
+  'sqlite-pool.js',
   'state-store.js',
   'fb-buff-tool.js',
   'avatar-tool.js',

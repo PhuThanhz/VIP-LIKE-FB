@@ -48,6 +48,7 @@ const isSameDbStatus = (a: DbStatus, b: DbStatus) =>
   a.usingCache === b.usingCache &&
   a.cachedCount === b.cachedCount &&
   a.database === b.database &&
+  a.driver === b.driver &&
   a.error === b.error;
 
 const useDbStatus = () => {
@@ -68,6 +69,7 @@ const useDbStatus = () => {
             connected: true,
             usingCache: false,
             database: res.data.config?.database || 'viplike_radiant',
+            driver: res.data?.driver === 'sqlite' ? 'sqlite' : 'mysql',
             loading: false,
           });
         } else {
