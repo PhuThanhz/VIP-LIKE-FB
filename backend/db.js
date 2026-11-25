@@ -26,7 +26,7 @@ function loadAccountsCache() {
 }
 
 function saveAccountsCache(accounts) {
-  if (pool) return; // MySQL Workbench is already the primary source
+  // Always save to accounts_cache.json as durable local backup
   try {
     const tmp = `${ACCOUNTS_CACHE_FILE}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(accounts, null, 2), 'utf8');
@@ -490,7 +490,7 @@ function loadLicensesCache() {
 }
 
 function saveLicensesCache(licenses) {
-  if (pool) return; // MySQL Workbench is already the primary source
+  // Always save to licenses_cache.json as durable local backup
   try {
     const tmp = `${LICENSES_CACHE_FILE}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(licenses, null, 2), 'utf8');
@@ -782,7 +782,7 @@ function loadBuffLogsCache() {
 }
 
 function saveBuffLogsCache(logs) {
-  if (pool) return; // MySQL Workbench is already the primary source
+  // Always save to buff_logs_cache.json as durable local backup
   try {
     const sorted = [...logs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     const tmp = `${BUFF_LOGS_CACHE_FILE}.tmp`;
@@ -1045,7 +1045,7 @@ function loadTelegramNotifsCache() {
 }
 
 function saveTelegramNotifsCache(list) {
-  if (pool) return; // MySQL Workbench is already the primary source
+  // Always save to telegram_notifications_cache.json as durable local backup
   try {
     const sorted = [...list]
       .sort((a, b) => new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt))

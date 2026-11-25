@@ -63,7 +63,7 @@ function createStateStore({ dataDir = require('./paths').DATA_DIR, keys = KEYS, 
   }
 
   function writeFile(key, value) {
-    if (db) return; // MySQL Workbench is already the primary source, no need to write the JSON file
+    // Always persist to local JSON file so standalone desktop app survives restarts without MySQL
     try {
       const fp = filePath(key);
       const tmp = `${fp}.tmp`;
