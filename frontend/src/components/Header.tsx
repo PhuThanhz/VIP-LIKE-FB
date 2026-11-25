@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import {
@@ -8,6 +8,7 @@ import {
   UserOutlined,
   LogoutOutlined,
   KeyOutlined,
+  LockOutlined,
   PictureOutlined,
   UserAddOutlined,
   DownOutlined,
@@ -46,6 +47,13 @@ const HeaderComponent: React.FC<HeaderProps> = ({
   const [wallpaperModalOpen, setWallpaperModalOpen] = useState(false);
   const [telemetryModalOpen, setTelemetryModalOpen] = useState(false);
 
+  // If user is logged in with default password, prompt them to change it on first entry
+  useEffect(() => {
+    if (currentUser?.isDefaultPassword) {
+      setAccountModalTab('change-password');
+    }
+  }, [currentUser?.isDefaultPassword]);
+
   const { totalDeadCount, openModal } = useCookieAlert();
   const displayName = currentUser.fullName || currentUser.username;
   const initial = (displayName || '?').trim().charAt(0).toUpperCase();
@@ -63,6 +71,7 @@ const HeaderComponent: React.FC<HeaderProps> = ({
     },
     { type: 'divider' },
     { key: 'profile', icon: <UserOutlined />, label: 'Account', onClick: () => setAccountModalTab('profile') },
+    { key: 'change-password', icon: <LockOutlined className="text-amber-400" />, label: 'Đổi mật khẩu', onClick: () => setAccountModalTab('change-password') },
     { key: 'license', icon: <KeyOutlined />, label: 'License', onClick: () => setAccountModalTab('license') },
     ...(admin
       ? [{ key: 'create-user', icon: <UserAddOutlined />, label: 'Create account', onClick: () => setAccountModalTab('create-user') }]

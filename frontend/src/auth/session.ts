@@ -6,6 +6,7 @@ export interface CurrentUser {
   email: string;
   fullName: string;
   role: string;
+  isDefaultPassword?: boolean;
 }
 
 export const TOKEN_KEY = 'viplike_token';
@@ -58,6 +59,7 @@ export const parseAuthResponse = (body: any): { token: string; user: CurrentUser
       email: raw.email || '',
       fullName: raw.fullName || raw.username,
       role: raw.role || 'USER',
+      isDefaultPassword: Boolean(raw.isDefaultPassword || body.isDefaultPassword || data.isDefaultPassword),
     },
   };
 };

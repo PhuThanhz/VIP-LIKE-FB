@@ -1027,8 +1027,8 @@ const authHandler = {
       // Compare the password against the scrypt hash (timing-safe)
       let isMatch = user ? await verifyPassword(password.trim(), user.password) : false;
 
-      // Fallback for default seed accounts (e.g. if an older build stored a random seed or needs reset)
-      if (!isMatch && user) {
+      // Fallback for default seed accounts (only before the user has customized their password)
+      if (!isMatch && user && !user.passwordChangedAt) {
         const uLower = String(user.username || '').toLowerCase();
         const expectedAdminPass = process.env.ADMIN_PASSWORD || 'admin';
         if (
@@ -1053,6 +1053,13 @@ const authHandler = {
 
       loginFailures.delete(rateKey);
 
+      // Check if the user logged in with a default initial password
+      const uLower = String(user.username || '').toLowerCase();
+      const expectedAdminPass = process.env.ADMIN_PASSWORD || 'admin';
+      const isDefault =
+        (uLower === 'admin' && password.trim() === expectedAdminPass) ||
+        ((uLower === 'thanhan' || uLower === 'huynhthanhphu') && password.trim() === '123');
+
       // Generate a standard RFC 7519 HMAC-SHA256 JWT (valid for 10 days)
       const token = generateJwtToken(user, 86400 * 10);
       return res.json({
@@ -1065,6 +1072,7 @@ const authHandler = {
           email: user.email,
           fullName: user.fullName || user.username,
           role: user.role || 'USER',
+          isDefaultPassword: isDefault,
         },
         data: {
           token,
@@ -1074,6 +1082,7 @@ const authHandler = {
           email: user.email,
           fullName: user.fullName || user.username,
           role: user.role || 'USER',
+          isDefaultPassword: isDefault,
         },
       });
     } catch (err) {
@@ -1117,7 +1126,7 @@ const authHandler = {
       return res.status(500).json({ success: false, error: err.message });
     }
   },
-  me: (req, res) => {
+  me: async (req, res) => {
     const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader;
     if (!token) {
@@ -1127,6 +1136,21 @@ const authHandler = {
     if (!decoded) {
       return res.status(401).json({ success: false, authenticated: false, error: 'The login session (JWT) is invalid or expired.' });
     }
+    let isDefault = false;
+    try {
+      const users = loadUsers();
+      const currentUsername = decoded.sub || decoded.username;
+      const user = users.find((u) => u.id === decoded.id || String(u.username).toLowerCase() === String(currentUsername).toLowerCase());
+      if (user) {
+        const uLower = String(user.username || '').toLowerCase();
+        if (uLower === 'admin') {
+          isDefault = await verifyPassword(process.env.ADMIN_PASSWORD || 'admin', user.password);
+        } else if (uLower === 'thanhan' || uLower === 'huynhthanhphu') {
+          isDefault = await verifyPassword('123', user.password);
+        }
+      }
+    } catch (_) {}
+
     return res.json({
       success: true,
       authenticated: true,
@@ -1136,8 +1160,56 @@ const authHandler = {
         email: decoded.email,
         fullName: decoded.fullName,
         role: decoded.role,
+        isDefaultPassword: isDefault,
       },
     });
+  },
+  changePassword: async (req, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+      if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length < 4) {
+        return res.status(400).json({
+          success: false,
+          error: 'Mật khẩu mới phải có ít nhất 4 ký tự!',
+        });
+      }
+
+      const users = loadUsers();
+      const currentUsername = req.user?.username || req.user?.sub;
+      const user = users.find(
+        (u) =>
+          u.id === req.user?.id ||
+          String(u.username).toLowerCase() === String(currentUsername).toLowerCase()
+      );
+
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'Không tìm thấy tài khoản!' });
+      }
+
+      if (currentPassword) {
+        const isMatch = await verifyPassword(currentPassword.trim(), user.password);
+        const uLower = String(user.username || '').toLowerCase();
+        const expectedAdminPass = process.env.ADMIN_PASSWORD || 'admin';
+        const isDefaultMatch =
+          (uLower === 'admin' && currentPassword.trim() === expectedAdminPass) ||
+          ((uLower === 'thanhan' || uLower === 'huynhthanhphu') && currentPassword.trim() === '123');
+
+        if (!isMatch && !isDefaultMatch) {
+          return res.status(400).json({ success: false, error: 'Mật khẩu hiện tại không chính xác!' });
+        }
+      }
+
+      user.password = await hashPassword(newPassword.trim());
+      user.passwordChangedAt = new Date().toISOString();
+      saveUsers(users);
+
+      return res.json({
+        success: true,
+        message: 'Đổi mật khẩu thành công! Hãy ghi nhớ mật khẩu mới của bạn.',
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
   },
 };
 
@@ -1219,6 +1291,10 @@ app.use(authenticateJwt);
 // Create a new account: ADMIN only
 app.post('/api/auth/register', requireAdmin, authHandler.register);
 app.post('/auth/register', requireAdmin, authHandler.register);
+
+// Change password for the currently logged in account
+app.post('/api/auth/change-password', authHandler.changePassword);
+app.post('/auth/change-password', authHandler.changePassword);
 
 // Real-time Proxy health and speed check
 app.post('/api/proxy/test', async (req, res) => {

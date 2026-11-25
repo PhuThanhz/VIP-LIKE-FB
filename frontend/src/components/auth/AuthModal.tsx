@@ -14,7 +14,7 @@ import { CurrentUser, isAdmin } from '../../auth/session';
 
 const { Title, Text } = Typography;
 
-export type AuthModalTab = 'profile' | 'license' | 'create-user';
+export type AuthModalTab = 'profile' | 'license' | 'change-password' | 'create-user';
 
 interface AuthModalProps {
   open: boolean;
@@ -26,7 +26,7 @@ interface AuthModalProps {
 
 const INPUT_CLASS = 'bg-slate-900 border-slate-700 text-white rounded-xl';
 
-/** Account modal for signed-in users: profile, key activation, (admin) create new account. */
+/** Account modal for signed-in users: profile, key activation, change password, (admin) create new account. */
 export const AuthModal: React.FC<AuthModalProps> = ({
   open,
   onClose,
@@ -39,11 +39,38 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [createUserForm] = Form.useForm();
   const [licenseForm] = Form.useForm();
+  const [changePassForm] = Form.useForm();
   const [hwid, setHwid] = useState('');
 
   useEffect(() => {
     getMachineHwid().then(setHwid);
   }, []);
+
+  const handleChangePassword = async (values: any) => {
+    if (values.newPassword !== values.confirmPassword) {
+      message.error('Mật khẩu xác nhận không khớp!');
+      return;
+    }
+    try {
+      setLoading(true);
+      const res = await api.post('/auth/change-password', {
+        currentPassword: values.currentPassword,
+        newPassword: values.newPassword,
+      });
+      if (res.data?.success) {
+        message.success(res.data.message || 'Đổi mật khẩu thành công!');
+        changePassForm.resetFields();
+        currentUser.isDefaultPassword = false;
+        setActiveTab('profile');
+      } else {
+        message.error(res.data?.error || 'Đổi mật khẩu thất bại!');
+      }
+    } catch (err: any) {
+      message.error(err.response?.data?.error || 'Lỗi khi đổi mật khẩu.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleCreateUser = async (values: any) => {
     try {
@@ -160,6 +187,80 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             className="bg-gradient-to-r from-amber-500 to-yellow-600 rounded-xl mt-2 h-11 text-black font-bold"
           >
             Activate License Now
+          </Button>
+        </Form>
+      ),
+    },
+    {
+      key: 'change-password',
+      label: 'Đổi mật khẩu',
+      children: (
+        <Form form={changePassForm} layout="vertical" onFinish={handleChangePassword} className="pt-2">
+          {currentUser?.isDefaultPassword && (
+            <div className="mb-3 p-2.5 bg-amber-500/15 border border-amber-500/30 rounded-xl text-xs text-amber-300 flex items-center gap-2">
+              <span>⚠️</span>
+              <span>Bạn đang dùng mật khẩu ban đầu. Hãy đặt mật khẩu mới để bảo mật tài khoản!</span>
+            </div>
+          )}
+          <Form.Item
+            name="currentPassword"
+            label={<span className="text-slate-300 text-xs font-semibold">Mật khẩu hiện tại</span>}
+            rules={[{ required: true, message: 'Vui lòng nhập mật khẩu hiện tại' }]}
+          >
+            <Input.Password
+              size="large"
+              prefix={<LockOutlined className="text-slate-500 mr-1" />}
+              placeholder="Nhập mật khẩu hiện tại..."
+              className={INPUT_CLASS}
+            />
+          </Form.Item>
+          <Form.Item
+            name="newPassword"
+            label={<span className="text-slate-300 text-xs font-semibold">Mật khẩu mới</span>}
+            rules={[
+              { required: true, message: 'Vui lòng nhập mật khẩu mới' },
+              { min: 4, message: 'Mật khẩu phải có ít nhất 4 ký tự' },
+            ]}
+          >
+            <Input.Password
+              size="large"
+              prefix={<KeyOutlined className="text-slate-500 mr-1" />}
+              placeholder="Nhập mật khẩu mới..."
+              className={INPUT_CLASS}
+            />
+          </Form.Item>
+          <Form.Item
+            name="confirmPassword"
+            label={<span className="text-slate-300 text-xs font-semibold">Xác nhận mật khẩu mới</span>}
+            dependencies={['newPassword']}
+            rules={[
+              { required: true, message: 'Vui lòng xác nhận mật khẩu mới' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('newPassword') === value) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error('Mật khẩu xác nhận không khớp!'));
+                },
+              }),
+            ]}
+          >
+            <Input.Password
+              size="large"
+              prefix={<KeyOutlined className="text-slate-500 mr-1" />}
+              placeholder="Nhập lại mật khẩu mới..."
+              className={INPUT_CLASS}
+            />
+          </Form.Item>
+          <Button
+            type="primary"
+            htmlType="submit"
+            block
+            size="large"
+            loading={loading}
+            className="bg-gradient-to-r from-cyan-500 to-blue-600 font-bold rounded-xl mt-2 h-11 border-0 shadow-lg shadow-cyan-500/20"
+          >
+            LƯU MẬT KHẨU MỚI
           </Button>
         </Form>
       ),
