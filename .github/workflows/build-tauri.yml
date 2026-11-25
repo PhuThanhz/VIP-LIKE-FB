@@ -81,6 +81,21 @@ jobs:
         shell: bash
         run: node scripts/prepare-backend-bundle.mjs
 
+      - name: Smoke-test the bundled backend
+        shell: bash
+        run: |
+          cd frontend/src-tauri/resources/backend
+          NODE=../node/node; [ -f ../node/node.exe ] && NODE=../node/node.exe
+          export PORT=3199 VIPLIKE_DATA_DIR="$RUNNER_TEMP/vl/data" VIPLIKE_PROFILES_DIR="$RUNNER_TEMP/vl/profiles"
+          export DB_HOST=127.0.0.2 DB_PORT=1 TELEGRAM_BOT_TOKEN= TELEGRAM_CHAT_ID= GEMINI_API_KEY=
+          "$NODE" server.js > "$RUNNER_TEMP/backend.log" 2>&1 &
+          PID=$!
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:3199/api/health | grep -q '"UP"'; then echo "backend UP"; kill $PID || true; exit 0; fi
+            sleep 1
+          done
+          echo "::error::bundled backend did not become healthy"; cat "$RUNNER_TEMP/backend.log"; kill $PID || true; exit 1
+
       - name: Build Tauri Application
         uses: tauri-apps/tauri-action@v0
         env:

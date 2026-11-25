@@ -56,8 +56,14 @@ export const BackendGate: React.FC<{ children: React.ReactNode }> = ({ children 
     <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center gap-3 px-6 text-center">
       {!isError && <Spin size="large" />}
       <span className={`text-xs font-mono ${isError ? 'text-red-400' : 'text-cyan-400'}`}>
-        {isError ? `Could not start the local server: ${status.replace(/^error:\s*/, '')}` : MESSAGES[status] || MESSAGES.starting}
+        {isError ? 'Could not start the local server:' : MESSAGES[status] || MESSAGES.starting}
       </span>
+      {isError && (
+        <pre className="max-w-[900px] max-h-[50vh] overflow-auto whitespace-pre-wrap text-left text-[11px] font-mono text-red-300 bg-black/40 rounded p-3 select-text">
+          {status.replace(/^error:\s*/, '')}
+          {'\n\nLogs: %APPDATA%\\com.viplike.radiant\\logs\\backend.log'}
+        </pre>
+      )}
       {isError && (
         <Button size="small" onClick={() => { setStatus('starting'); startBackend(); }}>
           Retry

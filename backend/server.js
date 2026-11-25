@@ -5164,6 +5164,14 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   });
 }
 
+// Desktop app: the Tauri shell holds our stdin open. When the app quits (or crashes) the pipe closes,
+// so shut down cleanly instead of staying behind as an orphan holding port 3100.
+if (process.env.VIPLIKE_PARENT_PIPE === '1') {
+  process.stdin.on('end', () => process.emit('SIGTERM'));
+  process.stdin.on('error', () => process.emit('SIGTERM'));
+  process.stdin.resume();
+}
+
 async function autoSeedPagesIfEmpty() {
   try {
     const pool = db.getPool();
