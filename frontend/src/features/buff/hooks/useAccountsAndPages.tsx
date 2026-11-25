@@ -8,6 +8,7 @@ import {
   getViaKey,
   isPersonalCookieAccount,
   saveStoredPagesForVia,
+  isDeadViaStatus,
 } from '../utils';
 import { getInitialSeedVias, getStoredCookieForVia, seedLocalStorageIfEmpty } from '../../../config/seedHelper';
 import {
@@ -49,9 +50,11 @@ export interface UseAccountsAndPagesDeps {
   pageSearchQuery: string;
   autoSkipAlreadyLiked: boolean;
   autoFailoverLiveVia: boolean;
+  /** Remembers how many likes the user asked for when a quick-pick could only find fewer Pages */
+  setLikeRequest: (req: { requested: number; picked: number } | null) => void;
 }
 
-/** Via/tài khoản, danh sách Fanpage theo Via, chọn Fanpage, chống trùng, ước tính thời gian chạy */
+/** Vias/accounts, Fanpage lists per Via, Fanpage selection, dedupe, run-time estimate */
 export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
   const {
     props,
@@ -80,9 +83,10 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     pageSearchQuery,
     autoSkipAlreadyLiked,
     autoFailoverLiveVia,
+    setLikeRequest,
   } = deps;
 
-  // Quản lý & Khai báo thêm i_user (Fanpage) cho từng Via
+  // Manage & declare extra i_user (Fanpages) per Via
   const queryClient = useQueryClient();
   const [managePagesModalOpen, setManagePagesModalOpen] = useState<boolean>(false);
   const [targetViaForModal, setTargetViaForModal] = useState<number | 'CUSTOM'>('CUSTOM');
@@ -137,7 +141,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     return Array.from(byCUser.values());
   }, [accounts]);
 
-  // Đồng bộ số liệu thống kê lên Sidebar Ant Design
+  // Sync stats to the Ant Design Sidebar
   useEffect(() => {
     props.onStatsUpdate?.({
       queueCount: queueItems.filter((i) => i.status === 'QUEUED').length,
@@ -189,7 +193,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     }
   }, [fbAccounts, selectedAccountId, customCookie]);
 
-  // Đồng bộ Fanpage từ Backend Cache vào LocalStorage khi khởi động
+  // Sync Fanpages from the backend cache into LocalStorage on startup
   useEffect(() => {
     seedLocalStorageIfEmpty();
     api.get('/buff-cached-pages').then((res) => {
@@ -224,7 +228,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
       return;
     }
 
-    // NẾU ĐANG CHỌN CHẾ ĐỘ DÀN VIA CÁ NHÂN: DÙNG TRỰC TIẾP TỪNG NICK VIA
+    // IN PERSONAL-VIA MODE: USE EACH VIA ACCOUNT DIRECTLY
     if (actorMode === 'VIAS') {
       if (selectedAccountId === 'ALL_VIAS') {
         const viaItems: FanpageItem[] = fbAccounts.map((a: any) => {
@@ -268,7 +272,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
       const allPages: FanpageItem[] = [];
       const seenPageIds = new Set<string>();
 
-      // Thu thập toàn bộ page của từng via
+      // Collect every page of each via
       const viaPageMaps = new Map<number, FanpageItem[]>();
 
       for (const account of fbAccounts) {
@@ -301,9 +305,9 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
         viaPageMaps.set(account.id, Array.from(map.values()));
       }
 
-      // THUẬT TOÁN CÂN BẰNG TẢI THÔNG MINH (SMART LOAD BALANCER):
-      // Ưu tiên các Via có tệp page nhỏ hơn (Hồng Phước 92, Phú 28) lên trước để phân phối đều,
-      // sau đó Via lớn (Thành An 514) gánh phần còn lại, giúp giảm tải nhiệt cho tất cả các nick mẹ.
+      // SMART LOAD BALANCER:
+      // Vias with smaller page pools (Hồng Phước 92, Phú 28) go first to spread the load evenly,
+      // then the large Via (Thành An 514) takes the rest, reducing strain on every parent account.
       const sortedAccounts = [...fbAccounts].sort((a, b) => {
         const countA = viaPageMaps.get(a.id)?.length || 0;
         const countB = viaPageMaps.get(b.id)?.length || 0;
@@ -421,7 +425,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     };
   }, [batchLinksText]);
 
-  // Ước tính thời gian chạy: ưu tiên tốc độ thực tế từ các bài đã hoàn tất, nếu chưa có thì tính theo giãn cách đang chọn
+  // Run-time estimate: prefer the real speed from completed posts, otherwise use the selected delay
   const runEstimate = useMemo(() => {
     const links = buffMode === 'BATCH' ? parsedBatchLinks.length : targetPostUrl.trim() ? 1 : 0;
     const accounts = selectedPageIds.length;
@@ -436,7 +440,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     let perPage: number;
     let basis: 'history' | 'settings';
     if (samples.length >= 3) {
-      perPage = samples[Math.floor(samples.length / 2)]; // trung vị, ít bị ảnh hưởng bởi lần chạy bất thường
+      perPage = samples[Math.floor(samples.length / 2)]; // median, less affected by outlier runs
       basis = 'history';
     } else {
       perPage = delayMs / 1000 / Math.max(1, concurrency) + 3;
@@ -448,7 +452,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
 
 
 
-  // Mutation: Lưu các Fanpage mới vào Via
+  // Mutation: save new Fanpages to a Via
   const savePagesMutation = useMutation({
     mutationFn: async (pagesToAdd: { pageName: string; platformAccountId: string }[]) => {
       const motherAccount = fbAccounts.find((a: any) => a.id === (targetViaForModal !== 'CUSTOM' ? targetViaForModal : selectedAccountId));
@@ -483,7 +487,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     onError: () => {},
   });
 
-  // Handlers lưu / xóa Fanpage cho Via cụ thể
+  // Handlers to save / remove Fanpages for a specific Via
   const handleSavePagesForTargetVia = (pagesToAdd: FanpageItem[]) => {
     const existing = getStoredPagesForVia(targetViaKey);
     const merged = [...existing];
@@ -503,7 +507,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
       setSelectedPageIds(merged.map((p) => p.id));
     }
 
-    message.success(`Đã lưu ${pagesToAdd.length} Fanpage cho Via ${modalViaAccount?.pageName || 'này'}!`);
+    message.success(`Saved ${pagesToAdd.length} Fanpages for Via ${modalViaAccount?.pageName || 'this'}!`);
 
     savePagesMutation.mutate(pagesToAdd.map((p) => ({ pageName: p.name, platformAccountId: p.id })));
   };
@@ -519,7 +523,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
       setSelectedPageIds((prev) => prev.filter((id) => id !== pageId));
     }
 
-    message.success('Đã xóa Fanpage khỏi danh sách của Via!');
+    message.success('Fanpage removed from the Via\'s list!');
     deletePageMutation.mutate(pageId);
   };
 
@@ -530,10 +534,10 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
       setScannedPages([]);
       setSelectedPageIds([]);
     }
-    message.info('Đã xóa danh sách để nhập lại.');
+    message.info('List cleared so you can re-enter it.');
   };
 
-  // Mutation: Xoá Fanpage khỏi hệ thống
+  // Mutation: remove a Fanpage from the system
   const deletePageMutation = useMutation({
     mutationFn: async (pageId: string) => {
       const acc = (accounts as any[]).find(
@@ -549,17 +553,17 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     onError: () => {},
   });
 
-  // Thống kê số lượng Page theo từng Via khi chọn ALL_VIAS
+  // Page counts per Via when ALL_VIAS is selected
   const viaGroupCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const p of scannedPages) {
-      const vName = p.viaName || 'Khác';
+      const vName = p.viaName || 'Other';
       counts[vName] = (counts[vName] || 0) + 1;
     }
     return counts;
   }, [scannedPages]);
 
-  // Set lookup tối ưu O(1) thay cho .includes() / .some() O(N*M)
+  // O(1) lookup Sets instead of O(N*M) .includes() / .some()
   const selectedPageIdsSet = useMemo(() => new Set(selectedPageIds), [selectedPageIds]);
   const alreadyLikedPageIdsSet = useMemo(
     () => new Set(alreadyLikedPagesForUrl.map((al) => al.pageId)),
@@ -597,12 +601,40 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     );
   }, [scannedPages, pageSearchQuery, viaFilter, likeFilter, combinedAlreadyLikedIds]);
 
-  // Đếm số lượng Page thuộc Via hết hạn Cookie đang được người dùng chọn (O(N) thay vì O(N^2))
+  // Vias whose cookie is dead right now and how many not-yet-liked Pages that costs.
+  // Those Pages are skipped when picking, so the like target silently shrinks without this summary.
+  const deadViaSummary = useMemo(() => {
+    const byVia = new Map<string, { viaName: string; status: string; lostPages: number }>();
+    for (const p of unlikedScannedPages) {
+      if (!isDeadViaStatus(p.viaStatus)) continue;
+      const key = p.viaName || 'Via';
+      const cur = byVia.get(key) || { viaName: key, status: String(p.viaStatus), lostPages: 0 };
+      cur.lostPages++;
+      byVia.set(key, cur);
+    }
+    return Array.from(byVia.values()).sort((a, b) => b.lostPages - a.lostPages);
+  }, [unlikedScannedPages]);
+
+  // Not-yet-liked Pages that can actually run right now (live Via) = the real like ceiling for this post
+  const usableUnlikedCount = useMemo(
+    () => unlikedScannedPages.filter((p) => !isDeadViaStatus(p.viaStatus)).length,
+    [unlikedScannedPages]
+  );
+
+  const describeDeadVias = useCallback(
+    () =>
+      deadViaSummary
+        .map((v) => `${v.viaName} (${v.status === 'CHECKPOINT' ? 'checkpoint' : 'cookie expired'}, ${v.lostPages} Pages)`)
+        .join(', '),
+    [deadViaSummary]
+  );
+
+  // Count selected Pages that belong to cookie-expired Vias (O(N) instead of O(N^2))
   const expiredPagesSelectedCount = useMemo(() => {
-    return scannedPages.filter((p) => selectedPageIdsSet.has(p.id) && p.viaStatus === 'EXPIRED').length;
+    return scannedPages.filter((p) => selectedPageIdsSet.has(p.id) && isDeadViaStatus(p.viaStatus)).length;
   }, [scannedPages, selectedPageIdsSet]);
 
-  // Chọn N Page theo thuật toán phân bổ đều Round-Robin giữa các Via mẹ
+  // Pick N Pages spread evenly across parent Vias (round-robin)
   const pickBalancedPagesFromPool = useCallback((pool: FanpageItem[], count: number): FanpageItem[] => {
     if (pool.length === 0 || count <= 0) return [];
     const targetCount = Math.min(count, pool.length);
@@ -631,7 +663,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     return selectedList;
   }, []);
 
-  // Tự động loại bỏ & đổi sang Page chưa like ngay khi phát hiện bài viết đã có lịch sử tương tác
+  // Automatically drop & swap to not-yet-liked Pages as soon as the post is found to have engagement history
   useEffect(() => {
     if (!autoSkipAlreadyLiked || combinedAlreadyLikedIds.size === 0 || selectedPageIds.length === 0) return;
     const overlapCount = selectedPageIds.filter((id) => combinedAlreadyLikedIds.has(id)).length;
@@ -643,7 +675,7 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
       (p) =>
         !combinedAlreadyLikedIds.has(p.id) &&
         !keptSet.has(p.id) &&
-        (!autoFailoverLiveVia || p.viaStatus !== 'EXPIRED')
+        (!autoFailoverLiveVia || !isDeadViaStatus(p.viaStatus))
     );
     const fallbackUnliked =
       availableUnliked.length >= overlapCount
@@ -655,28 +687,28 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     setSelectedPageIds(nextIds);
 
     if (nextIds.length === 0) {
-      message.warning(`Tất cả ${overlapCount} Fanpage đang chọn đều đã like bài viết này trước đó!`);
+      message.warning(`All ${overlapCount} selected Fanpages have already liked this post!`);
     } else if (replacements.length > 0) {
       message.info(
-        `🛡️ Đã tự động bỏ ${overlapCount} Page đã like trước và đổi sang ${replacements.length} Page chưa like!`
+        `🛡️ Automatically dropped ${overlapCount} Pages that already liked and swapped in ${replacements.length} Pages that haven't!`
       );
     } else {
-      message.info(`🛡️ Đã tự động bỏ chọn ${overlapCount} Page đã like bài viết này trước đó.`);
+      message.info(`🛡️ Automatically deselected ${overlapCount} Pages that already liked this post.`);
     }
   }, [autoSkipAlreadyLiked, combinedAlreadyLikedIds, selectedPageIds, scannedPages, autoFailoverLiveVia, pickBalancedPagesFromPool]);
 
-  // Tự động thay thế toàn bộ Page thuộc Via hết cookie bằng Page từ các Via đang LIVE
+  // Automatically replace every Page of a cookie-expired Via with Pages from LIVE Vias
   const handleReplaceExpiredPagesWithLiveOnes = () => {
     const expiredSelected = scannedPages.filter(
-      (p) => selectedPageIdsSet.has(p.id) && p.viaStatus === 'EXPIRED'
+      (p) => selectedPageIdsSet.has(p.id) && isDeadViaStatus(p.viaStatus)
     );
     if (expiredSelected.length === 0) {
-      message.info('Không có Page nào thuộc Via hết cookie trong danh sách đang chọn.');
+      message.info('No selected Pages belong to a cookie-expired Via.');
       return;
     }
     const unselectedLivePages = scannedPages.filter(
       (p) =>
-        p.viaStatus !== 'EXPIRED' &&
+        !isDeadViaStatus(p.viaStatus) &&
         !selectedPageIdsSet.has(p.id) &&
         !combinedAlreadyLikedIds.has(p.id)
     );
@@ -691,14 +723,14 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     setSelectedPageIds(newSelected);
     if (replacement.length > 0) {
       message.success(
-        `🛡️ [Auto-Failover] Đã tự động thay thế ${replacement.length}/${needed} Page từ các Via LIVE đang hoạt động tốt!`
+        `🛡️ [Auto-Failover] Automatically replaced ${replacement.length}/${needed} Pages from healthy LIVE Vias!`
       );
     } else {
-      message.warning('Không tìm thấy thêm Page dự phòng từ Via Live để bù vào.');
+      message.warning('No more backup Pages found on live Vias to fill in.');
     }
   };
 
-  // Chọn tất cả Fanpage chưa like (hoặc toàn bộ nếu tắt chống trùng)
+  // Select every not-yet-liked Fanpage (or all of them if dedupe is off)
   const handleSelectAllUnliked = () => {
     const currentScanned = viaFilter !== 'ALL'
       ? scannedPages.filter((p) => p.viaName === viaFilter || String(p.viaAccountId) === viaFilter)
@@ -706,12 +738,12 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     if (currentScanned.length === 0) return;
     const currentUnliked = currentScanned.filter((p) => !combinedAlreadyLikedIds.has(p.id));
     const basePool = autoSkipAlreadyLiked ? currentUnliked : currentScanned;
-    const livePool = basePool.filter((p) => p.viaStatus !== 'EXPIRED');
+    const livePool = basePool.filter((p) => !isDeadViaStatus(p.viaStatus));
     const finalPool = autoFailoverLiveVia && livePool.length > 0 ? livePool : basePool;
 
     if (finalPool.length === 0) {
       setSelectedPageIds([]);
-      message.warning(`Tất cả Fanpage${viaFilter !== 'ALL' ? ` của Via [${viaFilter}]` : ''} hiện có đều đã like bài viết này rồi!`);
+      message.warning(`Every Fanpage${viaFilter !== 'ALL' ? ` of Via [${viaFilter}]` : ''} has already liked this post!`);
       return;
     }
 
@@ -719,14 +751,14 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     const skippedCount = currentScanned.length - finalPool.length;
     if (skippedCount > 0) {
       message.success(
-        `Đã chọn toàn bộ ${finalPool.length} Fanpage${viaFilter !== 'ALL' ? ` của Via [${viaFilter}]` : ''} chưa like (bỏ qua ${skippedCount} Page đã like/lỗi)!`
+        `Selected all ${finalPool.length} not-yet-liked Fanpages${viaFilter !== 'ALL' ? ` of Via [${viaFilter}]` : ''} (skipped ${skippedCount} liked/errored Pages)!`
       );
     } else {
-      message.success(`Đã chọn toàn bộ ${finalPool.length} Fanpage${viaFilter !== 'ALL' ? ` của Via [${viaFilter}]` : ''}!`);
+      message.success(`Selected all ${finalPool.length} Fanpages${viaFilter !== 'ALL' ? ` of Via [${viaFilter}]` : ''}!`);
     }
   };
 
-  // Chọn nhanh N Fanpage phân bổ cân bằng giữa các Via mẹ (CHỈ chọn những cái chưa like khi bật chống trùng)
+  // Quick-pick N Fanpages balanced across parent Vias (ONLY not-yet-liked ones when dedupe is on)
   const handleSelectRandomPages = (count: number) => {
     const currentScanned = viaFilter !== 'ALL'
       ? scannedPages.filter((p) => p.viaName === viaFilter || String(p.viaAccountId) === viaFilter)
@@ -737,12 +769,12 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     if (freshPages.length === 0) {
       setSelectedPageIds([]);
       message.warning(
-        `Tất cả ${currentScanned.length} Fanpage${viaFilter !== 'ALL' ? ` của Via [${viaFilter}]` : ''} đều đã like bài viết này trước đó!`
+        `All ${currentScanned.length} Fanpages${viaFilter !== 'ALL' ? ` of Via [${viaFilter}]` : ''} have already liked this post!`
       );
       return;
     }
-    // TỰ ĐỘNG THAY THẾ BẰNG VIA LIVE: Ưu tiên chọn 100% từ các Via đang LIVE, loại bỏ Via hết cookie
-    const liveFreshPages = freshPages.filter((p) => p.viaStatus !== 'EXPIRED');
+    // AUTO-REPLACE WITH LIVE VIAS: pick 100% from LIVE Vias, dropping cookie-expired ones
+    const liveFreshPages = freshPages.filter((p) => !isDeadViaStatus(p.viaStatus));
     const pool = autoFailoverLiveVia && liveFreshPages.length > 0 ? liveFreshPages : freshPages;
     const selectedList = viaFilter !== 'ALL'
       ? pool.slice(0, count)
@@ -750,17 +782,25 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
 
     const selected = selectedList.map((p) => p.id);
     setSelectedPageIds(selected);
+    setLikeRequest({ requested: count, picked: selected.length });
     const viaCount = new Set(selectedList.map((p) => p.viaName || 'Via')).size;
     const skippedAlreadyCount = currentScanned.length - currentUnliked.length;
 
     if (selected.length < count) {
-      message.warning(
-        `Chỉ còn ${selected.length} Fanpage chưa like${viaFilter !== 'ALL' ? ` của Via [${viaFilter}]` : ''} (đã bỏ qua ${skippedAlreadyCount} Page đã like trước)!`
-      );
+      const deadLost = pool === liveFreshPages ? freshPages.length - liveFreshPages.length : 0;
+      message.warning({
+        content:
+          `You asked for ${count} likes but only ${selected.length} Pages can like this post right now` +
+          ` (${skippedAlreadyCount} already liked it` +
+          (deadLost > 0 ? `, ${deadLost} belong to dead Vias: ${describeDeadVias()}` : '') +
+          '). ' +
+          (deadLost > 0 ? 'Update those Vias\' Cookies to use their Pages again.' : 'Each Page can like a post only once.'),
+        duration: 10,
+      });
     } else if (viaFilter !== 'ALL') {
-      message.success(`Đã chọn ${selected.length} Fanpage từ Via [${viaFilter}]!`);
+      message.success(`Selected ${selected.length} Fanpages from Via [${viaFilter}]!`);
     } else {
-      message.success(`Đã chọn cân bằng ${selected.length} Fanpage trên ${viaCount} Via sẵn sàng tương tác!`);
+      message.success(`Selected ${selected.length} Fanpages balanced across ${viaCount} ready Vias!`);
     }
   };
 
@@ -796,16 +836,16 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
         setScannedPages(merged);
         setSelectedPageIds(merged.map((p: FanpageItem) => p.id));
         message.success(
-          `Đã quét xong Facebook! Tổng cộng giữ đủ ${merged.length} Fanpage cho Via này${
-            newCount > 0 ? ` (tìm thấy thêm ${newCount} Page mới)` : ''
+          `Facebook scan complete! This Via now keeps ${merged.length} Fanpages${
+            newCount > 0 ? ` (found ${newCount} new Pages)` : ''
           }.`
         );
       } else {
-        message.warning('Không tìm thấy Fanpage nào hoặc cookie hết hạn.');
+        message.warning('No Fanpages found or the cookie has expired.');
       }
     },
     onError: (err: any) => {
-      message.error(`Lỗi khi quét Fanpage: ${err.response?.data?.error || err.message}`);
+      message.error(`Error scanning Fanpages: ${err.response?.data?.error || err.message}`);
     },
   });
 
@@ -836,6 +876,8 @@ export function useAccountsAndPages(deps: UseAccountsAndPagesDeps) {
     alreadyLikedPageIdsSet,
     combinedAlreadyLikedIds,
     unlikedScannedPages,
+    deadViaSummary,
+    usableUnlikedCount,
     filteredPages,
     expiredPagesSelectedCount,
     handleReplaceExpiredPagesWithLiveOnes,

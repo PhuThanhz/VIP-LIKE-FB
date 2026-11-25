@@ -40,11 +40,11 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
 
   const handleApplyCustomUrl = () => {
     if (!inputUrl.trim()) {
-      message.warning('Vui lòng dán liên kết ảnh hợp lệ');
+      message.warning('Please paste a valid image link');
       return;
     }
     setCustomUrl(inputUrl.trim());
-    message.success('Đã áp dụng hình nền tùy chỉnh thành công!');
+    message.success('Custom wallpaper applied!');
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -52,20 +52,20 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      message.error('Vui lòng chọn tệp hình ảnh (.jpg, .png, .webp)');
+      message.error('Please choose an image file (.jpg, .png, .webp)');
       return;
     }
 
     if (file.size > 10 * 1024 * 1024) {
-      message.error('Kích thước ảnh tối đa là 10MB');
+      message.error('Maximum image size is 10MB');
       return;
     }
 
     try {
       await uploadCustomImage(file);
-      message.success('Tải ảnh nền từ máy tính thành công!');
+      message.success('Wallpaper uploaded from your computer!');
     } catch {
-      message.error('Không thể đọc file ảnh, vui lòng thử lại');
+      message.error('Could not read the image file, please try again');
     }
   };
 
@@ -83,13 +83,13 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
           </div>
           <div>
             <div className="text-sm font-bold text-slate-100 flex items-center gap-2">
-              Bộ Sưu Tập Hình Nền & Hiệu Ứng Kính Mờ
+              Wallpaper Gallery & Frosted Glass Effects
               <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
                 PhuSocial Edition
               </span>
             </div>
             <div className="text-[11px] text-slate-400 font-normal">
-              Thay đổi hình nền phía sau và độ mờ kính mờ (Glassmorphism) theo phong cách của bạn
+              Change the background image and frosted glass (Glassmorphism) blur to suit your style
             </div>
           </div>
         </div>
@@ -108,7 +108,7 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
             }`}
           >
             <PictureOutlined />
-            <span>Bộ Sưu Tập Mẫu ({WALLPAPER_PRESETS.length})</span>
+            <span>Preset Gallery ({WALLPAPER_PRESETS.length})</span>
           </button>
 
           <button
@@ -120,7 +120,7 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
             }`}
           >
             <UploadOutlined />
-            <span>Tải Ảnh Riêng / Link Online</span>
+            <span>Upload Your Own / Online Link</span>
           </button>
 
           <button
@@ -132,7 +132,7 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
             }`}
           >
             <SlidersOutlined />
-            <span>Chỉnh Độ Tối & Xóa Phông</span>
+            <span>Darkness & Blur</span>
           </button>
         </div>
 
@@ -166,7 +166,7 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
                           <div className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center mb-1">
                             ⬛
                           </div>
-                          <span className="text-[10px] font-mono">Chế độ Đen Tuyền</span>
+                          <span className="text-[10px] font-mono">Pure Black Mode</span>
                         </div>
                       )}
 
@@ -179,7 +179,7 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
 
                       {preset.id === 'alpine-mist' && (
                         <div className="absolute bottom-2 left-2 bg-indigo-950/90 border border-indigo-700/60 text-indigo-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
-                          ★ Ảnh Mẫu Chuẩn
+                          ★ Standard Preset
                         </div>
                       )}
                     </div>
@@ -218,10 +218,10 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
                 <UploadOutlined className="text-xl" />
               </div>
               <div className="text-xs font-bold text-slate-200">
-                Tải ảnh từ máy tính của bạn
+                Upload an image from your computer
               </div>
               <div className="text-[11px] text-slate-400 mt-1 max-w-sm mx-auto">
-                Hỗ trợ tệp PNG, JPG, WEBP lên đến 10MB. Ảnh sẽ được lưu cục bộ trên trình duyệt của bạn.
+                Supports PNG, JPG, WEBP up to 10MB. The image is stored locally in your browser.
               </div>
               <Button
                 type="primary"
@@ -229,7 +229,7 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
                 icon={<UploadOutlined />}
                 className="mt-3 bg-blue-600 hover:bg-blue-500 text-xs font-semibold rounded-lg h-8"
               >
-                Chọn ảnh từ máy
+                Choose image
               </Button>
             </div>
 
@@ -237,10 +237,10 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
             <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/50 space-y-2">
               <div className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                 <LinkOutlined className="text-blue-400" />
-                Dán đường link ảnh trực tuyến (URL)
+                Paste an online image link (URL)
               </div>
               <div className="text-[11px] text-slate-400">
-                Nhập link ảnh từ Unsplash, Pexels, Imgur, Google Drive (direct link) hoặc bất kỳ trang web nào:
+                Enter an image link from Unsplash, Pexels, Imgur, Google Drive (direct link) or any website:
               </div>
               <div className="flex gap-2">
                 <Input
@@ -254,7 +254,7 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
                   onClick={handleApplyCustomUrl}
                   className="bg-blue-600 hover:bg-blue-500 text-xs font-semibold rounded-lg shrink-0"
                 >
-                  Áp dụng
+                  Apply
                 </Button>
               </div>
             </div>
@@ -269,8 +269,8 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
                     className="w-16 h-10 object-cover rounded-lg border border-slate-700"
                   />
                   <div>
-                    <div className="text-xs font-bold text-blue-300">Đang dùng hình nền tùy chỉnh</div>
-                    <div className="text-[10px] text-slate-400">Đã lưu trong cấu hình trình duyệt</div>
+                    <div className="text-xs font-bold text-blue-300">Using a custom wallpaper</div>
+                    <div className="text-[10px] text-slate-400">Saved in browser settings</div>
                   </div>
                 </div>
                 <Button
@@ -278,7 +278,7 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
                   onClick={() => setPreset('alpine-mist')}
                   className="text-xs border-slate-700 text-slate-300"
                 >
-                  Bỏ chọn
+                  Remove
                 </Button>
               </div>
             )}
@@ -293,10 +293,10 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs font-bold text-slate-200">
-                    Độ tối lớp kính bảo vệ chữ (Overlay Darkness)
+                    Text-protection overlay darkness (Overlay Darkness)
                   </div>
                   <div className="text-[11px] text-slate-400">
-                    Kéo sang phải để nền tối hơn (chữ siêu nét), kéo sang trái để thấy rõ ảnh nền hơn.
+                    Drag right for a darker background (crisper text), drag left to see the image more clearly.
                   </div>
                 </div>
                 <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">
@@ -312,9 +312,9 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
                 tooltip={{ formatter: (val) => `${Math.round((val || 0) * 100)}%` }}
               />
               <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                <span>25% (Nhìn rõ cảnh)</span>
-                <span>65% (Khuyên dùng chuẩn)</span>
-                <span>90% (Gần như đen)</span>
+                <span>25% (Clear view)</span>
+                <span>65% (Recommended)</span>
+                <span>90% (Almost black)</span>
               </div>
             </div>
 
@@ -323,10 +323,10 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs font-bold text-slate-200">
-                    Độ mờ hậu cảnh (Backdrop Blur Effect)
+                    Background blur (Backdrop Blur Effect)
                   </div>
                   <div className="text-[11px] text-slate-400">
-                    Hiệu ứng làm mờ phong cảnh phía sau (Bokeh), tạo chiều sâu cho các bảng điều khiển.
+                    Blurs the scenery behind (Bokeh), adding depth to the panels.
                   </div>
                 </div>
                 <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
@@ -342,9 +342,9 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
                 tooltip={{ formatter: (val) => `${val}px` }}
               />
               <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                <span>0px (Sắc nét nguyên bản)</span>
-                <span>4px (Mờ nhẹ tinh tế)</span>
-                <span>16px (Xóa phông mạnh)</span>
+                <span>0px (Original sharpness)</span>
+                <span>4px (Subtle blur)</span>
+                <span>16px (Strong blur)</span>
               </div>
             </div>
           </div>
@@ -357,11 +357,11 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
             icon={<ReloadOutlined />}
             onClick={() => {
               resetToDefault();
-              message.info('Đã khôi phục cài đặt hình nền chuẩn mẫu');
+              message.info('Default wallpaper settings restored');
             }}
             className="text-xs text-slate-400 hover:text-slate-200"
           >
-            Đặt lại mặc định
+            Reset to default
           </Button>
 
           <Button
@@ -369,7 +369,7 @@ export const WallpaperModal: React.FC<WallpaperModalProps> = ({ open, onClose })
             onClick={onClose}
             className="bg-blue-600 hover:bg-blue-500 text-xs font-semibold px-5 rounded-lg h-8 shadow-md shadow-blue-600/30"
           >
-            Đóng & Lưu
+            Close & Save
           </Button>
         </div>
       </div>

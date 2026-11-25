@@ -4,7 +4,7 @@ import { WORKER_BASE_URL } from '../../../config/axios';
 import { useVisibleInterval } from '../../../hooks/useVisibleInterval';
 import type { BuffMonitor } from '../types';
 
-/** Hàng đợi buff: 3s khi có bài đang chạy, 8s khi rảnh; dừng khi ẩn tab */
+/** Buff queue: every 3s while a post is running, 8s when idle; stops while the tab is hidden */
 export function useBuffQueue() {
   const [queueItems, setQueueItems] = useState<any[]>([]);
 
@@ -17,8 +17,8 @@ export function useBuffQueue() {
     } catch {}
   }, []);
 
-  // Chỉ phụ thuộc vào cờ "có bài đang chạy" (boolean), không phụ thuộc mảng queueItems:
-  // trước đây mỗi lần fetch tạo mảng mới → effect chạy lại → fetch ngay → vòng lặp gọi API liên tục.
+  // Depends only on the "a post is running" flag (boolean), not on the queueItems array:
+  // previously each fetch created a new array → effect re-ran → fetched immediately → endless API call loop.
   const queueHasRunning = queueItems.some((i) => i.status === 'RUNNING');
   useEffect(() => {
     fetchBuffQueue();
@@ -28,7 +28,7 @@ export function useBuffQueue() {
   return { queueItems, fetchBuffQueue };
 }
 
-/** Mục tiêu Post Hunter + cờ tạm dừng toàn cục; 15s một lần */
+/** Post Hunter monitors + global pause flag; every 15s */
 export function useBuffMonitors() {
   const [monitors, setMonitors] = useState<BuffMonitor[]>([]);
   const [postHunterPaused, setPostHunterPaused] = useState<boolean>(false);
@@ -51,7 +51,7 @@ export function useBuffMonitors() {
   return { monitors, postHunterPaused, setPostHunterPaused, fetchBuffMonitors };
 }
 
-/** Tổng quan dàn Via / BM (sức khoẻ, chống trùng, trạng thái hệ thống); 15s một lần */
+/** Via / BM fleet overview (health, dedupe, system status); every 15s */
 export function useBmOverview() {
   const [bmOverview, setBmOverview] = useState<any>(null);
 
@@ -77,7 +77,7 @@ export function useBmOverview() {
   return { bmOverview, fetchBmOverview };
 }
 
-/** Cấu hình hệ thống (Telegram, tốc độ, bảo vệ Via…); tải một lần khi mở trang */
+/** System config (Telegram, speed, Via protection…); loaded once when the page opens */
 export function useSystemSettings() {
   const [systemSettings, setSystemSettings] = useState<any>({
     telegramBotToken: '',

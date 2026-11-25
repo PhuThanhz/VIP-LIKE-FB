@@ -30,8 +30,8 @@ export class BuffStreamError extends Error {
   }
 }
 
-// Gọi /api/buff-like-stream và đọc SSE. receivedAny cho biết worker đã bắt đầu xử lý hay chưa:
-// nếu đã nhận event thì KHÔNG được chạy lại nhóm đó (tránh like/comment lặp).
+// Calls /api/buff-like-stream and reads the SSE. receivedAny tells whether the worker has started processing:
+// once an event has been received that group must NOT be re-run (avoids duplicate likes/comments).
 export async function runBuffStream(
   payload: Record<string, unknown>,
   onProgress: (event: BuffStreamProgressEvent) => void,
@@ -89,7 +89,7 @@ export async function runBuffStream(
         } else if (eventType === 'done') {
           return (data?.result || { total: 0, success: 0, failed: 0, details: [] }) as BuffRunResult;
         } else if (eventType === 'error') {
-          if (data?.cookieDead || /hết hạn|checkpoint|đăng nhập|xác minh/i.test(data?.error || '')) {
+          if (data?.cookieDead || /hết hạn|checkpoint|đăng nhập|xác minh|expired|log ?in|verif/i.test(data?.error || '')) {
             triggerCookieExpiredAlert({
               uid: data?.uid,
               viaName: data?.viaName,
@@ -97,18 +97,18 @@ export async function runBuffStream(
               isCheckpoint: data?.isCheckpoint || /checkpoint/i.test(data?.error || ''),
             });
           }
-          throw new BuffStreamError(data?.error || 'Lỗi khi thực hiện buff tương tác', true);
+          throw new BuffStreamError(data?.error || 'Error while running the engagement buff', true);
         }
       }
     }
-    throw new BuffStreamError('Kết nối tới worker bị ngắt trước khi hoàn tất', receivedAny);
+    throw new BuffStreamError('Connection to the worker dropped before completion', receivedAny);
   } catch (err: any) {
     if (err instanceof BuffStreamError) throw err;
-    throw new BuffStreamError(err?.name === 'AbortError' ? 'Đã dừng' : err?.message || 'Lỗi kết nối stream', receivedAny);
+    throw new BuffStreamError(err?.name === 'AbortError' ? 'Stopped' : err?.message || 'Stream connection error', receivedAny);
   }
 }
 
-// Nhóm Page theo Via sở hữu: mỗi Page phải chạy bằng đúng cookie của Via quản lý nó
+// Group Pages by owning Via: each Page must run with the cookie of the Via that manages it
 export function groupPagesByVia(pages: FanpageItem[], fallbackCookie: string, fallbackViaName: string): ViaGroup[] {
   const groups: ViaGroup[] = [];
   const byCookie = new Map<string, ViaGroup>();
@@ -134,7 +134,7 @@ export function summarizeBuffDetails(details: AutoBuffResultDetail[]) {
   };
 }
 
-// Đếm lại từ details để log cũ (lưu thiếu SKIPPED/UNVERIFIED) vẫn hiển thị đúng
+// Recount from details so old logs (missing SKIPPED/UNVERIFIED) still display correctly
 export function getLogCounts(log: BuffLogEntry) {
   if (!log.details?.length) {
     return {
@@ -152,7 +152,7 @@ export function getLogCounts(log: BuffLogEntry) {
   return { ...c, total, skipped: total - c.success - c.alreadyLiked - c.unverified - c.failed };
 }
 
-// Âm thanh chuông báo chiến thắng khi buff hoàn tất
+// Victory chime when a buff completes
 export function playVictoryChime() {
   try {
     const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -187,7 +187,7 @@ export const readLegacyBuffLogs = (): BuffLogEntry[] => {
   }
 };
 
-// Gộp theo id, ưu tiên bản trong `primary`, sắp xếp mới nhất trước
+// Merge by id, preferring the `primary` copy, sorted newest first
 export const mergeBuffLogs = (primary: BuffLogEntry[], secondary: BuffLogEntry[]): BuffLogEntry[] => {
   const seen = new Set(primary.map((l) => l.id));
   return [...primary, ...secondary.filter((l) => !seen.has(l.id))].sort(
@@ -273,11 +273,11 @@ export function isPersonalCookieAccount(account: any) {
 
 export const formatDelaySeconds = (ms: number) => `${Number((ms / 1000).toFixed(1))}s`;
 
-/** Nhãn tốc độ dùng chung cho badge, dòng mô tả và panel Tóm tắt */
+/** Speed label shared by the badge, description line and Summary panel */
 export const getSpeedLabel = (speedMode: string, customSpeed: boolean, delayMs: number, hasComment = false) => {
-  // Có bình luận thì giãn cách tối thiểu 12s, gọi "Rất nhanh · 12s" sẽ gây hiểu nhầm
-  if (hasComment) return `${formatDelaySeconds(delayMs)} (có bình luận)`;
-  const name = customSpeed ? 'Tùy chỉnh' : SPEED_PRESETS.find((p) => p.key === speedMode)?.name || 'Chuẩn';
+  // With comments the minimum gap is 12s, so calling it "Very fast · 12s" would be misleading
+  if (hasComment) return `${formatDelaySeconds(delayMs)} (with comments)`;
+  const name = customSpeed ? 'Custom' : SPEED_PRESETS.find((p) => p.key === speedMode)?.name || 'Standard';
   return `${name} · ${formatDelaySeconds(delayMs)}`;
 };
 
@@ -343,4 +343,9 @@ export function saveStoredPagesForVia(viaKey: string, pages: FanpageItem[]) {
   } catch (e) {
     console.error('Error saving via pages to localStorage:', e);
   }
+}
+
+/** A Via whose cookie can't be used right now (expired or checkpointed): its Pages are skipped when picking Pages */
+export function isDeadViaStatus(status?: string | null): boolean {
+  return status === 'EXPIRED' || status === 'CHECKPOINT';
 }

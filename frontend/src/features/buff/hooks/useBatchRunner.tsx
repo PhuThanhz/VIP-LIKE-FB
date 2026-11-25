@@ -15,6 +15,7 @@ import {
   playVictoryChime,
   runBuffStream,
   summarizeBuffDetails,
+  isDeadViaStatus,
 } from '../utils';
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { useMutation, type UseMutationResult } from '@tanstack/react-query';
@@ -78,7 +79,7 @@ export interface UseBatchRunnerDeps {
   setBatchLikesPerOrder: Dispatch<SetStateAction<number>>;
 }
 
-/** Khởi chạy buff: buff view, quét Fanpage, chạy ngay 1 link, chạy hàng loạt (batch) với tạm dừng/dừng/bù like */
+/** Runs buffs: view buff, Fanpage scan, run a single link now, run in bulk (batch) with pause/stop/top-up */
 export function useBatchRunner(deps: UseBatchRunnerDeps) {
   const {
     setViewProgress,
@@ -152,12 +153,12 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     onSuccess: (data) => {
       if (data.success && data.result) {
         setViewProgress({ total: targetViews, done: data.result.completed, status: 'DONE' });
-        message.success(`Đã buff xong ${data.result.completed}/${targetViews} Views cho video!`);
+        message.success(`Buffed ${data.result.completed}/${targetViews} views for the video!`);
       }
     },
     onError: (err: any) => {
       setViewProgress((prev) => ({ ...prev, status: 'IDLE' }));
-      message.error(`Lỗi buff View: ${err.response?.data?.error || err.message}`);
+      message.error(`View buff error: ${err.response?.data?.error || err.message}`);
     },
   });
 
@@ -181,7 +182,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
 
   const handleScanPages = () => {
     if (!activeCookie) {
-      message.warning('Vui lòng chọn tài khoản hoặc dán Cookie trước khi quét Fanpage!');
+      message.warning('Please choose an account or paste a Cookie before scanning Fanpages!');
       return;
     }
     scanPagesMutation.mutate(activeCookie);
@@ -189,11 +190,11 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
 
   const handleStartAutoBuff = () => {
     if (!isFacebookPostUrl(targetPostUrl)) {
-      message.warning('Vui lòng nhập link bài viết Facebook hợp lệ (https://facebook.com/...).');
+      message.warning('Please enter a valid Facebook post link (https://facebook.com/...).');
       return;
     }
     if (selectedPageIds.length === 0) {
-      message.warning('Vui lòng chọn ít nhất 1 Fanpage.');
+      message.warning('Please choose at least 1 Fanpage.');
       return;
     }
     autoBuffMutation.mutate();
@@ -201,15 +202,15 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
 
   const handleStartBatchBuff = async () => {
     if (!activeCookie) {
-      message.warning('Vui lòng chọn tài khoản hoặc dán Cookie Facebook trước!');
+      message.warning('Please choose an account or paste a Facebook Cookie first!');
       return;
     }
     if (parsedBatchLinks.length === 0) {
-      message.warning('Vui lòng dán ít nhất 1 liên kết Facebook hợp lệ vào danh sách!');
+      message.warning('Please paste at least 1 valid Facebook link into the list!');
       return;
     }
     if (scannedPages.length === 0) {
-      message.warning('Chưa có Fanpage nào được tải! Hãy bấm "Quét lại danh sách Fanpage" trước.');
+      message.warning('No Fanpages loaded yet! Click "Rescan Fanpage list" first.');
       return;
     }
 
@@ -218,25 +219,25 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
         ? scannedPages.filter((p) => selectedPageIdsSet.has(p.id))
         : scannedPages;
 
-    const liveAvailablePages = rawPages.filter((p) => p.viaStatus !== 'EXPIRED');
+    const liveAvailablePages = rawPages.filter((p) => !isDeadViaStatus(p.viaStatus));
     const availablePages =
       autoFailoverLiveVia && liveAvailablePages.length > 0 ? liveAvailablePages : rawPages;
 
     if (availablePages.length === 0) {
-      message.warning('Vui lòng chọn ít nhất 1 Fanpage để thả like!');
+      message.warning('Please choose at least 1 Fanpage to like with!');
       return;
     }
 
     if (actorMode === 'VIAS' && batchLikesPerOrder > availablePages.length) {
       message.error(
-        `Bạn đang chọn Dàn Nick cá nhân (${availablePages.length} Via) nên mỗi bài chỉ buff được tối đa ${availablePages.length} like (1 nick cá nhân chỉ like được 1 lần). Vui lòng bấm chọn "Page" (Dàn Fanpage vệ tinh) ở Bước 2 để buff đủ ${batchLikesPerOrder} like!`
+        `You selected personal accounts (${availablePages.length} Vias), so each post can get at most ${availablePages.length} likes (a personal account can like only once). Choose "Page" (satellite Fanpages) in Step 2 to reach ${batchLikesPerOrder} likes!`
       );
       return;
     }
 
     const targetLikes = Math.min(batchLikesPerOrder, availablePages.length);
 
-    // Lấy danh sách Page đã like cho từng link (hỗ trợ cả /share/) để chỉ gửi các Page CHƯA LIKE
+    // Fetch the Pages that already liked each link (supports /share/ too) so only NOT-YET-LIKED Pages are sent
     const perOrderInteractedMap = new Map<string, Set<string>>();
     if (autoSkipAlreadyLiked) {
       await Promise.all(
@@ -269,7 +270,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
           pageId: p.id,
           pageName: p.name,
           status: 'WAITING',
-          message: 'Chờ đến lượt bài viết...',
+          message: 'Waiting for this post\'s turn...',
         })),
       };
     });
@@ -277,7 +278,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     const commentLines = commentListText.split('\n').map((s) => s.trim()).filter(Boolean);
     const batchAccountName =
       selectedAccountId === 'ALL_VIAS'
-        ? `Toàn bộ dàn Via (${fbAccounts.length} Via)`
+        ? `All Vias (${fbAccounts.length} Vias)`
         : (fbAccounts as any[]).find((a) => a.id === selectedAccountId)?.pageName || 'Via Facebook';
 
     const batchStartTime = Date.now();
@@ -291,7 +292,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
 
     const batchLiveId = 'batch_' + Date.now();
 
-    // Thuật toán xoay vòng nhóm Via cho từng order dựa trên danh sách Page chưa like của chính order đó
+    // Rotate Via groups per order based on that order's own not-yet-liked Page list
     const getViaGroupsForOrder = (orderIdx: number) => {
       const orderViaGroups = groupPagesByVia(orderFreshPagesList[orderIdx] || [], activeCookie, batchAccountName);
       if (orderViaGroups.length <= 1) return orderViaGroups;
@@ -321,13 +322,13 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
         } else {
           orderDetails.push({
             pageId,
-            pageName: patch.pageName || 'Page Dự Phòng',
+            pageName: patch.pageName || 'Backup Page',
             viaName: patch.viaName,
             status: patch.status || 'RUNNING',
             likeStatus: patch.likeStatus,
             commentStatus: patch.commentStatus,
             commentText: patch.commentText,
-            message: patch.message || '⚡ Tự động bù từ kho dự phòng cho đủ KPI',
+            message: patch.message || '⚡ Auto top-up from the backup pool to reach the KPI',
             error: patch.error,
           });
         }
@@ -359,7 +360,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
         if (controller.signal.aborted || batchAbortRef.current) break;
         const currentSuccess = orderDetails.filter((d) => d.status === 'SUCCESS').length;
         if (currentSuccess >= targetLikes) {
-          console.log(`[BatchBuff] 🎯 Order ${i + 1} đã đạt đủ KPI ${currentSuccess}/${targetLikes} like. Hoàn tất sớm!`);
+          console.log(`[BatchBuff] 🎯 Order ${i + 1} reached its KPI ${currentSuccess}/${targetLikes} likes. Finishing early!`);
           break;
         }
         const group = assignedViaGroups[gIdx];
@@ -408,7 +409,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
                   pageName: ev.pageName,
                   viaName: eventViaName,
                   status: 'RUNNING',
-                  message: `[${eventViaName}] Đang mở bài và tương tác...`,
+                  message: `[${eventViaName}] Opening post and engaging...`,
                 });
                 publishOrder({ currentRunningPageName: ev.pageName });
               } else if (ev.type === 'PAGE_FINISH') {
@@ -433,7 +434,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
           }
         } catch (err: any) {
           const stopped = controller.signal.aborted || batchAbortRef.current;
-          orderError = stopped ? 'Đã dừng' : err.message;
+          orderError = stopped ? 'Stopped' : err.message;
           for (const p of group.pages) {
             const current = orderDetails.find((d) => d.pageId === p.id);
             if (current && (current.status === 'WAITING' || current.status === 'RUNNING')) {
@@ -463,7 +464,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
         status: finalStatus,
         percent: isTargetReached ? 100 : actualOrderPercent,
         currentRunningPageName: undefined,
-        ...(finalStatus === 'FAILED' ? { error: orderError || 'Không có Page nào tương tác thành công' } : {}),
+        ...(finalStatus === 'FAILED' ? { error: orderError || 'No Page engaged successfully' } : {}),
       });
 
       if (orderDetails.some((d) => d.status !== 'WAITING')) {
@@ -486,7 +487,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
       }
     };
 
-    // POOL THỰC THI ĐA LUỒNG (1 HOẶC 2 LINK SONG SONG):
+    // MULTI-WORKER EXECUTION POOL (1 OR 2 LINKS IN PARALLEL):
     const parallelWorkersCount = Math.max(1, Math.min(batchLinkConcurrency, initialOrders.length));
     let nextOrderIdx = 0;
 
@@ -507,12 +508,12 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     setIsBatchRunning(false);
     setIsBatchPaused(false);
     if (batchAbortRef.current) {
-      message.info('Đã dừng tiến trình chạy nhiều link.');
+      message.info('Stopped the multi-link run.');
     } else {
       playVictoryChime();
       notification.success({
-        message: '🎉 HOÀN TẤT CHẠY TẤT CẢ LIÊN KẾT!',
-        description: `Đã chạy xong toàn bộ ${initialOrders.length} bài viết trong danh sách (${parallelWorkersCount > 1 ? 'Chế độ song song 2 link' : 'Chế độ tuần tự'}). Báo cáo chi tiết đã lưu vào lịch sử và gửi về Telegram!`,
+        message: '🎉 ALL LINKS DONE!',
+        description: `Finished all ${initialOrders.length} posts in the list (${parallelWorkersCount > 1 ? '2-link parallel mode' : 'sequential mode'}). The detailed report was saved to history and sent to Telegram!`,
         duration: 10,
         placement: 'topRight',
       });
@@ -523,11 +524,11 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     if (isBatchPaused) {
       batchPauseRef.current = false;
       setIsBatchPaused(false);
-      message.info('Tiếp tục chạy...');
+      message.info('Resuming...');
     } else {
       batchPauseRef.current = true;
       setIsBatchPaused(true);
-      message.warning('Sẽ tạm dừng sau khi xong bài hiện tại.');
+      message.warning('Will pause after the current post finishes.');
     }
   };
 
@@ -539,13 +540,13 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     setIsBatchPaused(false);
     setBatchOrders((prev) => prev.map((o) => (o.status === 'PENDING' ? { ...o, status: 'PAUSED' } : o)));
     axios.post(`${WORKER_BASE_URL}/api/buff-live/stop`).catch(() => {});
-    message.info('Đang dừng: worker sẽ dừng sau Page hiện tại.');
+    message.info('Stopping: the worker will stop after the current Page.');
   };
 
   const handleRefillSingleOrder = (order: BatchOrder) => {
     const missing = Math.max(0, order.totalLikesTarget - (order.successLikes || 0));
     if (missing <= 0) {
-      message.info('Bài viết này đã đạt đủ mục tiêu Like!');
+      message.info('This post has already reached its Like target!');
       return;
     }
     setBuffMode('SINGLE');
@@ -553,7 +554,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     setSelectedAccountId('ALL_VIAS');
     handleSelectRandomPages(missing);
     setActiveTabKey('buff-stream');
-    message.success(`⚡ Đã chuyển sang chế độ Tương Tác Trực Tiếp và chọn sẵn ${missing} Fanpage từ kho LIVE để bù like! Bấm "Bắt đầu tương tác" để chạy.`);
+    message.success(`⚡ Switched to Live Engagement mode and preselected ${missing} Fanpages from the LIVE pool to top up likes! Click "Start engagement" to run.`);
   };
 
   const handleRefillBatchIncomplete = () => {
@@ -561,7 +562,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
       (o) => (o.successLikes || 0) < o.totalLikesTarget
     );
     if (incompleteOrders.length === 0) {
-      message.success('Tất cả các bài trong Batch đều đã đạt 100% KPI!');
+      message.success('Every post in the Batch has reached 100% of its KPI!');
       return;
     }
     const lines = incompleteOrders.map((o) => o.url).join('\n');
@@ -571,7 +572,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     setBatchLikesPerOrder(maxMissing);
     setSelectedAccountId('ALL_VIAS');
     setActiveTabKey('buff-like');
-    message.success(`⚡ Đã tải ${incompleteOrders.length} bài viết còn thiếu vào danh sách Batch với chế độ Gộp Toàn Bộ Via (${fbAccounts.length} Via)! Bấm "Bắt đầu tương tác" để chạy nốt.`);
+    message.success(`⚡ Loaded ${incompleteOrders.length} incomplete posts into the Batch list using All Vias mode (${fbAccounts.length} Vias)! Click "Start engagement" to finish them.`);
   };
 
 

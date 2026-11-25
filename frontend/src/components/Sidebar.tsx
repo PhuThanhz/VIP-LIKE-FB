@@ -18,12 +18,12 @@ interface SidebarProps {
   activeTabKey: string;
   onSelectTab: (key: string) => void;
   collapsed: boolean;
-  /** Antd gọi khi cửa sổ vượt qua breakpoint `lg` (1024px) */
+  /** Called by antd when the window crosses the `lg` breakpoint (1024px) */
   onBreakpoint: (broken: boolean) => void;
   stats?: SidebarStats;
 }
 
-/** Số nhỏ bên phải mục menu (chỉ chữ xám, không khung màu) */
+/** Small number to the right of a menu item (plain grey text, no colored box) */
 const Count: React.FC<{ value?: number }> = ({ value }) =>
   value ? <span className="ml-auto text-xs text-slate-500 tabular-nums">{value > 99 ? '99+' : value}</span> : null;
 
@@ -37,7 +37,7 @@ const renderBadge = (key: NavKey, stats: SidebarStats): React.ReactNode => {
       if (stats.deadViasCount && stats.deadViasCount > 0) {
         return (
           <span className="ml-auto flex items-center gap-1 text-[11px] font-semibold text-rose-400 bg-rose-500/20 border border-rose-500/40 px-1.5 py-0.5 rounded-full animate-pulse">
-            ⚠️ {stats.deadViasCount} Via lỗi
+            ⚠️ {stats.deadViasCount} Via errors
           </span>
         );
       }
@@ -111,14 +111,14 @@ const SidebarComponent: React.FC<SidebarProps> = ({
 
     const groupLabel = (text: string) => <span className="px-1">{text}</span>;
     return [
-      { type: 'group', label: groupLabel('Chiến dịch'), children: groups.engagement.items },
-      { type: 'group', label: groupLabel('Tài khoản'), children: groups.channels.items },
-      { type: 'group', label: groupLabel('Hệ thống'), children: groups.system.items },
+      { type: 'group', label: groupLabel('Campaigns'), children: groups.engagement.items },
+      { type: 'group', label: groupLabel('Accounts'), children: groups.channels.items },
+      { type: 'group', label: groupLabel('System'), children: groups.system.items },
     ];
   }, [collapsed, monitorsCount, queueCount, historyCount, accountsCount]);
 
   const handleMenuClick: MenuProps['onClick'] = ({ key, domEvent }) => {
-    // Bỏ focus trên item vừa click để highlight không bị dính lại
+    // Blur the clicked item so the highlight doesn't stick
     (domEvent?.currentTarget as HTMLElement | undefined)?.blur?.();
     onSelectTab(key);
   };
@@ -147,7 +147,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                   RADIANT
                 </span>
               </div>
-              <div className="text-xs text-slate-400 truncate mt-0.5">Hệ thống tương tác Meta</div>
+              <div className="text-xs text-slate-400 truncate mt-0.5">Meta engagement system</div>
             </div>
           )}
         </div>
@@ -164,7 +164,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
           />
         </div>
 
-        {/* Số phiên bản + giờ build + trạng thái cập nhật */}
+        {/* Version number + build time + update status */}
         <div className="p-2.5 border-t border-slate-800/60 shrink-0">
           <AppVersion compact={collapsed} />
         </div>

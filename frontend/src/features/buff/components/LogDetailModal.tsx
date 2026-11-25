@@ -28,7 +28,7 @@ export default function LogDetailModal({ log, onClose, onReuse }: LogDetailModal
       onCancel={onClose}
       footer={[
         <Button key="close" onClick={onClose} className="rounded-xl">
-          Đóng
+          Close
         </Button>,
         selectedLogDetail && (
           <Button
@@ -37,7 +37,7 @@ export default function LogDetailModal({ log, onClose, onReuse }: LogDetailModal
             className="bg-blue-600 hover:bg-blue-500 font-bold rounded-xl"
             onClick={() => onReuse(selectedLogDetail)}
           >
-            Nạp bài này để Buff tiếp
+            Load this post to keep buffing
           </Button>
         ),
       ]}
@@ -49,20 +49,20 @@ export default function LogDetailModal({ log, onClose, onReuse }: LogDetailModal
           <HistoryOutlined className="text-blue-400 text-lg" />
           <div>
             <div className="font-bold text-base text-slate-100">
-              Chi tiết lịch sử
+              History details
             </div>
             <div className="text-[11px] text-slate-400 font-normal">
-              Thời gian:{' '}
+              Time:{' '}
               <span className="font-mono text-slate-300">
                 {selectedLogDetail ? new Date(selectedLogDetail.createdAt).toLocaleString('vi-VN') : ''}
               </span>{' '}
-              • Chế độ:{' '}
+              • Mode:{' '}
               <span className="font-semibold text-blue-400">
                 {selectedLogDetail?.type === 'QUEUE'
-                  ? 'Hàng đợi tự động (Queue)'
+                  ? 'Auto queue (Queue)'
                   : selectedLogDetail?.type === 'BATCH'
-                  ? 'Hàng loạt (Batch)'
-                  : 'Đơn lẻ (Single)'}
+                  ? 'Bulk (Batch)'
+                  : 'Single'}
               </span>
             </div>
           </div>
@@ -74,18 +74,18 @@ export default function LogDetailModal({ log, onClose, onReuse }: LogDetailModal
           {/* Target Post Info */}
           <div className="p-3.5 bg-slate-950/50 border border-slate-800 rounded-xl space-y-2">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-200">Link bài viết mục tiêu:</span>
+              <span className="font-bold text-slate-200">Target post link:</span>
               <div className="flex items-center gap-2">
                 <Button
                   size="small"
                   icon={<CopyOutlined />}
                   onClick={() => {
                     navigator.clipboard.writeText(selectedLogDetail.targetUrl);
-                    message.success('Đã sao chép link!');
+                    message.success('Link copied!');
                   }}
                   className="text-xs"
                 >
-                  Sao chép
+                  Copy
                 </Button>
                 <Button
                   size="small"
@@ -95,7 +95,7 @@ export default function LogDetailModal({ log, onClose, onReuse }: LogDetailModal
                   onClick={() => window.open(selectedLogDetail.targetUrl, '_blank')}
                   className="text-xs"
                 >
-                  Mở Facebook
+                  Open Facebook
                 </Button>
               </div>
             </div>
@@ -103,7 +103,7 @@ export default function LogDetailModal({ log, onClose, onReuse }: LogDetailModal
               {selectedLogDetail.targetUrl}
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              <span className="text-slate-500">Cảm xúc:</span>
+              <span className="text-slate-500">Reaction:</span>
               {(() => {
                 const rObj = REACTIONS.find((r) => r.key === selectedLogDetail.reactionType) || REACTIONS[0];
                 return (
@@ -115,7 +115,7 @@ export default function LogDetailModal({ log, onClose, onReuse }: LogDetailModal
               {selectedLogDetail.accountName && (
                 <>
                   <span className="text-slate-400">•</span>
-                  <span className="text-slate-500">Tài khoản mẹ:</span>
+                  <span className="text-slate-500">Parent account:</span>
                   <Tag color="cyan">{selectedLogDetail.accountName}</Tag>
                 </>
               )}
@@ -128,25 +128,25 @@ export default function LogDetailModal({ log, onClose, onReuse }: LogDetailModal
             return (
           <div className="grid grid-cols-4 gap-2">
             <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-center">
-              <div className="text-[10px] text-slate-500 font-bold uppercase">Tổng Page</div>
+              <div className="text-[10px] text-slate-500 font-bold uppercase">Total Pages</div>
               <div className="text-lg font-semibold text-slate-100">{counts.total}</div>
             </div>
             <div className="p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-center">
-              <div className="text-[10px] text-emerald-400 font-bold uppercase">Thành công</div>
+              <div className="text-[10px] text-emerald-400 font-bold uppercase">Success</div>
               <div className="text-lg font-semibold text-emerald-400">{counts.success}</div>
             </div>
             <div className="p-2.5 rounded-xl bg-blue-950/40 border border-blue-800/60 text-center">
-              <div className="text-[10px] text-blue-400 font-bold uppercase">Đã Like Trước</div>
+              <div className="text-[10px] text-blue-400 font-bold uppercase">Already Liked</div>
               <div className="text-lg font-semibold text-blue-400">{counts.alreadyLiked}</div>
             </div>
             <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-center">
-              <div className="text-[10px] text-rose-400 font-bold uppercase">Thất bại / Lỗi</div>
+              <div className="text-[10px] text-rose-400 font-bold uppercase">Failed / Error</div>
               <div className="text-lg font-semibold text-rose-400">{counts.failed}</div>
               {counts.unverified + counts.skipped > 0 && (
                 <div className="text-[10px] text-slate-400">
-                  {counts.unverified > 0 && `${counts.unverified} chưa xác minh`}
+                  {counts.unverified > 0 && `${counts.unverified} unverified`}
                   {counts.unverified > 0 && counts.skipped > 0 && ' • '}
-                  {counts.skipped > 0 && `${counts.skipped} bỏ qua / dừng`}
+                  {counts.skipped > 0 && `${counts.skipped} skipped / stopped`}
                 </div>
               )}
             </div>
@@ -157,25 +157,25 @@ export default function LogDetailModal({ log, onClose, onReuse }: LogDetailModal
           {/* Detailed Table of Pages */}
           <div className="space-y-2">
             <div className="font-bold text-slate-200 flex items-center justify-between">
-              <span>Chi tiết từng Fanpage ({selectedLogDetail.details.length} Page):</span>
+              <span>Per-Fanpage details ({selectedLogDetail.details.length} Pages):</span>
             </div>
             <div className="max-h-72 overflow-y-auto space-y-1.5 border border-slate-800 rounded-xl p-2 bg-slate-950/50">
               {selectedLogDetail.details.map((detail, idx) => {
                 let statusTag: ReactNode;
                 if (detail.status === 'SUCCESS') {
-                  statusTag = <Tag color="success" icon={<CheckCircleFilled />}>Thành công</Tag>;
+                  statusTag = <Tag color="success" icon={<CheckCircleFilled />}>Success</Tag>;
                 } else if (detail.status === 'ALREADY_LIKED') {
-                  statusTag = <Tag color="blue" icon={<CheckOutlined />}>Đã like trước đó</Tag>;
+                  statusTag = <Tag color="blue" icon={<CheckOutlined />}>Already liked</Tag>;
                 } else if (detail.status === 'NO_BUTTON') {
-                  statusTag = <Tag color="warning">Không thấy nút Like</Tag>;
+                  statusTag = <Tag color="warning">Like button not found</Tag>;
                 } else if (detail.status === 'ERROR') {
-                  statusTag = <Tag color="error" icon={<CloseCircleFilled />}>Lỗi</Tag>;
+                  statusTag = <Tag color="error" icon={<CloseCircleFilled />}>Error</Tag>;
                 } else if (detail.status === 'UNVERIFIED') {
-                  statusTag = <Tag color="gold">Chưa xác minh</Tag>;
+                  statusTag = <Tag color="gold">Unverified</Tag>;
                 } else if (detail.status === 'SKIPPED') {
-                  statusTag = <Tag color="default">Bỏ qua / Đã dừng</Tag>;
+                  statusTag = <Tag color="default">Skipped / Stopped</Tag>;
                 } else {
-                  statusTag = <Tag color="default">Chưa chạy</Tag>;
+                  statusTag = <Tag color="default">Not run</Tag>;
                 }
 
                 return (

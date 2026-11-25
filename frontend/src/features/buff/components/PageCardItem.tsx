@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 import { Checkbox, Tag } from 'antd';
 import type { FanpageItem, PageCardItemProps } from '../types';
-import { getAvatarGradient, getInitials } from '../utils';
+import { getAvatarGradient, getInitials, isDeadViaStatus } from '../utils';
 
 export type { PageCardItemProps };
 
@@ -55,7 +55,7 @@ export const PageCardItem = memo<PageCardItemProps>(({
             <span>ID: {page.id}</span>
             {isAlreadyLiked && (
               <Tag color="orange" className="text-[9px] m-0 border-0 px-1 py-0 leading-tight">
-                Đã like
+                Liked
               </Tag>
             )}
             {actorMode === 'VIAS' ? (
@@ -69,9 +69,9 @@ export const PageCardItem = memo<PageCardItemProps>(({
                 </span>
               )
             )}
-            {page.viaStatus === 'EXPIRED' ? (
+            {isDeadViaStatus(page.viaStatus) ? (
               <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-950/90 text-rose-300 border border-rose-800/80 font-sans font-medium inline-flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> Hết cookie
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> Cookie expired
               </span>
             ) : page.viaStatus === 'OK' && selectedAccountId === 'ALL_VIAS' ? (
               <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 font-sans font-medium inline-flex items-center gap-1">

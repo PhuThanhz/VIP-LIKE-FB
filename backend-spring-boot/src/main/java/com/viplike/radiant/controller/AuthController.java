@@ -32,7 +32,7 @@ public class AuthController {
     @GetMapping("/me")
     public ApiResponse<User> me(Authentication authentication) {
         if (authentication == null) {
-            return ApiResponse.fail("Chưa đăng nhập.");
+            return ApiResponse.fail("Not logged in.");
         }
         return authService.getCurrentUser(authentication.getName());
     }

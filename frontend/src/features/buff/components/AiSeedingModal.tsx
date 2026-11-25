@@ -25,7 +25,7 @@ export interface AiSeedingModalProps {
   handleGenerateAiComments: () => void | Promise<void>;
 }
 
-/** Studio AI Seeding & Spintax: chọn kịch bản theo ngành, sinh bình luận bằng AI */
+/** AI Seeding & Spintax studio: pick an industry script, generate comments with AI */
 export default function AiSeedingModal({
   aiStudioModalOpen,
   onClose,
@@ -56,9 +56,9 @@ export default function AiSeedingModal({
               <RobotOutlined className="text-base" />
             </div>
             <div>
-              <div>AI SEEDING STUDIO & BỘ TRỘN SPINTAX</div>
+              <div>AI SEEDING STUDIO & SPINTAX MIXER</div>
               <div className="text-[11px] font-normal text-slate-400">
-                Sinh bình luận tự nhiên theo ngành hàng, chống trùng lặp và né thuật toán quét bot của Meta.
+                Generate natural comments per industry, avoiding duplicates and Meta's bot-detection scans.
               </div>
             </div>
           </div>
@@ -81,9 +81,9 @@ export default function AiSeedingModal({
         }}
       >
         <div className="space-y-4 pt-3 text-xs sm:text-sm">
-          {/* 1. Chọn Ngành Nghề / Niche */}
+          {/* 1. Choose industry / niche */}
           <div className="space-y-2">
-            <label className="font-bold text-slate-300 block">Chủ đề bài viết:</label>
+            <label className="font-bold text-slate-300 block">Post topic:</label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {Object.entries(SEEDING_NICHE_PRESETS).map(([key, item]) => {
                 const isSelected = selectedNiche === key;
@@ -108,15 +108,15 @@ export default function AiSeedingModal({
             </div>
           </div>
 
-          {/* 1.1 Nhập ngữ cảnh bài viết & Phong cách AI */}
+          {/* 1.1 Post context & AI tone */}
           <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2.5">
             <div>
               <label className="font-bold text-slate-300 block mb-1">
-                Nội dung / Tóm tắt bài viết (AI đọc ngữ cảnh):
+                Post content / summary (AI reads the context):
               </label>
               <Input.TextArea
                 rows={2}
-                placeholder="Dán tiêu đề, giá bán, hoặc thông tin bài viết (VD: Áo polo nam cotton 199k freeship toàn quốc)..."
+                placeholder="Paste the title, price or post details (e.g. Men's cotton polo 199k, free nationwide shipping)..."
                 value={aiPostPrompt}
                 onChange={(e) => setAiPostPrompt(e.target.value)}
                 className="bg-slate-950/70 border-slate-700 text-slate-100 text-xs rounded-xl"
@@ -126,7 +126,7 @@ export default function AiSeedingModal({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
                 <label className="font-semibold text-slate-400 block mb-1 text-xs">
-                  Phong cách bình luận (Tone):
+                  Comment style (Tone):
                 </label>
                 <Select
                   size="small"
@@ -134,16 +134,16 @@ export default function AiSeedingModal({
                   onChange={setAiTone}
                   className="w-full text-xs"
                   options={[
-                    { value: 'customer_inquiry', label: 'Khách hỏi mua / Tư vấn (Size, ship, giá)' },
-                    { value: 'enthusiastic', label: 'Khen ngợi / Đánh giá 5 sao (Đẹp, ưng ý)' },
-                    { value: 'expert', label: 'Hào hứng / Thảo luận (Đồng tình, chia sẻ)' },
-                    { value: 'natural', label: 'Tự nhiên tổng hợp (Đa góc nhìn)' },
+                    { value: 'customer_inquiry', label: 'Purchase inquiry / Consultation (size, shipping, price)' },
+                    { value: 'enthusiastic', label: 'Praise / 5-star review (beautiful, satisfied)' },
+                    { value: 'expert', label: 'Excited / Discussion (agreeing, sharing)' },
+                    { value: 'natural', label: 'Natural mix (multiple viewpoints)' },
                   ]}
                 />
               </div>
               <div>
                 <label className="font-semibold text-slate-400 block mb-1 text-xs">
-                  Số lượng bình luận cần tạo:
+                  Number of comments to generate:
                 </label>
                 <Select
                   size="small"
@@ -151,23 +151,23 @@ export default function AiSeedingModal({
                   onChange={setAiCount}
                   className="w-full text-xs"
                   options={[
-                    { value: 10, label: '10 bình luận' },
-                    { value: 15, label: '15 bình luận' },
-                    { value: 20, label: '20 bình luận' },
-                    { value: 30, label: '30 bình luận' },
+                    { value: 10, label: '10 comments' },
+                    { value: 15, label: '15 comments' },
+                    { value: 20, label: '20 comments' },
+                    { value: 30, label: '30 comments' },
                   ]}
                 />
               </div>
             </div>
           </div>
 
-          {/* 2. Mẫu Cấu Trúc Spintax Gốc */}
+          {/* 2. Base Spintax template */}
           <div className="space-y-1.5 p-3 rounded-xl bg-slate-950/80 border border-slate-800">
             <div className="flex items-center justify-between text-xs">
               <span className="font-bold text-slate-300">
-                Cấu trúc Spintax gốc của ngành "{SEEDING_NICHE_PRESETS[selectedNiche]?.label}":
+                Base Spintax for the "{SEEDING_NICHE_PRESETS[selectedNiche]?.label}" industry:
               </span>
-              <span className="text-[11px] text-slate-500 font-mono">Cú pháp: {'{A|B|C} {D|E}'}</span>
+              <span className="text-[11px] text-slate-500 font-mono">Syntax: {'{A|B|C} {D|E}'}</span>
             </div>
             <div className="space-y-1 font-mono text-[11px] text-blue-300 max-h-36 overflow-y-auto pr-1">
               {SEEDING_NICHE_PRESETS[selectedNiche]?.templates.map((tmpl, idx) => (
@@ -183,7 +183,7 @@ export default function AiSeedingModal({
             <div className="flex items-center justify-between">
               <span className="font-bold text-blue-300 flex items-center gap-1.5 text-xs">
                 <ThunderboltFilled className="text-amber-400" />
-                Kết quả thực tế khi Bot đi bình luận (Đã xoay Spintax ngẫu nhiên):
+                Actual result when the bot comments (Spintax randomly spun):
               </span>
               <Button
                 size="small"
@@ -191,11 +191,11 @@ export default function AiSeedingModal({
                 onClick={() => {
                   const tmpls = SEEDING_NICHE_PRESETS[selectedNiche]?.templates || [];
                   setPreviewSamples(tmpls.map(resolveSpintax));
-                  message.info('Đã xoay biến thể Spintax mới!');
+                  message.info('New Spintax variant spun!');
                 }}
                 className="text-[11px] bg-slate-900 border-slate-700 text-slate-300 hover:text-white"
               >
-                Xoay Thử Lại
+                Spin Again
               </Button>
             </div>
 
@@ -212,15 +212,15 @@ export default function AiSeedingModal({
             </div>
           </div>
 
-          {/* 3.5. Soạn thảo & Danh sách câu bình luận áp dụng thực tế */}
+          {/* 3.5. Edit & list of comments actually used */}
           <div className="space-y-2 p-3.5 rounded-xl bg-slate-950 border border-slate-800">
             <div className="flex items-center justify-between text-xs">
               <span className="font-bold text-slate-200 flex items-center gap-1.5">
                 <EditOutlined className="text-cyan-400" />
-                Danh sách câu bình luận áp dụng ({parsedCommentLines.length} câu):
+                Comments in use ({parsedCommentLines.length}):
               </span>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-slate-400">Mỗi dòng một câu</span>
+                <span className="text-[11px] text-slate-400">One per line</span>
                 {commentListText.trim() && (
                   <Button
                     size="small"
@@ -228,11 +228,11 @@ export default function AiSeedingModal({
                     danger
                     onClick={() => {
                       setCommentListText('');
-                      message.info('Đã xóa trắng danh sách bình luận');
+                      message.info('Comment list cleared');
                     }}
                     className="text-[11px] p-0 h-auto"
                   >
-                    Xóa trắng
+                    Clear
                   </Button>
                 )}
               </div>
@@ -241,16 +241,16 @@ export default function AiSeedingModal({
               rows={4}
               value={commentListText}
               onChange={(e) => setCommentListText(e.target.value)}
-              placeholder="Bạn có thể dán hoặc tự gõ thêm các câu bình luận riêng tại đây (mỗi dòng một câu)..."
+              placeholder="You can paste or type your own comments here (one per line)..."
               className="font-sans text-xs bg-slate-900 border-slate-700 text-slate-100 rounded-xl placeholder:text-slate-500"
             />
           </div>
 
-          {/* 4. Hành động Nạp Vào Chiến Dịch */}
+          {/* 4. Load into campaign actions */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
             <div className="flex items-center gap-2 text-xs text-slate-400">
               <SafetyCertificateOutlined className="text-emerald-400" />
-              <span>Bảo vệ tài khoản: 100% các Via sẽ bình luận nội dung khác nhau.</span>
+              <span>Account protection: every Via will post a different comment.</span>
             </div>
 
             <div className="flex items-center gap-2">
@@ -258,7 +258,7 @@ export default function AiSeedingModal({
                 onClick={() => onClose()}
                 className="bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700 font-semibold rounded-xl text-xs h-9"
               >
-                Hoàn tất &amp; Đóng
+                Done &amp; Close
               </Button>
               <Button
                 icon={<RobotOutlined spin={isAiGeneratingComments} />}
@@ -269,13 +269,13 @@ export default function AiSeedingModal({
                 }}
                 className="bg-blue-600 hover:bg-blue-500 text-on-accent font-bold rounded-xl text-xs h-9 border-none"
               >
-                Tạo bằng AI theo link bài
+                Generate with AI from post link
               </Button>
 
               <Button
                 onClick={() => {
                   const tmpls = SEEDING_NICHE_PRESETS[selectedNiche]?.templates || [];
-                  // Sinh 10 biến thể Spintax ngẫu nhiên
+                  // Generate 10 random Spintax variants
                   const generated: string[] = [];
                   for (let i = 0; i < 12; i++) {
                     const t = tmpls[i % tmpls.length];
@@ -284,11 +284,11 @@ export default function AiSeedingModal({
                   const existingLines = commentListText.split('\n').filter((s) => s.trim());
                   setCommentListText([...existingLines, ...generated].join('\n'));
                   onClose();
-                  message.success(`Đã nối thêm ${generated.length} bình luận vào danh sách!`);
+                  message.success(`Appended ${generated.length} comments to the list!`);
                 }}
                 className="bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700 font-semibold rounded-xl text-xs h-9"
               >
-                Thêm vào cuối
+                Append
               </Button>
 
               <Button
@@ -296,14 +296,14 @@ export default function AiSeedingModal({
                 icon={<ThunderboltFilled />}
                 onClick={() => {
                   const tmpls = SEEDING_NICHE_PRESETS[selectedNiche]?.templates || [];
-                  // Dùng trực tiếp các câu Spintax nguyên bản để bot tự xoay ở mỗi lượt cmt
+                  // Use the raw Spintax lines so the bot spins them on every comment
                   setCommentListText(tmpls.join('\n'));
                   onClose();
-                  message.success(`Đã nạp toàn bộ kịch bản Spintax chuẩn của "${SEEDING_NICHE_PRESETS[selectedNiche]?.label}"!`);
+                  message.success(`Loaded the full standard Spintax script for "${SEEDING_NICHE_PRESETS[selectedNiche]?.label}"!`);
                 }}
                 className="bg-blue-600 hover:bg-blue-500 border-none font-bold rounded-xl text-xs h-9"
               >
-                Thay toàn bộ
+                Replace all
               </Button>
             </div>
           </div>

@@ -1,15 +1,15 @@
 /**
- * db.js - Quản lý kết nối MySQL Workbench cho VIPLIKE RADIANT
- * Kết nối trực tiếp vào Database 'viplike_radiant' trên MySQL Workbench (port 3306)
- * Hỗ trợ bộ nhớ đệm tự động (Local Cache Fallback) chống gián đoạn khi MySQL bảo trì/chưa bật.
+ * db.js - Manages the MySQL Workbench connection for VIPLIKE RADIANT
+ * Connects directly to the 'viplike_radiant' Database on MySQL Workbench (port 3306)
+ * Supports an automatic Local Cache Fallback to avoid interruptions while MySQL is under maintenance/off.
  */
 
 const mysql = require('mysql2/promise');
 const fs = require('fs');
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+const { DATA_DIR } = require('./paths');
 
-const dataDir = path.join(__dirname, 'data');
+const dataDir = DATA_DIR;
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const ACCOUNTS_CACHE_FILE = path.join(dataDir, 'accounts_cache.json');
 
@@ -20,19 +20,19 @@ function loadAccountsCache() {
       if (Array.isArray(data)) return data;
     }
   } catch (e) {
-    console.warn('[DB Cache] ⚠️ Không đọc được accounts_cache.json:', e.message);
+    console.warn('[DB Cache] ⚠️ Could not read accounts_cache.json:', e.message);
   }
   return [];
 }
 
 function saveAccountsCache(accounts) {
-  if (pool) return; // Đã có MySQL Workbench làm nguồn chính
+  if (pool) return; // MySQL Workbench is already the primary source
   try {
     const tmp = `${ACCOUNTS_CACHE_FILE}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(accounts, null, 2), 'utf8');
     fs.renameSync(tmp, ACCOUNTS_CACHE_FILE);
   } catch (e) {
-    console.warn('[DB Cache] ⚠️ Không lưu được accounts_cache.json:', e.message);
+    console.warn('[DB Cache] ⚠️ Could not save accounts_cache.json:', e.message);
   }
 }
 
@@ -95,18 +95,18 @@ async function ensurePerformanceIndexes(p) {
         const [existing] = await p.query(`SHOW INDEX FROM ${item.table} WHERE Key_name = ?`, [item.name]);
         if (!existing || existing.length === 0) {
           await p.query(item.sql);
-          console.log(`[DB Indexing] ⚡ Tối ưu hóa Database: Đã tạo Index '${item.name}' trên bảng '${item.table}'`);
+          console.log(`[DB Indexing] ⚡ Database optimization: created Index '${item.name}' on table '${item.table}'`);
         }
       } catch (err) {}
     }
     performanceIndexesReady = true;
   } catch (err) {
-    console.warn('[DB Indexing] ⚠️ Bỏ qua lỗi tạo Index:', err.message);
+    console.warn('[DB Indexing] ⚠️ Ignoring Index creation error:', err.message);
   }
 }
 
 /**
- * Kiểm tra kết nối tới MySQL Workbench
+ * Checks the connection to MySQL Workbench
  */
 async function testConnection() {
   try {
@@ -128,7 +128,7 @@ async function testConnection() {
     };
   } catch (err) {
     const cachedAccounts = loadAccountsCache();
-    console.warn('[MySQL Workbench] ⚠️ Lỗi kết nối MySQL (Dùng bộ nhớ đệm):', err.message);
+    console.warn('[MySQL Workbench] ⚠️ MySQL connection error (using the cache):', err.message);
     return {
       success: true,
       connected: false,
@@ -146,7 +146,7 @@ async function testConnection() {
 }
 
 /**
- * Lấy danh sách toàn bộ tài khoản Via / Fanpage từ MySQL Workbench (hoặc Cache dự phòng)
+ * Gets every Via / Fanpage account from MySQL Workbench (or the backup Cache)
  */
 async function getSocialAccounts() {
   try {
@@ -169,13 +169,13 @@ async function getSocialAccounts() {
       FROM social_accounts 
       ORDER BY id DESC
     `);
-    // Cập nhật bộ nhớ đệm tự động khi MySQL hoạt động
+    // Automatically refresh the cache while MySQL works
     if (Array.isArray(rows) && rows.length > 0) {
       saveAccountsCache(rows);
     }
     return rows;
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Không kết nối được MySQL, chuyển sang đọc accounts_cache.json:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Could not connect to MySQL, reading accounts_cache.json instead:', err.message);
     const cached = loadAccountsCache();
     if (cached.length > 0) return cached;
     return [];
@@ -183,7 +183,7 @@ async function getSocialAccounts() {
 }
 
 /**
- * Lấy danh sách Via còn sống (có c_user trong access_token/cookie)
+ * Gets the live Vias (with c_user in access_token/cookie)
  */
 async function getLiveVias() {
   try {
@@ -224,7 +224,7 @@ async function getLiveVias() {
     }
     return vias;
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Không kết nối được MySQL, trích xuất Live Vias từ cache:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Could not connect to MySQL, extracting Live Vias from the cache:', err.message);
     const cached = loadAccountsCache();
     const sortedCache = [...(cached || [])].sort((a, b) => {
       const aProf = a.accountType === 'PERSONAL_PROFILE_COOKIE' ? 0 : 1;
@@ -256,7 +256,7 @@ async function getLiveVias() {
 }
 
 /**
- * Thêm một Via hoặc Fanpage mới vào bảng social_accounts trên MySQL Workbench & Cache
+ * Adds a new Via or Fanpage to the social_accounts table in MySQL Workbench & the Cache
  */
 async function addSocialAccount({
   userId = 1,
@@ -283,7 +283,7 @@ async function addSocialAccount({
     newId = res.insertId;
   } catch (err) {
     dbSaved = false;
-    console.warn('[MySQL Workbench] ⚠️ Lỗi lưu MySQL, lưu tạm vào cache:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ MySQL save error, saving temporarily to the cache:', err.message);
   }
 
   const newAccount = {
@@ -305,12 +305,12 @@ async function addSocialAccount({
   cached.unshift(newAccount);
   saveAccountsCache(cached);
 
-  // dbSaved=false: mới chỉ lưu tạm vào cache cục bộ, chưa vào MySQL
+  // dbSaved=false: only saved temporarily to the local cache, not yet to MySQL
   return { ...newAccount, dbSaved };
 }
 
 /**
- * Cập nhật thông tin tài khoản trong MySQL Workbench & Cache
+ * Updates account info in MySQL Workbench & the Cache
  */
 async function updateSocialAccount(id, { pageName, cookieString, proxyUrl, tokenStatus }) {
   let dbSaved = true;
@@ -343,10 +343,10 @@ async function updateSocialAccount(id, { pageName, cookieString, proxyUrl, token
     await p.execute(`UPDATE social_accounts SET ${updates.join(', ')} WHERE id = ?`, params);
   } catch (err) {
     dbSaved = false;
-    console.warn(`[MySQL Workbench] ⚠️ Lỗi cập nhật ID ${id} trên MySQL, cập nhật cache:`, err.message);
+    console.warn(`[MySQL Workbench] ⚠️ Error updating ID ${id} in MySQL, updating the cache:`, err.message);
   }
 
-  // Luôn cập nhật cache
+  // Always update the cache
   const cached = loadAccountsCache();
   const idx = cached.findIndex((a) => a.id === Number(id) || a.id === id);
   if (idx !== -1) {
@@ -365,7 +365,7 @@ async function updateSocialAccount(id, { pageName, cookieString, proxyUrl, token
 }
 
 /**
- * Cập nhật trạng thái Token / Session (OK, CHECKPOINT, EXPIRED)
+ * Updates the Token / Session status (OK, CHECKPOINT, EXPIRED)
  */
 async function updateTokenStatus(id, status) {
   try {
@@ -386,7 +386,7 @@ async function updateTokenStatus(id, status) {
 }
 
 /**
- * Cập nhật chuỗi Cookie mới cho Via theo UID (cập nhật đồng bộ cả nick mẹ & các page con)
+ * Updates a Via's Cookie string by UID (syncing both the parent account & its child pages)
  */
 async function updateViaCookieByUid(uid, cookieString, proxyUrl) {
   const cleanCookie = String(cookieString || '').trim();
@@ -408,10 +408,10 @@ async function updateViaCookieByUid(uid, cookieString, proxyUrl) {
     );
   } catch (err) {
     dbSaved = false;
-    console.warn(`[MySQL Workbench] ⚠️ Lỗi cập nhật cookie theo UID ${targetUid}:`, err.message);
+    console.warn(`[MySQL Workbench] ⚠️ Error updating the cookie for UID ${targetUid}:`, err.message);
   }
 
-  // Luôn cập nhật cache
+  // Always update the cache
   const cached = loadAccountsCache();
   let updatedCount = 0;
   for (const acc of cached) {
@@ -437,7 +437,7 @@ async function updateViaCookieByUid(uid, cookieString, proxyUrl) {
 }
 
 /**
- * Xóa tài khoản khỏi MySQL Workbench & Cache
+ * Deletes an account from MySQL Workbench & the Cache
  */
 async function deleteSocialAccount(id) {
   let dbSaved = true;
@@ -446,7 +446,7 @@ async function deleteSocialAccount(id) {
     await p.execute('DELETE FROM social_accounts WHERE id = ?', [id]);
   } catch (err) {
     dbSaved = false;
-    console.warn(`[MySQL Workbench] ⚠️ Lỗi xóa ID ${id} trên MySQL:`, err.message);
+    console.warn(`[MySQL Workbench] ⚠️ Error deleting ID ${id} in MySQL:`, err.message);
   }
 
   const cached = loadAccountsCache();
@@ -457,7 +457,7 @@ async function deleteSocialAccount(id) {
 }
 
 // =============================================================================
-// QUẢN LÝ BẢN QUYỀN & CHO THUÊ TOOL (SOFTWARE LICENSES)
+// LICENSE & TOOL RENTAL MANAGEMENT (SOFTWARE LICENSES)
 // =============================================================================
 const LICENSES_CACHE_FILE = path.join(dataDir, 'licenses_cache.json');
 
@@ -468,14 +468,14 @@ function loadLicensesCache() {
       if (Array.isArray(data)) return data;
     }
   } catch (e) {
-    console.warn('[License Cache] ⚠️ Không đọc được licenses_cache.json:', e.message);
+    console.warn('[License Cache] ⚠️ Could not read licenses_cache.json:', e.message);
   }
-  // Khởi tạo key mẫu nếu chưa có
+  // Create a sample key if none exists
   return [
     {
       id: 1,
       licenseKey: 'VIP-PRO-2026-TRIAL-8888',
-      customerName: 'Đối Tác Thuê VIPLIKE (Bản quyền mẫu)',
+      customerName: 'VIPLIKE Rental Partner (Sample license)',
       customerContact: '0988888888',
       hardwareHwid: null,
       packageType: '1_MONTH',
@@ -483,20 +483,20 @@ function loadLicensesCache() {
       status: 'ACTIVE',
       activatedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      notes: 'Gói thuê 30 ngày kích hoạt mẫu cho máy khách',
+      notes: 'Sample 30-day rental plan for a client machine',
       createdAt: new Date().toISOString(),
     },
   ];
 }
 
 function saveLicensesCache(licenses) {
-  if (pool) return; // Đã có MySQL Workbench làm nguồn chính
+  if (pool) return; // MySQL Workbench is already the primary source
   try {
     const tmp = `${LICENSES_CACHE_FILE}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(licenses, null, 2), 'utf8');
     fs.renameSync(tmp, LICENSES_CACHE_FILE);
   } catch (e) {
-    console.warn('[License Cache] ⚠️ Không lưu được licenses_cache.json:', e.message);
+    console.warn('[License Cache] ⚠️ Could not save licenses_cache.json:', e.message);
   }
 }
 
@@ -553,7 +553,7 @@ async function getLicenses() {
       saveLicensesCache(rows);
       return rows;
     } else {
-      // Nếu bảng rỗng, đồng bộ bản ghi mẫu từ cache vào MySQL
+      // If the table is empty, sync the sample record from the cache into MySQL
       const cached = loadLicensesCache();
       for (const lic of cached) {
         try {
@@ -579,7 +579,7 @@ async function getLicenses() {
       return cached;
     }
   } catch (err) {
-    console.warn('[Database] ⚠️ Lỗi đọc licenses:', err.message);
+    console.warn('[Database] ⚠️ Error reading licenses:', err.message);
   }
   return loadLicensesCache();
 }
@@ -620,7 +620,7 @@ async function createLicense({
     );
     newId = res.insertId;
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Lỗi tạo license MySQL:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Error creating the MySQL license:', err.message);
   }
 
   const newLicense = {
@@ -650,28 +650,28 @@ async function activateLicense({ licenseKey, hardwareHwid }) {
   const lic = cached.find((l) => l.licenseKey === licenseKey);
 
   if (!lic) {
-    return { success: false, error: 'Mã License không tồn tại trên hệ thống.' };
+    return { success: false, error: 'This License Key does not exist in the system.' };
   }
 
   if (lic.status === 'LOCKED') {
-    return { success: false, error: 'Mã License này đã bị KHÓA. Vui lòng liên hệ Admin.' };
+    return { success: false, error: 'This License Key has been LOCKED. Please contact the Admin.' };
   }
 
   const now = new Date();
   const expireDate = new Date(lic.expiresAt);
   if (expireDate < now) {
-    return { success: false, error: 'Mã License này đã HẾT HẠN sử dụng.' };
+    return { success: false, error: 'This License Key has EXPIRED.' };
   }
 
-  // Nếu đã gắn HWID và máy khác cố kích hoạt
+  // If it's already bound to an HWID and another machine tries to activate
   if (lic.hardwareHwid && hardwareHwid && lic.hardwareHwid !== hardwareHwid) {
     return {
       success: false,
-      error: `License này đã được kích hoạt cho thiết bị khác (${lic.hardwareHwid}). Không thể dùng trên máy này.`,
+      error: `This License is already activated on another device (${lic.hardwareHwid}). It can't be used on this machine.`,
     };
   }
 
-  // Gắn HWID và đánh dấu kích hoạt
+  // Bind the HWID and mark as activated
   lic.hardwareHwid = hardwareHwid || lic.hardwareHwid;
   lic.activatedAt = lic.activatedAt || now.toISOString();
   saveLicensesCache(cached);
@@ -683,7 +683,7 @@ async function activateLicense({ licenseKey, hardwareHwid }) {
       [lic.hardwareHwid, licenseKey]
     );
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Lỗi kích hoạt license MySQL:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Error activating the MySQL license:', err.message);
   }
 
   const daysRemaining = Math.max(0, Math.ceil((expireDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
@@ -705,7 +705,7 @@ async function activateLicense({ licenseKey, hardwareHwid }) {
 async function updateLicenseStatus(id, newStatus, addDays = 0) {
   const cached = loadLicensesCache();
   const lic = cached.find((l) => l.id === Number(id) || l.id === id);
-  if (!lic) return { success: false, error: 'Không tìm thấy license' };
+  if (!lic) return { success: false, error: 'License not found' };
 
   lic.status = newStatus;
   if (addDays > 0) {
@@ -727,16 +727,16 @@ async function updateLicenseStatus(id, newStatus, addDays = 0) {
       await p.execute(`UPDATE software_licenses SET status = ?, updated_at = NOW() WHERE id = ?`, [newStatus, id]);
     }
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Lỗi cập nhật license MySQL:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Error updating the MySQL license:', err.message);
   }
 
   return { success: true, license: lic };
 }
 
 // =============================================================================
-// LỊCH SỬ TƯƠNG TÁC (BUFF LOGS) - mỗi dòng là một lượt chạy, chi tiết Page lưu JSON
-// Ghi MySQL trước; MySQL lỗi thì giữ trong buff_logs_cache.json (cờ _pending)
-// và tự đẩy lên lại ở lần đọc/ghi kế tiếp khi MySQL hoạt động.
+// ENGAGEMENT HISTORY (BUFF LOGS) - one row per run, Page details stored as JSON
+// Write to MySQL first; if MySQL fails keep it in buff_logs_cache.json (_pending flag)
+// and push it again automatically on the next read/write when MySQL works.
 // =============================================================================
 const BUFF_LOGS_CACHE_FILE = path.join(dataDir, 'buff_logs_cache.json');
 const BUFF_LOGS_CACHE_MAX = 2000;
@@ -776,26 +776,26 @@ function loadBuffLogsCache() {
       if (Array.isArray(data)) return data;
     }
   } catch (e) {
-    console.warn('[BuffLogs Cache] ⚠️ Không đọc được buff_logs_cache.json:', e.message);
+    console.warn('[BuffLogs Cache] ⚠️ Could not read buff_logs_cache.json:', e.message);
   }
   return [];
 }
 
 function saveBuffLogsCache(logs) {
-  if (pool) return; // Đã có MySQL Workbench làm nguồn chính
+  if (pool) return; // MySQL Workbench is already the primary source
   try {
     const sorted = [...logs].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     const tmp = `${BUFF_LOGS_CACHE_FILE}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(sorted.slice(0, BUFF_LOGS_CACHE_MAX)), 'utf8');
     fs.renameSync(tmp, BUFF_LOGS_CACHE_FILE);
   } catch (e) {
-    console.warn('[BuffLogs Cache] ⚠️ Không lưu được buff_logs_cache.json:', e.message);
+    console.warn('[BuffLogs Cache] ⚠️ Could not save buff_logs_cache.json:', e.message);
   }
 }
 
 const toInt = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.trunc(Number(v))) : 0);
 
-/** Chuẩn hoá log từ frontend, trả null nếu thiếu id/targetUrl */
+/** Normalizes a log from the frontend, returns null if id/targetUrl is missing */
 function normalizeBuffLog(log) {
   if (!log || typeof log !== 'object') return null;
   const id = typeof log.id === 'string' ? log.id.slice(0, 64) : '';
@@ -882,7 +882,7 @@ async function upsertBuffLogsToMysql(p, logs) {
   );
 }
 
-/** Đẩy các log đang chờ (lưu lúc MySQL lỗi) lên MySQL */
+/** Pushes pending logs (saved while MySQL was failing) up to MySQL */
 async function flushPendingBuffLogs(p) {
   const cached = loadBuffLogsCache();
   const pending = cached.filter((l) => l._pending);
@@ -891,12 +891,12 @@ async function flushPendingBuffLogs(p) {
     await upsertBuffLogsToMysql(p, pending.slice(i, i + 100));
   }
   saveBuffLogsCache(cached.map(({ _pending, ...l }) => l));
-  console.log(`[BuffLogs] ✅ Đã đồng bộ ${pending.length} log chờ lên MySQL`);
+  console.log(`[BuffLogs] ✅ Synced ${pending.length} pending logs to MySQL`);
 }
 
 /**
- * Lấy lịch sử tương tác mới nhất (MySQL, hoặc cache khi MySQL lỗi)
- * Hỗ trợ Keyset Cursor Pagination O(1) chống chậm khi bảng lớn
+ * Gets the latest engagement history (MySQL, or the cache when MySQL fails)
+ * Supports O(1) Keyset Cursor Pagination so large tables stay fast
  */
 async function getBuffLogs(optionsOrLimit = 500, summaryOnlyArg = false) {
   let safeLimit = 500;
@@ -957,7 +957,7 @@ async function getBuffLogs(optionsOrLimit = 500, summaryOnlyArg = false) {
 
     return { logs, nextCursor, source: 'mysql' };
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Lỗi đọc buff_logs, dùng cache:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Error reading buff_logs, using the cache:', err.message);
     const logs = loadBuffLogsCache()
       .slice(0, safeLimit)
       .map(({ _pending, ...l }) => (summaryOnly ? { ...l, details: [] } : l));
@@ -966,7 +966,7 @@ async function getBuffLogs(optionsOrLimit = 500, summaryOnlyArg = false) {
 }
 
 /**
- * Lấy chi tiết đầy đủ của một lượt chạy theo ID (kèm JSON details)
+ * Gets the full details of a run by ID (including JSON details)
  */
 async function getBuffLogById(id) {
   if (!id) return null;
@@ -984,13 +984,13 @@ async function getBuffLogById(id) {
     if (!rows || rows.length === 0) return null;
     return rowToBuffLog(rows[0]);
   } catch (err) {
-    console.warn('[DB] ⚠️ Lỗi đọc log theo id:', err.message);
+    console.warn('[DB] ⚠️ Error reading the log by id:', err.message);
     return null;
   }
 }
 
 /**
- * Lưu (thêm/cập nhật) một hoặc nhiều log. Trả về số log hợp lệ đã lưu.
+ * Saves (inserts/updates) one or more logs. Returns the number of valid logs saved.
  */
 async function saveBuffLogs(rawLogs) {
   const logs = (Array.isArray(rawLogs) ? rawLogs : [rawLogs]).map(normalizeBuffLog).filter(Boolean);
@@ -1005,7 +1005,7 @@ async function saveBuffLogs(rawLogs) {
     await flushPendingBuffLogs(p);
   } catch (err) {
     source = 'cache';
-    console.warn('[MySQL Workbench] ⚠️ Lỗi lưu buff_logs, giữ trong cache chờ đồng bộ:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Error saving buff_logs, keeping them in the cache pending sync:', err.message);
   }
 
   const incoming = new Map(logs.map((l) => [l.id, source === 'cache' ? { ...l, _pending: true } : l]));
@@ -1016,7 +1016,7 @@ async function saveBuffLogs(rawLogs) {
 }
 
 /**
- * Xoá toàn bộ lịch sử. Bắt buộc MySQL hoạt động để log không "sống lại" khi kết nối lại.
+ * Deletes the whole history. MySQL must be working so logs don't "come back" on reconnect.
  */
 async function clearBuffLogs() {
   const p = getPool();
@@ -1039,13 +1039,13 @@ function loadTelegramNotifsCache() {
       if (Array.isArray(data)) return data;
     }
   } catch (e) {
-    console.warn('[Telegram Cache] ⚠️ Không đọc được telegram_notifications_cache.json:', e.message);
+    console.warn('[Telegram Cache] ⚠️ Could not read telegram_notifications_cache.json:', e.message);
   }
   return [];
 }
 
 function saveTelegramNotifsCache(list) {
-  if (pool) return; // Đã có MySQL Workbench làm nguồn chính
+  if (pool) return; // MySQL Workbench is already the primary source
   try {
     const sorted = [...list]
       .sort((a, b) => new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt))
@@ -1054,7 +1054,7 @@ function saveTelegramNotifsCache(list) {
     fs.writeFileSync(tmp, JSON.stringify(sorted, null, 2), 'utf8');
     fs.renameSync(tmp, TELEGRAM_NOTIFS_CACHE_FILE);
   } catch (e) {
-    console.warn('[Telegram Cache] ⚠️ Không lưu được cache:', e.message);
+    console.warn('[Telegram Cache] ⚠️ Could not save the cache:', e.message);
   }
 }
 
@@ -1090,7 +1090,7 @@ async function saveTelegramNotification({
   const item = {
     chat_id: String(chatId || ''),
     event_type: String(eventType || 'GENERAL'),
-    title: String(title || 'Thông báo hệ thống'),
+    title: String(title || 'System notification'),
     message: String(message || ''),
     status: String(status || 'SENT'),
     telegram_message_id: telegramMessageId ? Number(telegramMessageId) : null,
@@ -1117,7 +1117,7 @@ async function saveTelegramNotification({
     );
     item.id = res.insertId;
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Không ghi được vào telegram_notifications (dùng cache):', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Could not write to telegram_notifications (using the cache):', err.message);
     item.id = Date.now();
   }
 
@@ -1136,13 +1136,13 @@ async function getTelegramNotifications(limit = 50) {
     );
     if (rows && rows.length > 0) return rows;
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Không đọc được telegram_notifications từ DB:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Could not read telegram_notifications from the DB:', err.message);
   }
   return loadTelegramNotifsCache().slice(0, limit);
 }
 
 // =============================================================================
-// KHO TRẠNG THÁI (app_state): người dùng, cài đặt, hàng đợi, lịch sử, monitors
+// STATE STORE (app_state): users, settings, queue, history, monitors
 // =============================================================================
 let appStateTableReady = false;
 
@@ -1172,8 +1172,8 @@ async function getAppState(key) {
 let localTokenSequence = 0;
 
 /**
- * Cấp phát Fencing Token độc nhất, tăng dần đơn điệu (Monotonic Fencing Token)
- * Được bảo đảm bền vững qua MySQL (app_state) và không bị trùng/reset sau restart server
+ * Allocates a unique, monotonically increasing Fencing Token (Monotonic Fencing Token)
+ * Kept durable via MySQL (app_state) and never duplicated/reset after a server restart
  * @returns {Promise<number>}
  */
 async function allocateFencingToken() {
@@ -1181,7 +1181,7 @@ async function allocateFencingToken() {
   try {
     await ensureAppStateTable();
     const p = getPool();
-    // Nguyên tử hóa việc tăng epoch trên MySQL:
+    // Atomically increment the epoch in MySQL:
     await p.query(
       `INSERT INTO app_state (state_key, state_value, updated_ms)
        VALUES ('global_fencing_epoch', '1', ?)
@@ -1199,7 +1199,7 @@ async function allocateFencingToken() {
       return (epochVal * 1000) + localTokenSequence;
     }
   } catch (err) {
-    console.warn('[DB] ⚠️ Không truy cập được MySQL app_state, dùng monotonic clock fallback:', err.message);
+    console.warn('[DB] ⚠️ Could not access MySQL app_state, using the monotonic clock fallback:', err.message);
   }
   localTokenSequence = (localTokenSequence + 1) % 1000;
   return (nowMs * 1000) + localTokenSequence;
@@ -1234,13 +1234,13 @@ async function syncTelegramSettingsToDb(settings) {
     }
     return { success: true };
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Không đồng bộ được telegram settings vào app_settings:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Could not sync telegram settings into app_settings:', err.message);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Lấy danh sách Fanpage từ bảng facebook_page_accesses trên MySQL
+ * Gets the Fanpage list from the facebook_page_accesses table in MySQL
  */
 async function getFacebookPageAccesses(userId = 1, personalProfileId = null) {
   try {
@@ -1264,14 +1264,14 @@ async function getFacebookPageAccesses(userId = 1, personalProfileId = null) {
       verificationStatus: r.verification_status,
     }));
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Không lấy được facebook_page_accesses:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Could not get facebook_page_accesses:', err.message);
     return [];
   }
 }
 
 /**
- * Lưu danh sách Fanpage vào bảng facebook_page_accesses trên MySQL
- * Giữ nguyên trạng thái cách ly (active = 0, UNSWITCHABLE) nếu chưa được xác thực lại từ switcher.
+ * Saves the Fanpage list to the facebook_page_accesses table in MySQL
+ * Keeps the quarantine status (active = 0, UNSWITCHABLE) unless re-verified by the switcher.
  */
 async function saveFacebookPageAccesses(pages = [], personalProfileId = '', profileName = '', userId = 1) {
   if (!Array.isArray(pages) || pages.length === 0) return { success: true, count: 0 };
@@ -1319,13 +1319,13 @@ async function saveFacebookPageAccesses(pages = [], personalProfileId = '', prof
     }
     return { success: true, count: saved };
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Lỗi lưu facebook_page_accesses:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Error saving facebook_page_accesses:', err.message);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Cập nhật trạng thái cách ly / xác thực cho các cặp (personalProfileId, pageId) trong facebook_page_accesses
+ * Updates the quarantine / verified status for (personalProfileId, pageId) pairs in facebook_page_accesses
  */
 async function markFacebookPageAccessesStatus(entries = [], verificationStatus = 'UNSWITCHABLE', active = 0, reason = '') {
   if (!Array.isArray(entries) || entries.length === 0) return { success: true, updated: 0 };
@@ -1357,13 +1357,13 @@ async function markFacebookPageAccessesStatus(entries = [], verificationStatus =
     }
     return { success: true, updated };
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Lỗi cập nhật trạng thái facebook_page_accesses:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Error updating facebook_page_accesses status:', err.message);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Đồng bộ danh sách tài khoản người dùng vào bảng users trên MySQL
+ * Syncs the user account list into the users table in MySQL
  */
 async function syncUsersToDb(users = []) {
   if (!Array.isArray(users) || users.length === 0) return { success: true };
@@ -1384,7 +1384,7 @@ async function syncUsersToDb(users = []) {
     }
     return { success: true };
   } catch (err) {
-    console.warn('[MySQL Workbench] ⚠️ Lỗi đồng bộ users vào MySQL:', err.message);
+    console.warn('[MySQL Workbench] ⚠️ Error syncing users into MySQL:', err.message);
     return { success: false, error: err.message };
   }
 }

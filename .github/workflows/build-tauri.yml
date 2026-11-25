@@ -1,7 +1,7 @@
 name: Build Desktop App (.exe & .dmg)
 
-# Mỗi lần push code lên main → build bản Windows + macOS → tạo GitHub Release
-# (app đã cài tự cập nhật qua latest.json) → ghi đè bộ cài lên Google Drive.
+# Every push to main → build Windows + macOS → create a GitHub Release
+# (installed apps auto-update via latest.json) → overwrite the installers on Google Drive.
 on:
   workflow_dispatch:
   push:
@@ -77,6 +77,10 @@ jobs:
           cd frontend
           npm ci || npm install
 
+      - name: Bundle Node backend into the app
+        shell: bash
+        run: node scripts/prepare-backend-bundle.mjs
+
       - name: Build Tauri Application
         uses: tauri-apps/tauri-action@v0
         env:
@@ -87,11 +91,11 @@ jobs:
           projectPath: './frontend'
           tagName: app-v__VERSION__
           releaseName: 'VIPLIKE RADIANT v__VERSION__'
-          releaseBody: 'Bản cập nhật tự động từ commit ${{ github.sha }}'
+          releaseBody: 'Automatic update from commit ${{ github.sha }}'
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.bundle.conf.json
 
   upload-drive:
     needs: [version, build-tauri]
@@ -105,7 +109,7 @@ jobs:
         id: chk
         run: |
           if [ -z "$RCLONE_CONFIG_DATA" ]; then
-            echo "RCLONE_CONFIG secret chưa đặt → bỏ qua upload Drive"
+            echo "RCLONE_CONFIG secret not set → skipping Drive upload"
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -132,14 +136,14 @@ jobs:
           
           if [ -n "$WIN_FOLDER" ] && [ -n "$EXE" ] && [ -f "$EXE" ]; then
             echo "Uploading Windows installer..."
-            rclone copyto "$EXE" gdrive:VIPLIKE-RADIANT-Setup.exe --drive-root-folder-id "$WIN_FOLDER" -v
-            printf 'Phiên bản: %s\nCommit: %s\n' "$VERSION" "$GITHUB_SHA" > version_win.txt
-            rclone copyto version_win.txt gdrive:version-windows.txt --drive-root-folder-id "$WIN_FOLDER"
+            rclone copyto "$EXE" gdrive:Windows/VIPLIKE-RADIANT-Setup.exe --drive-root-folder-id "$WIN_FOLDER" -v
+            printf 'Version: %s\nCommit: %s\n' "$VERSION" "$GITHUB_SHA" > version_win.txt
+            rclone copyto version_win.txt gdrive:Windows/version-windows.txt --drive-root-folder-id "$WIN_FOLDER"
           fi
 
           if [ -n "$MAC_FOLDER" ] && [ -n "$DMG" ] && [ -f "$DMG" ]; then
             echo "Uploading macOS installer..."
-            rclone copyto "$DMG" gdrive:VIPLIKE-RADIANT.dmg --drive-root-folder-id "$MAC_FOLDER" -v
-            printf 'Phiên bản: %s\nCommit: %s\n' "$VERSION" "$GITHUB_SHA" > version_mac.txt
-            rclone copyto version_mac.txt gdrive:version-mac.txt --drive-root-folder-id "$MAC_FOLDER"
+            rclone copyto "$DMG" gdrive:MacBook/VIPLIKE-RADIANT.dmg --drive-root-folder-id "$MAC_FOLDER" -v
+            printf 'Version: %s\nCommit: %s\n' "$VERSION" "$GITHUB_SHA" > version_mac.txt
+            rclone copyto version_mac.txt gdrive:MacBook/version-mac.txt --drive-root-folder-id "$MAC_FOLDER"
           fi

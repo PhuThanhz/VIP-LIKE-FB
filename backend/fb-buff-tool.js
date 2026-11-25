@@ -1,9 +1,9 @@
 /**
- * FB BUFF TOOL - BUFF LIKE ẨN BẰNG FANPAGE & BUFF VIEW VIDEO/REELS
- * Hỗ trợ:
- * 1. Quét toàn bộ Fanpage từ Cookie nick mẹ (Profile Pages / New Page Experience).
- * 2. Buff Like/Reaction (LIKE, LOVE, CARE, HAHA, WOW, SAD, ANGRY) bằng danh tính Fanpage vào bài viết (Like ẩn).
- * 3. Buff View Video/Reels đa luồng (Headless Playwright, tối ưu RAM/băng thông).
+ * FB BUFF TOOL - HIDDEN LIKE BUFF VIA FANPAGES & VIDEO/REELS VIEW BUFF
+ * Supports:
+ * 1. Scanning every Fanpage from a parent account Cookie (Profile Pages / New Page Experience).
+ * 2. Like/Reaction buff (LIKE, LOVE, CARE, HAHA, WOW, SAD, ANGRY) on posts as a Fanpage identity (hidden Like).
+ * 3. Multi-threaded Video/Reels view buff (headless Playwright, RAM/bandwidth optimized).
  */
 
 const { chromium } = require('playwright');
@@ -26,7 +26,7 @@ const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 
-// Cờ tối ưu hóa tốc độ và bộ nhớ RAM cho Playwright Chromium
+// Speed and RAM optimization flags for Playwright Chromium
 const OPTIMIZED_CHROMIUM_ARGS = [
   '--disable-blink-features=AutomationControlled',
   '--no-sandbox',
@@ -56,8 +56,8 @@ const OPTIMIZED_CHROMIUM_ARGS = [
   '--media-cache-size=16777216',
 ];
 
-// Hàm chặn video nặng, ảnh thừa & tracker quảng cáo bên thứ 3 để tối ưu RAM/băng thông
-// Giữ nguyên telemetry nội bộ của Facebook (/ajax/bz, logging_client_events, browser_measurement) để tránh bị Meta gắn cờ client bất thường
+// Block heavy video, unnecessary images & 3rd-party ad trackers to save RAM/bandwidth
+// Keep Facebook's internal telemetry (/ajax/bz, logging_client_events, browser_measurement) so Meta doesn't flag the client as abnormal
 async function applyResourceOptimization(context, allowMedia = false, blockImages = true) {
   try {
     await context.route('**/*', (route) => {
@@ -65,7 +65,7 @@ async function applyResourceOptimization(context, allowMedia = false, blockImage
       const rType = req.resourceType();
       const url = req.url();
 
-      // Chỉ chặn tracker quảng cáo bên thứ 3; giữ telemetry nội bộ của Facebook
+      // Only block 3rd-party ad trackers; keep Facebook's internal telemetry
       if (
         url.includes('googletagmanager.com') ||
         url.includes('doubleclick.net')
@@ -73,12 +73,12 @@ async function applyResourceOptimization(context, allowMedia = false, blockImage
         return route.abort();
       }
 
-      // Khi chỉ cần Like/Comment, chặn luồng video mp4/m3u8 để tiết kiệm băng thông
+      // When only Like/Comment is needed, block mp4/m3u8 video streams to save bandwidth
       if (!allowMedia && (rType === 'media' || url.endsWith('.mp4') || url.endsWith('.m3u8') || url.endsWith('.webm'))) {
         return route.abort();
       }
 
-      // Chặn ảnh và web font khi buff tương tác để tiết kiệm RAM, CPU và giảm thời gian tải DOM
+      // Block images and web fonts during engagement buffs to save RAM, CPU and DOM load time
       if (blockImages) {
         if (
           rType === 'image' ||
@@ -92,12 +92,12 @@ async function applyResourceOptimization(context, allowMedia = false, blockImage
       return route.continue();
     });
   } catch (e) {
-    // bỏ qua lỗi nếu context đã đóng
+    // ignore errors if the context is already closed
   }
 }
 
 // ==========================================
-// 1. CÁC HÀM TIỆN ÍCH COOKIE & PARSING
+// 1. COOKIE & PARSING UTILITIES
 // ==========================================
 
 
@@ -107,7 +107,7 @@ function parseCookieString(cookieStr, domain = '.facebook.com') {
   let str = String(cookieStr).trim();
   str = str.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
 
-  // 1. Nếu là định dạng JSON (Cookie-Editor, J2Team, mảng cookies)
+  // 1. JSON format (Cookie-Editor, J2Team, cookie arrays)
   if ((str.startsWith('{') && str.endsWith('}')) || (str.startsWith('[') && str.endsWith(']'))) {
     try {
       const parsed = JSON.parse(str);
@@ -139,7 +139,7 @@ function parseCookieString(cookieStr, domain = '.facebook.com') {
     } catch (_) {}
   }
 
-  // 2. Định dạng chuỗi cookie thông thường
+  // 2. Regular cookie string format
   const parts = str.split(';');
   const cookies = [];
   for (const part of parts) {
@@ -170,7 +170,7 @@ function getUserIdFromCookie(cookieStr) {
   const match = str.match(/(?:^|;\s*)c_user=([0-9]+)/);
   if (match) return match[1];
 
-  // Tìm trong JSON
+  // Look inside the JSON
   const jsonMatch =
     str.match(/"name"\s*:\s*"c_user"\s*,\s*"value"\s*:\s*"([0-9]+)"/) ||
     str.match(/"c_user"\s*:\s*"?([0-9]+)"?/);
@@ -180,12 +180,12 @@ function getUserIdFromCookie(cookieStr) {
 }
 
 // ==========================================
-// 1b. QUẢN LÝ BỘ NHỚ ĐỆM FANPAGE (PAGES CACHE)
+// 1b. FANPAGE CACHE MANAGEMENT (PAGES CACHE)
 // ==========================================
 
-const dataDir = path.join(__dirname, 'data');
+const { DATA_DIR: dataDir, PROFILES_DIR } = require('./paths');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-// Cache hết hạn để page mới được gán (vd. page trong BM) tự xuất hiện ở lần quét sau
+// Cache expiry so newly assigned pages (e.g. pages in a BM) show up on the next scan
 const PAGES_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 function loadPagesCache() {
@@ -204,7 +204,7 @@ function getCachedPages(uid) {
   if (entry && Array.isArray(entry.pages) && entry.pages.length > 0) {
     const quarantined = entry.quarantined && typeof entry.quarantined === 'object' ? entry.quarantined : {};
     const valid = entry.pages.filter((p) => p && p.id && !quarantined[String(p.id)]);
-    // Ưu tiên Page đã từng chuyển danh tính thành công (verified) lên trước
+    // Put Pages that have switched identity successfully before (verified) first
     return valid.sort((a, b) => (b.verified ? 1 : 0) - (a.verified ? 1 : 0));
   }
   return null;
@@ -230,7 +230,7 @@ function setCachedPages(uid, pages, viaName = '', options = {}) {
     if (!raw || !raw.id) continue;
     const pid = String(raw.id);
     if (seenIds.has(pid)) continue;
-    // Nếu bảng Switcher trực tiếp thấy Page này thì bỏ cách ly; nguồn khác thì giữ nguyên cách ly cũ
+    // If the Switcher list directly shows this Page, lift the quarantine; other sources keep the old quarantine
     if (quarantined[pid]) {
       if (raw.source === 'SWITCHER') {
         delete quarantined[pid];
@@ -247,8 +247,8 @@ function setCachedPages(uid, pages, viaName = '', options = {}) {
     });
   }
 
-  // Bảo vệ chống mất dữ liệu khi Facebook trả về kết quả quét thiếu (partial scan):
-  // nếu danh sách mới nhỏ hơn nhiều so với cache cũ, giữ lại các Page cũ không bị cách ly
+  // Guard against data loss when Facebook returns an incomplete scan (partial scan):
+  // if the new list is much smaller than the old cache, keep the old non-quarantined Pages
   if (!replaceExisting && prevPagesList.length > normalizedPages.length * 2 && normalizedPages.length > 0) {
     for (const prev of prevPagesList) {
       if (!prev || !prev.id) continue;
@@ -270,19 +270,19 @@ function setCachedPages(uid, pages, viaName = '', options = {}) {
   };
   savePagesCache(cache);
 
-  // Đồng bộ trực tiếp vào bảng facebook_page_accesses trên MySQL
+  // Sync directly into the facebook_page_accesses table in MySQL
   try {
     const db = require('./db');
     db.saveFacebookPageAccesses(normalizedPages, uid, viaName).catch((e) => {
-      console.warn(`[FB-Buff] ⚠️ Không đồng bộ được pages vào MySQL facebook_page_accesses: ${e.message}`);
+      console.warn(`[FB-Buff] ⚠️ Could not sync pages into MySQL facebook_page_accesses: ${e.message}`);
     });
   } catch (_) { }
 }
 
 /**
- * Ghi nhận kết quả chuyển danh tính Fanpage trên từng Via:
- * - Thành công: xóa bộ đếm lỗi, đánh dấu verified = true.
- * - Lỗi chuyển danh tính lặp lại (hoặc sai Via): tự động cách ly khỏi pages_cache & facebook_page_accesses.
+ * Records the result of switching to a Fanpage identity on each Via:
+ * - Success: clear the failure counter, mark verified = true.
+ * - Repeated identity-switch failures (or wrong Via): automatically quarantine from pages_cache & facebook_page_accesses.
  */
 function recordPageSwitchOutcome(uid, pageId, success, errorCode = '') {
   if (!uid || !pageId || String(pageId) === String(uid)) return { quarantined: false };
@@ -312,7 +312,7 @@ function recordPageSwitchOutcome(uid, pageId, success, errorCode = '') {
           [{ personalProfileId: uidKey, pageId: pidKey }],
           'VERIFIED',
           1,
-          'Đã xác thực chuyển danh tính thành công'
+          'Identity switch verified successfully'
         ).catch(() => {});
       } catch (_) {}
     }
@@ -326,8 +326,8 @@ function recordPageSwitchOutcome(uid, pageId, success, errorCode = '') {
 
   if (nextFails >= threshold) {
     const reason = isWrongVia
-      ? 'Page thuộc quản trị của Via khác'
-      : `Không chuyển được danh tính Fanpage ${nextFails} lần liên tiếp`;
+      ? 'Page is managed by a different Via'
+      : `Could not switch to the Fanpage identity ${nextFails} times in a row`;
     entry.quarantined[pidKey] = {
       name: targetPage?.name || pidKey,
       quarantinedAt: new Date().toISOString(),
@@ -340,7 +340,7 @@ function recordPageSwitchOutcome(uid, pageId, success, errorCode = '') {
       entry.count = entry.pages.length;
     }
     savePagesCache(cache);
-    console.warn(`[FB-Buff] 🧹 Đã tự động cách ly Page "${targetPage?.name || pidKey}" (${pidKey}) khỏi Via ${uidKey}: ${reason}`);
+    console.warn(`[FB-Buff] 🧹 Automatically quarantined Page "${targetPage?.name || pidKey}" (${pidKey}) from Via ${uidKey}: ${reason}`);
     try {
       const db = require('./db');
       db.markFacebookPageAccessesStatus(
@@ -359,7 +359,7 @@ function recordPageSwitchOutcome(uid, pageId, success, errorCode = '') {
 }
 
 // ==========================================
-// 1c. BỘ ĐIỀU TIẾT CHỐNG KIỆT SỨC FANPAGE (PAGE FATIGUE GOVERNOR) & PROXY PARSER
+// 1c. PAGE FATIGUE GOVERNOR & PROXY PARSER
 // ==========================================
 
 function parseProxy(proxyStr) {
@@ -427,14 +427,14 @@ function parseProxy(proxyStr) {
 }
 
 /**
- * Kiểm tra kết nối và độ trễ của Proxy qua Playwright request context
+ * Checks Proxy connectivity and latency via a Playwright request context
  */
 async function testProxy(proxyStr, timeoutMs = 8000) {
   const parsed = parseProxy(proxyStr);
   if (!parsed) {
     return {
       success: false,
-      error: 'Định dạng Proxy không hợp lệ. Hỗ trợ: ip:port hoặc ip:port:user:pass hoặc http(s)/socks5://user:pass@ip:port',
+      error: 'Invalid Proxy format. Supported: ip:port or ip:port:user:pass or http(s)/socks5://user:pass@ip:port',
     };
   }
 
@@ -478,7 +478,7 @@ async function testProxy(proxyStr, timeoutMs = 8000) {
     } else {
       return {
         success: false,
-        error: `Proxy trả về mã lỗi HTTP ${res.status()}`,
+        error: `Proxy returned HTTP error code ${res.status()}`,
         latencyMs,
       };
     }
@@ -486,7 +486,7 @@ async function testProxy(proxyStr, timeoutMs = 8000) {
     const cleanError = (err.message || '').split('\n')[0].replace(/^apiRequestContext\.\w+:\s*/, '');
     return {
       success: false,
-      error: `Kết nối qua Proxy thất bại: ${cleanError}`,
+      error: `Proxy connection failed: ${cleanError}`,
       latencyMs: Date.now() - startTime,
     };
   } finally {
@@ -497,16 +497,16 @@ async function testProxy(proxyStr, timeoutMs = 8000) {
 }
 
 /**
- * Kiểm tra sức khỏe Proxy nhanh chóng (Quick Health Check)
+ * Quick Proxy health check
  */
 async function testProxyHealth(proxyStr, timeoutMs = 4000) {
   if (!proxyStr || typeof proxyStr !== 'string' || !proxyStr.trim()) {
-    return { live: false, error: 'Proxy trống' };
+    return { live: false, error: 'Empty proxy' };
   }
   const trimmed = proxyStr.trim();
   const parsed = parseProxy(trimmed);
   if (!parsed) {
-    return { live: false, error: 'Định dạng Proxy không hợp lệ' };
+    return { live: false, error: 'Invalid Proxy format' };
   }
   try {
     const res = await testProxy(trimmed, timeoutMs);
@@ -525,7 +525,7 @@ async function testProxyHealth(proxyStr, timeoutMs = 4000) {
 }
 
 /**
- * Lọc và kiểm tra danh sách Proxy trong Pool, trả về các Proxy còn sống (Live)
+ * Filters and checks the Proxy Pool, returning the live Proxies
  */
 async function filterLiveProxies(proxyList = [], timeoutMs = 4000) {
   if (!Array.isArray(proxyList) || proxyList.length === 0) return [];
@@ -549,7 +549,7 @@ function savePageUsage(data) {
   store.write('page_usage', data);
 }
 
-// Ngày theo giờ Việt Nam (YYYY-MM-DD) để giới hạn reset lúc 0h chứ không phải 7h sáng (UTC)
+// Date in Vietnam time (YYYY-MM-DD) so limits reset at midnight, not at 7am (UTC)
 function usageDateKey() {
   return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' });
 }
@@ -559,7 +559,7 @@ function recordPageAction(pageId) {
   const today = usageDateKey();
   let usage = loadPageUsage();
   if (!usage[today]) {
-    // Chỉ giữ 7 ngày gần nhất
+    // Keep only the last 7 days
     const kept = {};
     for (const d of Object.keys(usage).sort().slice(-6)) kept[d] = usage[d];
     kept[today] = {};
@@ -582,12 +582,12 @@ function getDailyPageActionLimit() {
 }
 
 // ==========================================
-// 2. QUÉT DANH SÁCH FANPAGE TỪ COOKIE NICK MẸ
+// 2. SCAN THE FANPAGE LIST FROM THE PARENT ACCOUNT COOKIE
 // ==========================================
 
-// Quét bảng "Trang & trang cá nhân của bạn" (menu tài khoản → Xem tất cả trang cá nhân → Xem thêm trang...).
-// ID lấy từ phản hồi GraphQL khi bấm "Xem thêm trang"; page nào chỉ có tên (thường là URL vanity) thì
-// tra ID bằng link trên your_pages.
+// Scan the "Your profiles and Pages" panel (account menu → See all profiles → See more Pages...).
+// IDs come from the GraphQL response when clicking "See more Pages"; pages with only a name (usually a vanity URL)
+// get their ID looked up via the link on your_pages.
 async function scanProfileSwitcherPages(page, uid) {
   const idByName = new Map();
   const walk = (o) => {
@@ -608,7 +608,7 @@ async function scanProfileSwitcherPages(page, uid) {
     } catch (e) { }
   };
 
-  // Link của từng card trên your_pages (để tra page vanity), lấy trước khi rời trang
+  // Each card's link on your_pages (to look up vanity pages), collected before leaving the page
   const cardLinks = await page.evaluate(() => {
     const out = {};
     document.querySelectorAll('a[href]').forEach((a) => {
@@ -647,11 +647,11 @@ async function scanProfileSwitcherPages(page, uid) {
           .replace(/\s+/g, ' ')
           .trim();
       };
-      // Dòng xem trước thông báo (vd: "Chưa đọcNguyễn Phi Văn đã theo dõi bạn.") không phải tên Page
+      // Notification preview lines (e.g. "Chưa đọcNguyễn Phi Văn đã theo dõi bạn.") are not Page names
       const notificationLike = /^(?:Chưa đọc|Unread)|(?:^|\s)đã (?:theo dõi|thích|bình luận|nhắc|gửi|chia sẻ|phản hồi|mời)(?:\s|$)|\b(?:followed|liked|commented|mentioned|shared|replied|invited)\b/;
       const set = new Set();
       dlg.querySelectorAll('[role="listitem"], [role="radio"], [role="button"], a').forEach((e) => {
-        // Lấy dòng đầu tiên thực sự là tên (bỏ qua dòng thông báo chưa đọc nằm phía trên)
+        // Take the first line that is actually a name (skip unread notification lines above it)
         const lines = (e.innerText || '').split('\n').map((l) => l.trim()).filter(Boolean);
         for (const raw of lines) {
           const t = cleanName(raw);
@@ -669,7 +669,7 @@ async function scanProfileSwitcherPages(page, uid) {
       let id = idByName.get(name) || '';
       let url = id ? `https://www.facebook.com/profile.php?id=${id}` : cardLinks[name] || '';
       if (!id && url) {
-        // Page vanity: ID nằm ở "userID" trong HTML trang tường của page
+        // Vanity page: the ID is in "userID" in the page's wall HTML
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => { });
         await page.waitForTimeout(2500);
         const html = await page.content().catch(() => '');
@@ -687,8 +687,8 @@ async function scanProfileSwitcherPages(page, uid) {
 }
 
 /**
- * Quét danh sách Fanpage từ Meta Accounts Centre (Trung tâm tài khoản - mục "Pages you manage / See all Pages")
- * Hỗ trợ các tài khoản được chuyển giao diện mới hiển thị 90+ Fanpage
+ * Scans the Fanpage list from Meta Accounts Centre ("Pages you manage / See all Pages")
+ * Supports accounts on the new UI that show 90+ Fanpages
  */
 async function scanAccountsCenterPages(page, uid) {
   const pages = new Map();
@@ -725,14 +725,14 @@ async function scanAccountsCenterPages(page, uid) {
     await page.goto('https://accountscenter.facebook.com/profiles', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(3000);
 
-    // Tìm và click "See all Pages" hoặc "Xem tất cả trang"
+    // Find and click "See all Pages" (or the Vietnamese equivalent)
     const seeAllBtn = page.getByText(/^(Xem tất cả trang|See all Pages|See all pages)/i).first();
     if (await seeAllBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await seeAllBtn.click().catch(() => { });
       await page.waitForTimeout(2000);
     }
 
-    // Cuộn trang để kích hoạt tải sạch toàn bộ trang
+    // Scroll to trigger loading every page
     for (let r = 0; r < 25; r++) {
       await page.evaluate(() => window.scrollBy(0, 1200));
       await page.waitForTimeout(600);
@@ -759,7 +759,7 @@ async function scanAccountsCenterPages(page, uid) {
 
     return Array.from(pages.values());
   } catch (err) {
-    console.warn(`[FB-Buff] ⚠️ Lỗi trong scanAccountsCenterPages: ${err.message}`);
+    console.warn(`[FB-Buff] ⚠️ Error in scanAccountsCenterPages: ${err.message}`);
     return Array.from(pages.values());
   } finally {
     page.off('response', onResponse);
@@ -767,13 +767,13 @@ async function scanAccountsCenterPages(page, uid) {
 }
 
 /**
- * Quét danh sách tất cả các Fanpage mà tài khoản đang sở hữu/quản lý (hỗ trợ Cache)
- * @param {string} cookieStr - Chuỗi cookie của nick Facebook mẹ
+ * Scans every Fanpage the account owns/manages (with Cache support)
+ * @param {string} cookieStr - Cookie string of the parent Facebook account
  * @param {object} options - { forceRefresh: boolean, viaName: string, proxyUrl: string }
  * @returns {Promise<Array<{ id: string, name: string, url: string }>>}
  */
 /**
- * Hợp nhất Fanpage từ pages_cache và bảng MySQL facebook_page_accesses (loại bỏ page đang bị cách ly).
+ * Merges Fanpages from pages_cache and the MySQL facebook_page_accesses table (excluding quarantined pages).
  */
 async function mergeCachedAndDbPages(uid, viaName = '') {
   const uidKey = String(uid || '');
@@ -820,14 +820,14 @@ async function getManagedPages(cookieStr, options = {}) {
   const { forceRefresh = false, viaName = '', proxyUrl = '' } = options;
   const cookies = parseCookieString(cookieStr);
   if (!cookies.length) {
-    throw new Error('Cookie rỗng hoặc không đúng định dạng');
+    throw new Error('Cookie is empty or in the wrong format');
   }
 
   const uid = getUserIdFromCookie(cookieStr);
   if (!forceRefresh && uid) {
     const cached = await mergeCachedAndDbPages(uid, viaName);
     if (cached && cached.length > 0) {
-      console.log(`[FB-Buff] ⚡ [CACHE HIT] Đã lấy ${cached.length} Fanpage từ cache/DB cho UID: ${uid} (không tốn thời gian quét lại)`);
+      console.log(`[FB-Buff] ⚡ [CACHE HIT] Got ${cached.length} Fanpages from cache/DB for UID: ${uid} (no rescan needed)`);
       return cached;
     }
   }
@@ -855,24 +855,24 @@ async function getManagedPages(cookieStr, options = {}) {
     await context.addCookies(cookies);
     const page = await context.newPage();
 
-    console.log('[FB-Buff] 🔄 Đang truy cập Facebook để lấy danh sách Fanpage...');
+    console.log('[FB-Buff] 🔄 Opening Facebook to fetch the Fanpage list...');
     await page.goto('https://www.facebook.com/pages/?category=your_pages', {
       waitUntil: 'domcontentloaded',
       timeout: 30000,
     });
     await page.waitForTimeout(4000);
 
-    // Kiểm tra đăng nhập
+    // Check login
     const currentUrl = page.url();
     if (currentUrl.includes('/login') || currentUrl.includes('/checkpoint')) {
-      throw new Error('Cookie đã hết hạn hoặc bị checkpoint');
+      throw new Error('Cookie expired or checkpointed');
     }
 
-    // CUỘN TẢI SÂU TOÀN BỘ DANH SÁCH FANPAGE (DÀNH CHO TÀI KHOẢN BM CÓ HÀNG TRĂM PAGE)
-    console.log('[FB-Buff] 📜 Đang cuộn trang tự động để quét toàn bộ hàng trăm Fanpage trong BM...');
+    // DEEP-SCROLL THE WHOLE FANPAGE LIST (FOR BM ACCOUNTS WITH HUNDREDS OF PAGES)
+    console.log('[FB-Buff] 📜 Auto-scrolling to scan hundreds of Fanpages in the BM...');
     let lastFoundCount = 0;
     let staleRounds = 0;
-    const maxScrollRounds = 35; // Hỗ trợ quét tới 500+ Fanpage
+    const maxScrollRounds = 35; // Supports scanning 500+ Fanpages
 
     for (let round = 0; round < maxScrollRounds; round++) {
       const currentCards = await page.evaluate(() => {
@@ -884,7 +884,7 @@ async function getManagedPages(cookieStr, options = {}) {
       if (currentCards === lastFoundCount) {
         staleRounds++;
         if (staleRounds >= 3) {
-          // Thử cuộn tận đáy trang một lần cuối để đảm bảo đã tải sạch
+          // Try scrolling to the very bottom one last time to make sure everything loaded
           await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
           await page.waitForTimeout(1500);
           const finalCards = await page.evaluate(() => document.querySelectorAll('div[role="article"], a[href*="/profile.php?id="], a[href*="/pages/"]').length);
@@ -894,12 +894,12 @@ async function getManagedPages(cookieStr, options = {}) {
         staleRounds = 0;
         lastFoundCount = currentCards;
         if (round % 5 === 0 && round > 0) {
-          console.log(`[FB-Buff] 🔄 Tiến trình quét Fanpage BM: Đã nhận diện ~${currentCards} thẻ...`);
+          console.log(`[FB-Buff] 🔄 BM Fanpage scan progress: ~${currentCards} cards detected...`);
         }
       }
     }
 
-    // Trích xuất danh sách Fanpage từ giao diện web một cách chuẩn xác
+    // Extract the Fanpage list from the web UI accurately
     const pageList = await page.evaluate(() => {
       const pageMap = new Map(); // pageId -> { id, name, url }
       const noiseRegex = /^(?:\d+\s*(?:thông báo|tin nhắn|notifications?|messages?)|chuyển sang|chuyển ngay|switch|quản lý|manage|xem trang|view page|trang cá nhân|profile)$/i;
@@ -916,7 +916,7 @@ async function getManagedPages(cookieStr, options = {}) {
         return cleaned;
       };
 
-      // 1. Quét các thẻ cha đại diện cho từng Fanpage Card
+      // 1. Scan the parent elements representing each Fanpage card
       const cardContainers = document.querySelectorAll('div[role="article"], div[data-visualcompletion="ignore-dynamic-extra-content"], div[role="listitem"], a[href*="/profile.php?id="]');
 
       cardContainers.forEach((card) => {
@@ -928,7 +928,7 @@ async function getManagedPages(cookieStr, options = {}) {
         if (!idMatch) return;
         const pageId = idMatch[1];
 
-        // Tìm tiêu đề tên Fanpage từ các thẻ tiêu đề hoặc span chính
+        // Find the Fanpage name from heading tags or the main span
         const titleEl = card.querySelector('h2, h3, h4, strong, span[dir="auto"], span.x1lliihq') || link;
         const rawTitle = titleEl ? (titleEl.innerText || titleEl.textContent || '') : '';
         const cleanedTitle = cleanPageName(rawTitle);
@@ -944,7 +944,7 @@ async function getManagedPages(cookieStr, options = {}) {
         }
       });
 
-      // 2. Quét dự phòng toàn bộ các link nếu chưa đủ
+      // 2. Fallback scan of every link if there aren't enough yet
       const allLinks = document.querySelectorAll('a[href*="/profile.php?id="]');
       allLinks.forEach((a) => {
         const href = a.getAttribute('href') || '';
@@ -963,7 +963,7 @@ async function getManagedPages(cookieStr, options = {}) {
               url: href.startsWith('http') ? href : `https://www.facebook.com${href}`,
             });
           } else {
-            // Nếu tên hiện tại đang là dạng số hoặc quá ngắn mà tên mới đẹp hơn
+            // If the current name is numeric or too short and the new name is nicer
             const current = pageMap.get(pageId);
             if (noiseRegex.test(current.name) || (current.name.length < cleaned.length && !noiseRegex.test(cleaned))) {
               current.name = cleaned;
@@ -972,7 +972,7 @@ async function getManagedPages(cookieStr, options = {}) {
         }
       });
 
-      // 3. Chuẩn hóa lại lần cuối
+      // 3. Final normalization
       const results = [];
       for (const [id, item] of pageMap.entries()) {
         item.name = cleanPageName(item.name);
@@ -990,8 +990,8 @@ async function getManagedPages(cookieStr, options = {}) {
       p.source = p.source || 'YOUR_PAGES';
     });
 
-    // Bổ sung từ bảng "Trang & trang cá nhân của bạn": đây đúng là danh sách page nick chuyển sang được,
-    // thường nhiều hơn your_pages (page BM được gán, page dùng URL vanity...)
+    // Supplement from the "Your profiles and Pages" panel: this is exactly the list of pages the account can switch to,
+    // usually more than your_pages (pages assigned in a BM, pages with a vanity URL...)
     try {
       const extra = await scanProfileSwitcherPages(page, uid);
       const byId = new Map(pageList.map((p) => [String(p.id), p]));
@@ -1010,12 +1010,12 @@ async function getManagedPages(cookieStr, options = {}) {
         pageList.push(tagged);
         added++;
       }
-      console.log(`[FB-Buff] 🔁 Bảng chuyển trang cá nhân: ${extra.length} page, bổ sung thêm ${added} page.`);
+      console.log(`[FB-Buff] 🔁 Profile switcher panel: ${extra.length} pages, added ${added} more.`);
     } catch (err) {
-      console.warn(`[FB-Buff] ⚠️ Không quét được bảng chuyển trang cá nhân: ${err.message}`);
+      console.warn(`[FB-Buff] ⚠️ Could not scan the profile switcher panel: ${err.message}`);
     }
 
-    // Bổ sung từ Meta Accounts Centre (Trung tâm tài khoản - "See all Pages 92 >")
+    // Supplement from Meta Accounts Centre ("See all Pages 92 >")
     try {
       const acPages = await scanAccountsCenterPages(page, uid);
       const known = new Set(pageList.map((p) => p.id));
@@ -1026,15 +1026,15 @@ async function getManagedPages(cookieStr, options = {}) {
         pageList.push({ ...item, source: 'ACCOUNTS_CENTRE', verified: false });
         addedAc++;
       }
-      console.log(`[FB-Buff] 🏢 Meta Accounts Centre: ${acPages.length} page, bổ sung thêm ${addedAc} page.`);
+      console.log(`[FB-Buff] 🏢 Meta Accounts Centre: ${acPages.length} pages, added ${addedAc} more.`);
     } catch (err) {
-      console.warn(`[FB-Buff] ⚠️ Không quét được Accounts Centre: ${err.message}`);
+      console.warn(`[FB-Buff] ⚠️ Could not scan Accounts Centre: ${err.message}`);
     }
 
-    // Đưa các Page được xác nhận từ Switcher lên đầu danh sách
+    // Move Pages confirmed by the Switcher to the top of the list
     pageList.sort((a, b) => (b.verified ? 1 : 0) - (a.verified ? 1 : 0));
 
-    console.log(`[FB-Buff] ✅ Đã tìm thấy và làm sạch tên ${pageList.length} Fanpage được quản lý.`);
+    console.log(`[FB-Buff] ✅ Found and cleaned the names of ${pageList.length} managed Fanpages.`);
     if (uid && pageList.length > 0) {
       setCachedPages(uid, pageList, viaName);
     }
@@ -1045,12 +1045,12 @@ async function getManagedPages(cookieStr, options = {}) {
 }
 
 // ==========================================
-// 3. BUFF LIKE ẨN BẰNG FANPAGE (PAGE REACTIONS & COMMENTS)
+// 3. HIDDEN LIKE BUFF VIA FANPAGES (PAGE REACTIONS & COMMENTS)
 // ==========================================
 
 /**
- * Giải mã cú pháp Spintax {A|B|C} đa tầng/lồng nhau (Nested Spintax) thành chuỗi ngẫu nhiên
- * Ví dụ: "{ {Chào|Hello} {bạn|shop} | {Bài viết|Nội dung} {quá hay|rất ý nghĩa} } {ạ!|nha!}"
+ * Expands multi-level/nested Spintax {A|B|C} into a random string
+ * Example: "{ {Chào|Hello} {bạn|shop} | {Bài viết|Nội dung} {quá hay|rất ý nghĩa} } {ạ!|nha!}"
  */
 function resolveSpintax(text) {
   if (!text || typeof text !== 'string') return '';
@@ -1070,7 +1070,7 @@ function resolveSpintax(text) {
 }
 
 /**
- * Danh sách hậu tố tự nhiên giúp biến đổi bình luận tránh Meta/Admin phạt trùng lặp
+ * Natural suffixes that vary comments so Meta/Admins don't penalize duplicates
  */
 const NATURAL_VI_VARIATIONS = [
   ' ạ ❤️', ' nha bạn!', ' nhé 👍', ' quá nè ✨', ' bạn ơi 😊',
@@ -1079,15 +1079,15 @@ const NATURAL_VI_VARIATIONS = [
 ];
 
 /**
- * Thư viện Mẫu Kịch Bản Seeding Thông Minh (Smart Seeding Presets)
- * Hỗ trợ Spintax đa tầng, chia theo nhóm mục tiêu thực chiến: Bán hàng, Khen ngợi viral, Thảo luận tranh luận
+ * Smart Seeding Presets library
+ * Supports multi-level Spintax, grouped by real-world goal: Sales, Viral praise, Discussion
  */
 const SEEDING_PRESETS = [
   {
     id: 'sales',
-    name: 'Bán hàng & Chốt đơn',
+    name: 'Sales & Closing',
     badge: 'Kinh doanh',
-    description: 'Tạo hiệu ứng khách hỏi mua, xin giá, kích thích mua sắm',
+    description: 'Creates the effect of customers asking to buy and for prices, encouraging purchases',
     comments: [
       '{Shop ơi|Dạ shop|Shop yêu}|{cho em xin giá|inbox tư vấn em với ạ|sản phẩm này còn hàng không shop|ship về {Hà Nội|Sài Gòn|Đà Nẵng|Cần Thơ} mất mấy ngày ạ}?',
       '{Chất lượng|Hàng|Mẫu này} {đẹp quá|nhìn xịn xò thật sự|chuẩn chỉ ghê|rất ưng mắt}, {báo giá em với|ib em nha shop|tư vấn em chi tiết nhé|cho em đặt 1 cái với}! 🔥',
@@ -1098,9 +1098,9 @@ const SEEDING_PRESETS = [
   },
   {
     id: 'praise',
-    name: 'Khen ngợi & Viral tương tác',
+    name: 'Praise & Viral engagement',
     badge: 'Viral',
-    description: 'Đẩy mạnh tương tác tự nhiên, khen ngợi nội dung bài viết',
+    description: 'Boosts natural engagement by praising the post content',
     comments: [
       '{Quá tuyệt vời|Xuất sắc luôn|Đỉnh của chóp|Quá ý nghĩa|Chuẩn luôn}|{ạ|nha|bác ơi|mọi người ơi}! {Rất thích|Cực kỳ thích|Rất ấn tượng với} {nội dung|bài viết|video|chia sẻ} này. ❤️',
       '{Tuyệt vời quá|Đẹp mê ly|Đẳng cấp thực sự|Không còn gì để chê}! {Mong chờ|Hóng|Chúc bạn|Chúc kênh} {các bài viết tiếp theo|ngày càng phát triển|luôn thành công}! 👏✨',
@@ -1111,9 +1111,9 @@ const SEEDING_PRESETS = [
   },
   {
     id: 'discussion',
-    name: 'Thảo luận & Hỏi đáp',
-    badge: 'Hỏi đáp',
-    description: 'Kích thích bình luận tranh luận, giữ chân người xem lâu hơn',
+    name: 'Discussion & Q&A',
+    badge: 'Q&A',
+    description: 'Encourages discussion comments to keep viewers around longer',
     comments: [
       '{Bác|Bạn|Chủ thớt|Admin} cho mình hỏi {thêm chút kinh nghiệm về cái này với|chút xíu với ạ|đoạn này xử lý thế nào vậy ạ}? {Thấy hay quá|Nhìn cuốn thật sự|Tò mò ghê}! 🤔',
       '{Ai đã trải nghiệm|Có ai thử|Đã có bác nào dùng} cái này chưa ạ? {Cho em xin|Chia sẻ chút} review chân thực với nha! 🙌',
@@ -1125,20 +1125,20 @@ const SEEDING_PRESETS = [
 ];
 
 const REACTED_ARIA_RE = /(Gỡ|Remove|Đã thích|Liked|Thay đổi|Change)/i;
-// Sau khi thả cảm xúc khác Like, nút Like hiển thị tên cảm xúc đó thay cho "Thích"
+// After reacting with something other than Like, the Like button shows that reaction's name instead of "Thích"
 const REACTION_NAME_RE = /^(Yêu thích|Thương thương|Haha|Wow|Buồn|Phẫn nộ|Love|Care|Sad|Angry)$/i;
 
 function isReactedState(state, beforeAria, beforeText = '') {
   if (!state) return false;
-  // 1. Trạng thái aria đã đổi thành Gỡ Thích, Remove, Liked,...
+  // 1. aria state changed to Unlike, Remove, Liked,... (Gỡ Thích...)
   if (REACTED_ARIA_RE.test(state.aria)) return true;
-  // 2. Trạng thái aria hoặc text đổi thành tên reaction khác (Haha, Yêu thích,...)
+  // 2. aria or text changed to another reaction name (Haha, Love,...)
   if (REACTION_NAME_RE.test(state.aria) || REACTION_NAME_RE.test(state.text)) return true;
-  // 3. aria-pressed chuyển thành true
+  // 3. aria-pressed became true
   if (state.pressed === 'true') return true;
-  // 4. aria thay đổi khác aria ban đầu và không còn là "Thích" đơn thuần
+  // 4. aria differs from the original aria and is no longer plain "Like"
   if (Boolean(state.aria) && state.aria !== beforeAria && !/^(Thích|Like)$/i.test(state.aria)) return true;
-  // 5. Nếu là dạng nút pill hiển thị số cảm xúc (ví dụ trước click là 3, sau click là 4 hoặc 5)
+  // 5. Pill-style button showing the reaction count (e.g. 3 before the click, 4 or 5 after)
   if (beforeText && /^\d+$/.test(beforeText.trim()) && /^\d+$/.test((state.text || '').trim())) {
     const numBefore = parseInt(beforeText.trim(), 10);
     const numAfter = parseInt(state.text.trim(), 10);
@@ -1158,8 +1158,8 @@ const readButtonState = (el) => {
   return { aria, pressed, text, isBlue };
 };
 
-// Xác nhận nút Like đã chuyển sang trạng thái "đã bày tỏ cảm xúc" sau khi click.
-// Tối ưu: Polling phản hồi nhanh mỗi 50ms, phản hồi tức thì trong 60-150ms
+// Confirm the Like button switched to the "reacted" state after the click.
+// Optimized: fast polling every 50ms, instant feedback within 60-150ms
 async function verifyReacted(handle, beforeAria, refind = null, maxWaitMs = 1200, beforeText = '') {
   const start = Date.now();
   let retried = false;
@@ -1174,7 +1174,7 @@ async function verifyReacted(handle, beforeAria, refind = null, maxWaitMs = 1200
       if (fresh) {
         const state = await fresh.evaluate(readButtonState).catch(() => null);
         if (isReactedState(state, beforeAria, beforeText)) return true;
-        // Nếu qua 600ms Facebook chưa cập nhật, click bổ trợ 1 lần nữa để đảm bảo tương tác ăn 100%
+        // If Facebook hasn't updated after 600ms, click once more to make sure the engagement lands
         if (!retried && Date.now() - start > 600) {
           retried = true;
           await fresh.click({ timeout: 600 }).catch(async () => {
@@ -1189,7 +1189,7 @@ async function verifyReacted(handle, beforeAria, refind = null, maxWaitMs = 1200
   return false;
 }
 
-// Hỗ trợ dừng chờ ngay lập tức khi AbortSignal kích hoạt (Deep Cancellation)
+// Stops waiting immediately when the AbortSignal fires (Deep Cancellation)
 function cancellableSleep(ms, signal) {
   if (ms <= 0 || signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => {
@@ -1208,7 +1208,7 @@ function cancellableSleep(ms, signal) {
   });
 }
 
-// Hàm tính toán độ trễ tối ưu giữa các trang theo chuẩn Safe Human Pacing (chống spam, chống checkpoint)
+// Computes the optimal delay between pages per Safe Human Pacing (anti-spam, anti-checkpoint)
 function calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMinutes, totalPages, concurrency, speedMode = 'NORMAL') {
   if (dripFeedMode && dripDurationMinutes > 0) {
     const totalDurationMs = dripDurationMinutes * 60 * 1000;
@@ -1243,7 +1243,7 @@ function calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMi
 }
 
 /**
- * Tính thời gian nghỉ hạ nhiệt theo lô (Batch Cooldown) dùng chung cho Single & Multi Worker
+ * Computes the batch cooldown rest time shared by Single & Multi Worker
  */
 function computeBatchCooldownMs(cooldownDurationMs, speedMode = 'FAST', isBigBatch = false) {
   let baseCooldown = cooldownDurationMs || 10000;
@@ -1261,18 +1261,18 @@ function computeBatchCooldownMs(cooldownDurationMs, speedMode = 'FAST', isBigBat
     : baseCooldown + Math.floor(Math.random() * 1000);
 }
 
-// Tìm nút Like siêu tốc: Quét và đánh dấu trực tiếp trong DOM nội tại (0.5ms) thay vì gọi 25 lệnh CDP tuần tự
+// Ultra-fast Like button finder: scan and mark directly in the in-page DOM (0.5ms) instead of 25 sequential CDP calls
 async function findLikeButtonOnTab(tab) {
   try {
     const u = tab.url() || '';
     const isHome = u === 'https://www.facebook.com/' || u === 'https://www.facebook.com' || u.startsWith('https://www.facebook.com/?') || u.includes('facebook.com/home.php');
     if (isHome) {
-      console.warn(`[FB-Buff] ⚠️ findLikeButtonOnTab: Tab đang ở trang chủ Facebook (${u}), từ chối quét Like để tránh like nhầm New Feed.`);
+      console.warn(`[FB-Buff] ⚠️ findLikeButtonOnTab: the tab is on the Facebook home page (${u}), refusing to scan for Like to avoid liking the News Feed by mistake.`);
       return null;
     }
 
     const found = await tab.evaluate(() => {
-      // Xóa đánh dấu cũ nếu có
+      // Clear old marks if any
       const prev = document.querySelectorAll('[data-viplike-target="like"]');
       prev.forEach((el) => el.removeAttribute('data-viplike-target'));
 
@@ -1286,18 +1286,18 @@ async function findLikeButtonOnTab(tab) {
 
       function isLegitLikeButton(b) {
         if (!isVisible(b)) return false;
-        // Bỏ qua nếu nằm trong thanh banner / header trên cùng
+        // Skip if inside the top banner / header
         if (b.closest('div[role="banner"]')) return false;
-        // Bỏ qua nếu nằm trong popup thông báo, tin nhắn, cài đặt
+        // Skip if inside a notifications, messages or settings popup
         if (b.closest('div[aria-label*="Thông báo"], div[role="dialog"][aria-label*="Thông báo"], div[role="dialog"][aria-label*="Trang &"], div[role="dialog"][aria-label*="Cài đặt"], div[role="dialog"][aria-label*="Tin nhắn"]')) return false;
 
         const aria = (b.getAttribute('aria-label') || '').trim();
         const text = (b.innerText || '').trim();
 
-        // Bỏ qua nút đếm số cảm xúc thuần (ví dụ "Thích: 2 người")
+        // Skip pure reaction-count buttons (e.g. "Thích: 2 người")
         if (/^(?:Thích|Like):\s*\d+/i.test(aria)) return false;
 
-        // Khớp chính xác aria-label của nút Like / Cảm xúc (hỗ trợ cả Post, Video và Reels)
+        // Exact match on the Like / Reaction button aria-label (supports Posts, Videos and Reels)
         if (
           aria === 'Thích' || aria === 'Like' ||
           /^Thích[,\s]/i.test(aria) || /^Like[,\s]/i.test(aria) ||
@@ -1312,12 +1312,12 @@ async function findLikeButtonOnTab(tab) {
           return true;
         }
 
-        // Khớp nút có attribute quảng cáo Facebook
+        // Match buttons with Facebook's ad attribute
         if (b.querySelector('[data-ad-rendering-role="like_button"]') || b.getAttribute('data-ad-rendering-role') === 'like_button') {
           return true;
         }
 
-        // Khớp chính xác theo text hiển thị (nhưng loại trừ text quá dài)
+        // Exact match on the visible text (excluding overly long text)
         const lines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
         if (lines.length > 0 && (lines[0] === 'Thích' || lines[0] === 'Like') && text.length <= 15) {
           return true;
@@ -1326,7 +1326,7 @@ async function findLikeButtonOnTab(tab) {
         return false;
       }
 
-      // Ưu tiên 1: Quét trong Modal Dialog bài viết đang mở (bài viết xem qua permalink/share nằm trong modal lightbox)
+      // Priority 1: scan inside the open post Modal Dialog (posts opened via permalink/share sit in a lightbox modal)
       const modals = Array.from(document.querySelectorAll('div[role="dialog"]')).filter((d) => {
         const aria = (d.getAttribute('aria-label') || '').toLowerCase();
         return !aria.includes('thông báo') && !aria.includes('trang &') && !aria.includes('chuyển sang') && !aria.includes('cài đặt') && !aria.includes('tin nhắn');
@@ -1340,7 +1340,7 @@ async function findLikeButtonOnTab(tab) {
         }
       }
 
-      // Ưu tiên 2: Quét trong bài viết (Feed article / Group post / Pagelet)
+      // Priority 2: scan inside the post (Feed article / Group post / Pagelet)
       const articles = Array.from(document.querySelectorAll('div[role="article"], div[data-pagelet*="FeedUnit"], div[data-pagelet*="Group"]'));
       for (const a of articles) {
         const btns = Array.from(a.querySelectorAll('div[role="button"]'));
@@ -1351,7 +1351,7 @@ async function findLikeButtonOnTab(tab) {
         }
       }
 
-      // Ưu tiên 3: Quét trong Reels / Video container (div[role="main"])
+      // Priority 3: scan inside the Reels / Video container (div[role="main"])
       const mains = Array.from(document.querySelectorAll('div[role="main"]'));
       for (const m of mains) {
         const btns = Array.from(m.querySelectorAll('div[role="button"]'));
@@ -1370,7 +1370,7 @@ async function findLikeButtonOnTab(tab) {
     }
   } catch (e) { }
 
-  // Fallback Playwright Locator có phạm vi an toàn bên trong dialog, article hoặc main (Reels)
+  // Fallback Playwright Locator safely scoped inside a dialog, article or main (Reels)
   const fastFallback = tab.locator(
     'div[role="dialog"]:not([aria-label*="Thông báo"]) div[role="button"][aria-label="Thích"], ' +
     'div[role="dialog"]:not([aria-label*="Thông báo"]) div[role="button"][aria-label="Like"], ' +
@@ -1391,7 +1391,7 @@ async function findLikeButtonOnTab(tab) {
 }
 
 /**
- * Phát hiện hộp thoại hoặc trang cảnh báo chặn thao tác / nghi ngờ hành vi tự động từ Facebook
+ * Detects Facebook dialogs or pages warning about blocked actions / suspected automated behavior
  * @returns {Promise<{ blocked: boolean, automatedWarning: boolean, matched?: string, text?: string } | null>}
  */
 async function detectActionBlockReason(tab) {
@@ -1470,7 +1470,7 @@ async function detectActionBlockReason(tab) {
         }
       }
 
-      // Kiểm tra thêm toàn trang khi Facebook đẩy qua màn hình cảnh báo không nằm trong dialog
+      // Also check the whole page when Facebook shows a warning screen outside a dialog
       const bodyText = (document.body ? document.body.innerText : '').toLowerCase();
       if (bodyText.length > 0 && bodyText.length < 3000) {
         const autoMatch = automatedList.find((p) => bodyText.includes(p));
@@ -1483,7 +1483,7 @@ async function detectActionBlockReason(tab) {
 
     if (checkResult && checkResult.blocked) {
       console.warn(
-        `[FB-Buff] 🛑 ${checkResult.automatedWarning ? 'CẢNH BÁO HÀNH VI TỰ ĐỘNG' : 'Action Blocked'} khớp "${checkResult.matched}" [${checkResult.aria}]: "${checkResult.text.replace(/\s+/g, ' ')}"`
+        `[FB-Buff] 🛑 ${checkResult.automatedWarning ? 'AUTOMATED BEHAVIOR WARNING' : 'Action Blocked'} matched "${checkResult.matched}" [${checkResult.aria}]: "${checkResult.text.replace(/\s+/g, ' ')}"`
       );
       return checkResult;
     }
@@ -1499,14 +1499,14 @@ async function checkActionBlockedOnTab(tab) {
   return Boolean(reason && reason.blocked);
 }
 
-/** Tự động đóng các popup / overlay làm phiền của Facebook (Lúc khác, Not now, Đóng, v.v.) */
+/** Automatically closes annoying Facebook popups / overlays (Not now, Later, Close, etc.) */
 async function dismissFacebookOverlays(tab) {
   try {
     await tab.evaluate(() => {
       const dismissTexts = ['lúc khác', 'not now', 'để sau', 'không phải bây giờ'];
       const dialogs = document.querySelectorAll('div[role="dialog"]');
       for (const dlg of dialogs) {
-        // Nếu dialog này là nơi chứa bài viết hoặc nút Like (hộp thoại xem ảnh/reel), TUYỆT ĐỐI KHÔNG ĐƯỢC ĐÓNG
+        // If this dialog holds the post or the Like button (photo/reel viewer), NEVER close it
         const isPostDialog = Boolean(
           dlg.querySelector('[aria-label="Thích"], [aria-label="Like"], [aria-label*="Bình luận dưới tên"], [role="article"]')
         );
@@ -1525,15 +1525,15 @@ async function dismissFacebookOverlays(tab) {
   } catch (_) { }
 }
 
-/** Tự động xử lý trang trung gian bắt chuyển tài khoản (forced_account_switch) của Facebook */
+/** Automatically handles Facebook's forced account switch interstitial (forced_account_switch) */
 async function handleForcedAccountSwitch(tab, targetUrl = null, workerTag = '', pageInfo = null) {
   try {
     if (!tab || tab.isClosed()) return false;
     const u = tab.url() || '';
     if (u.includes('forced_account_switch')) {
-      console.log(`[FB-Buff]${workerTag} ⚠️ Phát hiện trang "forced_account_switch" (Chuyển tài khoản). Đang tự động xử lý...`);
+      console.log(`[FB-Buff]${workerTag} ⚠️ Detected the "forced_account_switch" page. Handling it automatically...`);
 
-      // Nếu có tên Fanpage, ưu tiên click chọn danh tính Fanpage đó trên form thay vì để mặc định nick mẹ
+      // If there's a Fanpage name, prefer selecting that Fanpage identity on the form instead of the default parent account
       if (pageInfo && pageInfo.name) {
         const pageOption = tab.locator(
           `div[role="radio"]:has-text("${pageInfo.name}"), ` +
@@ -1541,7 +1541,7 @@ async function handleForcedAccountSwitch(tab, targetUrl = null, workerTag = '', 
           `label:has-text("${pageInfo.name}")`
         ).first();
         if (await pageOption.isVisible({ timeout: 1200 }).catch(() => false)) {
-          console.log(`[FB-Buff]${workerTag} 🎯 Đã chọn danh tính Page "${pageInfo.name}" trên forced_account_switch`);
+          console.log(`[FB-Buff]${workerTag} 🎯 Selected Page identity "${pageInfo.name}" on forced_account_switch`);
           await pageOption.click({ force: true }).catch(() => { });
           await tab.waitForTimeout(400);
         }
@@ -1555,7 +1555,7 @@ async function handleForcedAccountSwitch(tab, targetUrl = null, workerTag = '', 
         if (targetUrl) {
           const cur = tab.url() || '';
           if (!cur.includes(targetUrl) && (cur.includes('forced_account_switch') || cur === 'https://www.facebook.com/')) {
-            console.log(`[FB-Buff]${workerTag} 🔄 Sau khi giải phóng forced_account_switch, đưa tab về: ${targetUrl}...`);
+            console.log(`[FB-Buff]${workerTag} 🔄 After clearing forced_account_switch, sending the tab back to: ${targetUrl}...`);
             await tab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => { });
             await tab.waitForTimeout(1000);
           }
@@ -1564,12 +1564,12 @@ async function handleForcedAccountSwitch(tab, targetUrl = null, workerTag = '', 
       }
     }
   } catch (e) {
-    console.warn(`[FB-Buff]${workerTag} ⚠️ Lỗi xử lý forced_account_switch:`, e.message);
+    console.warn(`[FB-Buff]${workerTag} ⚠️ Error handling forced_account_switch:`, e.message);
   }
   return false;
 }
 
-/** Kiểm tra bài viết Facebook có bị lỗi "Trang này hiện không hiển thị / Nội dung không khả dụng" */
+/** Checks whether a Facebook post shows "This content isn't available right now" */
 async function checkFacebookContentUnavailable(tab) {
   try {
     if (!tab || tab.isClosed()) return false;
@@ -1611,7 +1611,7 @@ function registerLightweightTabRoutes(tab) {
   tab.route('**/*{google-analytics,doubleclick}*', (route) => route.abort()).catch(() => {});
 }
 
-/** Đảm bảo Tab luôn mở và kết nối còn tốt, tự động đóng tab crash/treo và tạo tab mới */
+/** Keeps the Tab open and healthy, automatically closing crashed/hung tabs and opening a new one */
 async function ensureTabHealthy(context, currentTab, trackedTabs = null) {
   let needsNewTab = !currentTab || currentTab.isClosed() || Boolean(currentTab._isCrashed);
 
@@ -1647,7 +1647,7 @@ async function ensureTabHealthy(context, currentTab, trackedTabs = null) {
   }
 
   try {
-    console.log('[FB-Buff] 🔄 Tab bị đóng, crash hoặc treo — đang tự động khởi tạo tab sạch mới...');
+    console.log('[FB-Buff] 🔄 Tab closed, crashed or hung — automatically opening a clean new tab...');
     const newTab = await context.newPage();
     registerLightweightTabRoutes(newTab);
     if (trackedTabs) trackedTabs.add(newTab);
@@ -1661,8 +1661,8 @@ async function ensureTabHealthy(context, currentTab, trackedTabs = null) {
       msg.includes('Target closed')
     );
     if (isBrowserDead) {
-      console.error('[FB-Buff] 🛑 Trình duyệt Chromium đã bị đóng hoặc crash toàn phiên:', msg);
-      const deadErr = new Error(`Trình duyệt Chromium đã bị đóng hoặc crash: ${msg}`);
+      console.error('[FB-Buff] 🛑 The Chromium browser was closed or crashed for the whole session:', msg);
+      const deadErr = new Error(`The Chromium browser was closed or crashed: ${msg}`);
       deadErr.isBrowserDead = true;
       throw deadErr;
     }
@@ -1670,7 +1670,7 @@ async function ensureTabHealthy(context, currentTab, trackedTabs = null) {
   }
 }
 
-/** Chủ động đóng tab cũ và tạo tab mới để giải phóng RAM renderer cho các lô dài */
+/** Proactively closes the old tab and opens a new one to free renderer RAM on long batches */
 async function recycleHealthyTab(context, currentTab, trackedTabs = null) {
   if (currentTab) {
     if (trackedTabs) trackedTabs.delete(currentTab);
@@ -1731,26 +1731,26 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
   const targetName = (pageInfo.name || '').trim();
   const skipAvatarModal = Boolean(options?.skipAvatarModal);
 
-  // Kiểm tra xem hiện tại đã ở đúng danh tính chưa
+  // Check whether we're already on the right identity
   const currentActor = await getCurrentActor(tab);
   if (currentActor) {
     const isMatched = isProfileVia
       ? currentActor.id === String(uid)
       : (currentActor.id === targetId || (targetName && currentActor.name === targetName));
     if (isMatched) {
-      console.log(`[FB-Buff]${workerTag} 🎯 Đã ở đúng danh tính "${currentActor.name}" (ID: ${currentActor.id})`);
+      console.log(`[FB-Buff]${workerTag} 🎯 Already on the right identity "${currentActor.name}" (ID: ${currentActor.id})`);
       return true;
     }
   }
 
-  console.log(`[FB-Buff]${workerTag} 🔄 Đang chuyển sang danh tính "${pageInfo.name || 'Nick mẹ'}" (ID: ${pageInfo.id || uid})...`);
+  console.log(`[FB-Buff]${workerTag} 🔄 Switching to identity "${pageInfo.name || 'Parent account'}" (ID: ${pageInfo.id || uid})...`);
 
-  // Đóng các modal thừa nếu có
+  // Close leftover modals if any
   await tab.keyboard.press('Escape').catch(() => { });
   await tab.waitForTimeout(200);
 
-  // Bước 1: Mở menu Avatar góc trên cùng bên phải trong banner hoặc header navigation
-  // (Bỏ qua nếu Voice Switcher đã mở và không thấy Page để đi thẳng qua profile.php?id=..., tiết kiệm 5-6s/page)
+  // Step 1: open the Avatar menu at the top right of the banner or header navigation
+  // (Skipped if the Voice Switcher is already open and the Page isn't found, going straight via profile.php?id=..., saving 5-6s/page)
   const avatarSelector =
     'div[role="banner"] div[role="button"][aria-label*="trang cá nhân" i], ' +
     'div[role="banner"] div[role="button"][aria-label*="Your profile" i], ' +
@@ -1764,7 +1764,7 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
 
   let hasAvatar = skipAvatarModal ? false : await waitVisible(avatarBtn, 1500);
 
-  // TỐI ƯU SIÊU TỐC: Chỉ khi giao diện hiện tại thực sự thiếu thanh header menu Avatar mới cần đưa về trang chủ
+  // SPEED OPTIMIZATION: only go back to the home page when the current UI really lacks the Avatar header menu
   if (!skipAvatarModal && !hasAvatar) {
     const curSwitchUrl = tab.url() || '';
     if (curSwitchUrl.includes('/watch/') || !curSwitchUrl.includes('facebook.com')) {
@@ -1778,7 +1778,7 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
   if (hasAvatar) {
     await avatarBtn.click({ force: true });
 
-    // Bước 2: Kiểm tra xem Page/Via mục tiêu có nằm ngay trong danh sách rút gọn không
+    // Step 2: check whether the target Page/Via is right in the short list
     const searchTargetName = isProfileVia ? '' : targetName;
     const seeAllBtn = tab.locator(
       'div[role="button"]:has-text("Xem tất cả trang cá nhân"), ' +
@@ -1789,7 +1789,7 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
       '[aria-label*="See all profiles" i], [aria-label*="Xem tất cả trang" i]'
     ).first();
 
-    // Chờ menu tài khoản render xong (đợi seeAllBtn hoặc mục quickPage xuất hiện)
+    // Wait for the account menu to finish rendering (wait for seeAllBtn or a quickPage item)
     await waitVisible(seeAllBtn, 2000);
 
     if (searchTargetName) {
@@ -1802,7 +1802,7 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
         switched = true;
       }
     } else if (isProfileVia) {
-      // Chuyển về Via mẹ: Chọn profile cá nhân đầu tiên trong menu
+      // Switch back to the parent Via: pick the first personal profile in the menu
       const viaOption = tab.locator(
         'div[role="menu"] div[role="button"], div[role="dialog"] div[role="button"]'
       ).first();
@@ -1812,11 +1812,11 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
       }
     }
 
-    // Bước 3: Nếu chưa bấm được, mở modal "Xem tất cả trang cá nhân"
+    // Step 3: if not clicked yet, open the "See all profiles" modal
     if (!switched && (await waitVisible(seeAllBtn, 1200))) {
       await seeAllBtn.click({ force: true });
 
-      // Bắt dialog chứa danh sách chuyển trang cá nhân
+      // Catch the dialog holding the profile switch list
       const profileDlg = tab.locator('div[role="dialog"]').filter({
         has: tab.locator('input, [role="listitem"]'),
       }).last();
@@ -1824,14 +1824,14 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
       const activeDlg = (await waitVisible(profileDlg, 2500)) ? profileDlg : ((await waitVisible(fallbackDlg, 1000)) ? fallbackDlg : null);
 
       if (activeDlg) {
-        // 1. Kiểm tra nhanh nếu Page/Profile đã hiển thị ngay trong danh sách ban đầu của modal
+        // 1. Quick check whether the Page/Profile is already shown in the modal's initial list
         let pageItem = activeDlg.locator('div[role="button"], div[role="listitem"]').filter({ hasText: targetName }).first();
         if (await waitVisible(pageItem, 500)) {
           await pageItem.click({ force: true });
           switched = true;
         }
 
-        // 2. Nếu chưa thấy, dùng ô tìm kiếm trong modal (nhập bằng DOM evaluate để an toàn không gây blur modal)
+        // 2. If not, use the search box in the modal (typed via DOM evaluate so it doesn't blur the modal)
         if (!switched && targetName) {
           const hasSearchInput = await activeDlg.locator('input').first().isVisible({ timeout: 350 }).catch(() => false);
           if (hasSearchInput) {
@@ -1858,7 +1858,7 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
           }
         }
 
-        // 3. Nếu vẫn chưa thấy, cuộn nhanh danh sách (hỗ trợ tài khoản có hàng chục - hàng trăm Page)
+        // 3. If still not found, scroll the list quickly (supports accounts with dozens to hundreds of Pages)
         if (!switched && targetName) {
           for (let scrollAttempt = 0; scrollAttempt < 8 && !switched; scrollAttempt++) {
             await activeDlg.evaluate((dlg) => {
@@ -1894,9 +1894,9 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
     }
   }
 
-  // Fallback nếu không click được qua menu banner
+  // Fallback when the banner menu can't be clicked
   if (!switched) {
-    // Xóa i_user trước khi mở profile.php: khi đang mang i_user của Page trước, Facebook ẩn nút "Switch Now" / "Chuyển ngay"
+    // Remove i_user before opening profile.php: while carrying the previous Page's i_user, Facebook hides the "Switch Now" button
     await context.clearCookies({ name: 'i_user' }).catch(() => { });
     await tab.waitForTimeout(250);
 
@@ -1949,19 +1949,19 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
         });
         await tab.waitForTimeout(500);
 
-        // Kiểm tra nếu Facebook yêu cầu chuyển sang Via khác (không thuộc quyền của Via hiện tại)
+        // Check whether Facebook asks to switch to another Via (not owned by the current Via)
         const mismatchDlg = tab.locator('div[role="dialog"]').filter({
           hasText: /Bạn cần chuyển sang|Chuyển tài khoản|You need to switch to/i
         }).first();
         if (await waitVisible(mismatchDlg, 800)) {
-          console.warn(`[FB-Buff]${workerTag} ⚠️ Page "${pageInfo.name}" (${pageInfo.id}) thuộc quản trị của Via khác. Tự động bỏ qua.`);
+          console.warn(`[FB-Buff]${workerTag} ⚠️ Page "${pageInfo.name}" (${pageInfo.id}) is managed by another Via. Skipping automatically.`);
           pageInfo._switchErrorType = 'WRONG_VIA';
           await tab.keyboard.press('Escape').catch(() => { });
           await tab.waitForTimeout(300);
           return false;
         }
 
-        // Bắt và bấm nút "Chuyển" trong hộp thoại xác nhận đổi trang cá nhân Pro5 nếu mở modal
+        // Catch and click "Switch" in the Pro5 profile switch confirmation dialog if a modal opens
         if (!clickedPrimary) {
           const modalConfirm = tab.locator(
             'div[role="dialog"] div[role="button"][aria-label="Chuyển"], ' +
@@ -1980,11 +1980,11 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
     }
   }
 
-  // Đóng mọi popover/menu còn mở để tránh cản trở điều hướng
+  // Close any open popovers/menus so they don't block navigation
   await tab.keyboard.press('Escape').catch(() => { });
 
   if (switched) {
-    // Chờ Facebook hoàn tất request GraphQL đổi cookie i_user trên server trước khi điều hướng (tránh cắt ngang request!)
+    // Wait for Facebook's GraphQL request that changes the i_user cookie server-side before navigating (don't cut it off!)
     const wantsPageCookie = Boolean(pageInfo.id && pageInfo.id !== uid && !pageInfo.isProfile);
     const cookieDeadline = Date.now() + 5000;
     while (Date.now() < cookieDeadline) {
@@ -1995,7 +1995,7 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
       await tab.waitForTimeout(300);
     }
 
-    // Chờ Facebook thực hiện điều hướng chuyển sang phiên tài khoản mới hoàn tất
+    // Wait for Facebook to finish navigating into the new account session
     await tab.waitForFunction(() => {
       const text = document.body ? document.body.innerText : '';
       return !text.includes('Đang chuyển sang') && !text.includes('Switching to');
@@ -2011,7 +2011,7 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
       await tab.waitForTimeout(100);
     }
 
-    // Cập nhật cookie i_user cho Playwright context khi chuyển thành công
+    // Update the i_user cookie in the Playwright context after a successful switch
     if (wantsPageCookie) {
       await context.addCookies([
         {
@@ -2028,7 +2028,7 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
     }
   } else {
     await context.clearCookies({ name: 'i_user' }).catch(() => { });
-    console.warn(`[FB-Buff]${workerTag} ⚠️ Không thể tìm nút chuyển sang danh tính "${pageInfo.name}" (${pageInfo.id}) trên Facebook.`);
+    console.warn(`[FB-Buff]${workerTag} ⚠️ Could not find the button to switch to identity "${pageInfo.name}" (${pageInfo.id}) on Facebook.`);
     return false;
   }
 
@@ -2036,12 +2036,12 @@ async function switchTabIdentity(tab, context, pageInfo, uid, workerTag = '', op
 }
 
 /**
- * Thực hiện chia sẻ bài viết (Share to Feed / Chia sẻ ngay) bằng danh tính Fanpage hiện tại trên Tab
- * Giúp tăng chỉ số Share thật trên bài viết của Facebook
+ * Shares the post (Share to Feed / Share now) as the current Fanpage identity on the Tab
+ * Increases the real Share count on the Facebook post
  */
 async function executePostShare(tab, workerTag = '') {
   try {
-    // 1. Tìm nút Chia sẻ trên bài viết
+    // 1. Find the Share button on the post
     const shareSelectors = [
       'div[role="button"][aria-label*="Chia sẻ" i]',
       'div[role="button"][aria-label*="Share" i]',
@@ -2074,8 +2074,8 @@ async function executePostShare(tab, workerTag = '') {
     }
 
     if (!shareBtn) {
-      console.warn(`[FB-Buff]${workerTag} ⚠️ Không tìm thấy nút Chia sẻ trên bài viết.`);
-      return { success: false, error: 'Không tìm thấy nút Chia sẻ trên bài viết' };
+      console.warn(`[FB-Buff]${workerTag} ⚠️ Share button not found on the post.`);
+      return { success: false, error: 'Share button not found on the post' };
     }
 
     await shareBtn.scrollIntoViewIfNeeded().catch(() => { });
@@ -2084,7 +2084,7 @@ async function executePostShare(tab, workerTag = '') {
     });
     await tab.waitForTimeout(650);
 
-    // 2. Tìm tùy chọn "Chia sẻ ngay" hoặc "Chia sẻ lên Bảng feed"
+    // 2. Find the "Share now" or "Share to Feed" option
     const shareOptions = [
       'div[role="menuitem"]:has-text("Chia sẻ ngay")',
       'div[role="menuitem"]:has-text("Share now")',
@@ -2113,7 +2113,7 @@ async function executePostShare(tab, workerTag = '') {
       }
     }
 
-    // 3. Nếu Facebook mở modal/dialog soạn bài chia sẻ (có nút Đăng / Post)
+    // 3. If Facebook opens a share composer modal/dialog (with a Post button)
     const postModalBtn = tab.locator(
       'div[role="dialog"] div[role="button"][aria-label="Đăng"], ' +
       'div[role="dialog"] div[role="button"][aria-label="Post"], ' +
@@ -2130,21 +2130,21 @@ async function executePostShare(tab, workerTag = '') {
     }
 
     if (optionClicked) {
-      console.log(`[FB-Buff]${workerTag} 🚀 Đã chia sẻ bài viết thành công lên tường Fanpage!`);
+      console.log(`[FB-Buff]${workerTag} 🚀 Shared the post to the Fanpage wall!`);
       return { success: true };
     }
 
-    // Đóng popover nếu không ấn được để tránh kẹt giao diện
+    // Close the popover if nothing could be clicked, so the UI doesn't get stuck
     await tab.keyboard.press('Escape').catch(() => { });
-    return { success: false, error: 'Không tìm thấy tùy chọn Chia sẻ ngay' };
+    return { success: false, error: 'Share now option not found' };
   } catch (err) {
-    console.warn(`[FB-Buff]${workerTag} ⚠️ Lỗi khi thực hiện Chia sẻ: ${err.message}`);
+    console.warn(`[FB-Buff]${workerTag} ⚠️ Error while sharing: ${err.message}`);
     return { success: false, error: err.message };
   }
 }
 
 /**
- * Thực hiện chuỗi tương tác (đổi danh tính, thả like, viết bình luận, chia sẻ) cho 1 Fanpage trên 1 Tab
+ * Runs the engagement chain (switch identity, like, comment, share) for 1 Fanpage on 1 Tab
  */
 async function executePageInteraction({
   tab,
@@ -2170,7 +2170,7 @@ async function executePageInteraction({
   if (signal?.aborted || (typeof shouldStop === 'function' && shouldStop())) {
     return {
       aborted: true,
-      deadReason: 'Tác vụ đã dừng do đạt đủ KPI hoặc có lệnh dừng',
+      deadReason: 'Task stopped because the KPI was reached or a stop command was issued',
       item: {
         pageId: pageInfo.id,
         pageName: pageInfo.name,
@@ -2178,12 +2178,12 @@ async function executePageInteraction({
         likeStatus: 'SKIPPED',
         commentStatus: 'SKIPPED',
         shareStatus: 'SKIPPED',
-        message: 'Bỏ qua do đã đạt đủ KPI mục tiêu',
+        message: 'Skipped because the KPI target was reached',
     },
   };
 }
 
-  // BƯỚC 0: KIỂM TRA ĐĂNG XUẤT / HẾT HẠN COOKIE TRÊN TAB
+  // STEP 0: CHECK FOR LOGOUT / EXPIRED COOKIE ON THE TAB
   const isLoginPageOnTab = await tab.evaluate(() => {
     const hasInputs = Boolean(document.querySelector('input[name="email"], input[name="pass"], #login_form'));
     const modalText = (document.querySelector('div[role="dialog"]')?.innerText || '').toLowerCase();
@@ -2194,17 +2194,17 @@ async function executePageInteraction({
   const curUrl = tab.url();
   if (isLoginPageOnTab || curUrl.includes('/login') || curUrl.includes('/checkpoint')) {
     const isCp = curUrl.includes('/checkpoint');
-    console.error(`[FB-Buff]${workerTag} 🚨 PHÁT HIỆN COOKIE HẾT HẠN / ĐÃ ĐĂNG XUẤT (Xuất hiện màn hình đăng nhập Facebook)!`);
+    console.error(`[FB-Buff]${workerTag} 🚨 EXPIRED COOKIE / LOGGED OUT DETECTED (Facebook login screen appeared)!`);
     return {
       cookieDead: true,
       isCheckpoint: isCp,
       isExpired: !isCp,
-      deadReason: isCp ? 'Tài khoản Facebook bị Checkpoint' : 'Cookie đã hết hạn hoặc phiên đăng nhập đã bị đăng xuất',
+      deadReason: isCp ? 'Facebook account is checkpointed' : 'Cookie expired or the login session was logged out',
       item: {
         pageId: pageInfo.id,
         pageName: pageInfo.name,
         status: 'ERROR',
-        error: isCp ? 'Tài khoản bị Checkpoint' : 'Cookie Facebook đã hết hạn. Vui lòng cập nhật Cookie mới.',
+        error: isCp ? 'Account is checkpointed' : 'Facebook Cookie expired. Please update the Cookie.',
       },
     };
   }
@@ -2221,7 +2221,7 @@ async function executePageInteraction({
   let isAutomatedWarning = false;
 
   try {
-    // BƯỚC 1: CHUYỂN ĐỔI DANH TÍNH
+    // STEP 1: SWITCH IDENTITY
     let fastSwitched = false;
     let voiceSwitchMissed = false;
     const curTabUrl = tab.url();
@@ -2249,7 +2249,7 @@ async function executePageInteraction({
       isPostLikeUrl;
 
     if (fastSwitch && isOnPost) {
-      // Nếu là Reels / Video, ngăn bình luận thường chứa nút chuyển đổi danh tính tương tác (Voice Switcher)
+      // For Reels / Video, the comment panel usually holds the engagement identity switch (Voice Switcher)
       const isReelsOrVideo = curTabUrl.includes('/reel/') || curTabUrl.includes('/videos/') || (targetUrl && (targetUrl.includes('/reel/') || targetUrl.includes('/videos/')));
       if (isReelsOrVideo) {
         const commentDrawerOpened = await tab.evaluate(() => {
@@ -2308,16 +2308,16 @@ async function executePageInteraction({
 
           if (await waitVisible(pageOpt, 500)) {
             await pageOpt.click({ force: true }).catch(() => { });
-            // Chờ Facebook hoàn tất vòng xoay chuyển danh tính (đợi "Đang chuyển sang..." biến mất)
+            // Wait for Facebook to finish the identity switch spinner (wait for "Switching to..." to disappear)
             await tab.waitForFunction(() => {
               const text = document.body ? document.body.innerText : '';
               return !text.includes('Đang chuyển sang') && !text.includes('Switching to');
             }, { timeout: 12000 }).catch(() => { });
             await tab.waitForTimeout(450);
             fastSwitched = true;
-            console.log(`[FB-Buff]${workerTag} ⚡ [FAST-SWITCH] Đã đổi sang Page "${pageInfo.name}" ngay trên bài viết!`);
+            console.log(`[FB-Buff]${workerTag} ⚡ [FAST-SWITCH] Switched to Page "${pageInfo.name}" right on the post!`);
           } else {
-            // Tránh gõ vào searchBox (FB đóng dialog khi nhập input); thử mở rộng 1 lần nhanh, nếu không có thì đóng và đi thẳng qua profile.php
+            // Don't type into the searchBox (FB closes the dialog on input); try expanding once quickly, otherwise close and go straight via profile.php
             const seeMoreVoice = tab.locator(
               'div[role="dialog"] div[role="button"]:has-text("Xem thêm trang"), ' +
               'div[role="dialog"] div[role="button"]:has-text("See more Pages"), ' +
@@ -2342,7 +2342,7 @@ async function executePageInteraction({
               }, { timeout: 12000 }).catch(() => { });
               await tab.waitForTimeout(450);
               fastSwitched = true;
-              console.log(`[FB-Buff]${workerTag} ⚡ [FAST-SWITCH SCROLL] Đã tìm và đổi sang Page "${pageInfo.name}"!`);
+              console.log(`[FB-Buff]${workerTag} ⚡ [FAST-SWITCH SCROLL] Found and switched to Page "${pageInfo.name}"!`);
             } else {
               voiceSwitchMissed = true;
               await tab.keyboard.press('Escape').catch(() => { });
@@ -2353,29 +2353,29 @@ async function executePageInteraction({
     }
 
     if (fastSwitched) {
-      // TỐI ƯU SIÊU TỐC: Nếu đã đổi danh tính trực tiếp trên bài viết và tab vẫn đang ở bài viết mục tiêu,
-      // KHÔNG CẦN TẢI LẠI TOÀN TRANG (tiết kiệm 6 - 8 giây cho MỖI lượt Like)!
+      // SPEED OPTIMIZATION: if the identity was switched right on the post and the tab is still on the target post,
+      // NO FULL PAGE RELOAD NEEDED (saves 6 - 8 seconds per Like)!
       const u = tab.url() || '';
       const isStillOnPost = !u.includes('forced_account_switch') &&
         (u.includes('/posts/') || u.includes('/permalink') || u.includes('/share/') || u.includes('/reel/') || u.includes('/videos/') || u.includes('/photo/') || (targetUrl && u.includes(targetUrl)));
 
       if (!isStillOnPost) {
-        console.log(`[FB-Buff]${workerTag} 🌐 Tab bị trôi khỏi bài viết (${u}), đang đưa về bài viết mục tiêu: ${targetUrl}...`);
+        console.log(`[FB-Buff]${workerTag} 🌐 Tab drifted off the post (${u}), bringing it back to the target post: ${targetUrl}...`);
         await tab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => { });
         await tab.waitForTimeout(1500);
       } else {
-        // Chỉ cần chờ ngắn 450ms để DOM Facebook cập nhật actor mới
+        // Only a short 450ms wait is needed for Facebook's DOM to update the new actor
         await tab.waitForTimeout(450);
       }
 
-      // Kiểm tra lại danh tính thực tế ngay sau Fast-Switch; nếu chưa đổi thì fallback sang Switch chuẩn
+      // Re-check the actual identity right after Fast-Switch; if it didn't change, fall back to the standard Switch
       const postFastActor = await getCurrentActor(tab);
       if (postFastActor && pageInfo.id && pageInfo.id !== uid && !pageInfo.isProfile) {
         const fastMatched =
           postFastActor.id === String(pageInfo.id) ||
           (pageInfo.name && postFastActor.name && postFastActor.name.toLowerCase() === pageInfo.name.toLowerCase());
         if (!fastMatched) {
-          console.warn(`[FB-Buff]${workerTag} ⚠️ Fast-Switch chưa đổi được danh tính (vẫn là "${postFastActor.name}"), tự động chuyển sang Switch chuẩn...`);
+          console.warn(`[FB-Buff]${workerTag} ⚠️ Fast-Switch didn't change the identity (still "${postFastActor.name}"), falling back to the standard Switch...`);
           await tab.keyboard.press('Escape').catch(() => { });
           fastSwitched = false;
         }
@@ -2386,24 +2386,24 @@ async function executePageInteraction({
       const switchOk = await switchTabIdentity(tab, context, pageInfo, uid, workerTag, { skipAvatarModal: voiceSwitchMissed });
       if (!switchOk) {
         recordPageSwitchOutcome(uid, pageInfo.id, false, pageInfo._switchErrorType || 'SWITCH_FAILED');
-        throw new Error(`Không thể chuyển sang danh tính Fanpage "${pageInfo.name}" (${pageInfo.id}) trên Facebook`);
+        throw new Error(`Could not switch to Fanpage identity "${pageInfo.name}" (${pageInfo.id}) on Facebook`);
       }
 
-      // TỐI ƯU SIÊU TỐC: Nếu sau khi đổi danh tính, tab vẫn đang ở bài viết mục tiêu (chưa bị đổi URL),
-      // KHÔNG CẦN TẢI LẠI TOÀN TRANG (tiết kiệm 4 - 6 giây cho MỖI lượt Like)!
+      // SPEED OPTIMIZATION: if the tab is still on the target post after switching identity (URL unchanged),
+      // NO FULL PAGE RELOAD NEEDED (saves 4 - 6 seconds per Like)!
       const curU = tab.url() || '';
       const isStillOnPost = !curU.includes('forced_account_switch') &&
         (curU.includes('/posts/') || curU.includes('/permalink') || curU.includes('/share/') || curU.includes('/reel/') || curU.includes('/videos/') || curU.includes('/photo/') || (targetUrl && curU.includes(targetUrl)));
 
       if (!isStillOnPost) {
-        console.log(`[FB-Buff]${workerTag} 🌐 Đang mở bài viết mục tiêu: ${targetUrl}...`);
+        console.log(`[FB-Buff]${workerTag} 🌐 Opening the target post: ${targetUrl}...`);
         await tab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(async (navErr) => {
-          console.warn(`[FB-Buff]${workerTag} ⚠️ Thử lại mở bài viết mục tiêu: ${navErr.message}`);
+          console.warn(`[FB-Buff]${workerTag} ⚠️ Retrying to open the target post: ${navErr.message}`);
           await tab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => { });
         });
         await tab.waitForTimeout(400);
       } else {
-        console.log(`[FB-Buff]${workerTag} ⚡ Tab đã ở sẵn bài viết mục tiêu (${curU}), bỏ qua tải lại trang để tăng tốc.`);
+        console.log(`[FB-Buff]${workerTag} ⚡ Tab is already on the target post (${curU}), skipping the reload to speed up.`);
         await tab.waitForTimeout(400);
       }
 
@@ -2412,7 +2412,7 @@ async function executePageInteraction({
       }
     }
 
-    // ĐẢM BẢO CHẮC CHẮN TAB ĐANG Ở BÀI VIẾT MỤC TIÊU (CHỐNG BỊ FACEBOOK ĐẨY LẠC VỀ TRANG CHỦ / FEED)
+    // MAKE SURE THE TAB IS ON THE TARGET POST (GUARD AGAINST FACEBOOK PUSHING IT TO THE HOME PAGE / FEED)
     const checkIsOnPostUrl = () => {
       const u = tab.url() || '';
       const isHome = u === 'https://www.facebook.com/' || u === 'https://www.facebook.com' || u.startsWith('https://www.facebook.com/?') || u.includes('facebook.com/home.php');
@@ -2426,7 +2426,7 @@ async function executePageInteraction({
         await handleForcedAccountSwitch(tab, targetUrl, workerTag, pageInfo);
       }
       if (!checkIsOnPostUrl()) {
-        console.log(`[FB-Buff]${workerTag} 🔄 Tab chưa ở đúng bài viết (${tab.url()}), đang đưa về bài viết mục tiêu: ${targetUrl}...`);
+        console.log(`[FB-Buff]${workerTag} 🔄 Tab isn't on the right post (${tab.url()}), bringing it back to the target post: ${targetUrl}...`);
         await tab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => { });
         await tab.waitForTimeout(400);
       }
@@ -2436,22 +2436,22 @@ async function executePageInteraction({
     if (currentUrl.includes('/checkpoint') || currentUrl.includes('/login')) {
       const isCp = currentUrl.includes('/checkpoint');
       const cpMsg = isCp
-        ? 'Bị Facebook yêu cầu xác minh người thật ("Confirm you are human")'
-        : 'Cookie hết hạn (Bị chuyển về trang đăng nhập)';
+        ? 'Facebook asked to verify you are human ("Confirm you are human")'
+        : 'Cookie expired (redirected to the login page)';
       console.warn(`[FB-Buff]${workerTag} ⚠️ ${cpMsg} cho "${pageInfo.name}" (URL: ${currentUrl})`);
       throw new Error(cpMsg);
     }
 
-    // BƯỚC 2: HÀNH VI LƯỚT XEM TỰ NHIÊN & DWELL TIME (MÔ PHỎNG NGƯỜI THẬT ĐỌC BÀI VIẾT)
+    // STEP 2: NATURAL SCROLLING & DWELL TIME (SIMULATING A REAL PERSON READING THE POST)
     if (enableHumanBehavior) {
-      // Cuộn đọc bài tự nhiên (120 - 300px)
+      // Natural reading scroll (120 - 300px)
       await tab.evaluate(() => {
         const dlg = document.querySelector('div[role="dialog"]');
         if (dlg) dlg.scrollBy({ top: 120 + Math.floor(Math.random() * 180), behavior: 'smooth' });
         else window.scrollBy({ top: 120 + Math.floor(Math.random() * 180), behavior: 'smooth' });
       }).catch(() => { });
 
-      // Thời gian đọc bài (Dwell Time) mô phỏng người thật: Tinh chỉnh tối ưu theo speedMode
+      // Human-like Dwell Time reading the post: tuned per speedMode
       let dwellBase = 350;
       let dwellVar = 200;
       const currentSpeed = speedMode || 'FAST';
@@ -2460,7 +2460,7 @@ async function executePageInteraction({
       else if (currentSpeed === 'SAFE') { dwellBase = 800; dwellVar = 400; }
       await tab.waitForTimeout(dwellBase + Math.floor(Math.random() * dwellVar));
 
-      // Thỉnh thoảng cuộn nhẹ ngược lại (tỷ lệ 15%) như người đang ngẫm bài viết
+      // Occasionally scroll back up a little (15% chance) like someone pondering the post
       if (Math.random() < 0.15 && currentSpeed !== 'TURBO') {
         await tab.evaluate(() => {
           const dlg = document.querySelector('div[role="dialog"]');
@@ -2471,7 +2471,7 @@ async function executePageInteraction({
       }
     }
 
-    // BƯỚC 3: PHÂN BỔ CẢM XÚC THÔNG MINH
+    // STEP 3: SMART REACTION ALLOCATION
     if (currentReaction === 'RANDOM_POSITIVE' || currentReaction === 'RANDOM' || currentReaction === 'RANDOM_MIX' || currentReaction === 'SMART_MIX') {
       const rand = Math.random();
       if (rand < 0.65) currentReaction = 'LIKE';
@@ -2486,12 +2486,12 @@ async function executePageInteraction({
       else currentReaction = 'WOW';
     }
 
-    // BƯỚC 4: THẢ LIKE / REACTION
+    // STEP 4: DROP THE LIKE / REACTION
     if (enableLike) {
-      // 0. Đóng các popup quảng cáo / modal làm phiền của Facebook nếu có
+      // 0. Close Facebook ad popups / annoying modals if any
       await dismissFacebookOverlays(tab);
 
-      // 1. Đóng cookie banner nếu xuất hiện che màn hình (không đóng dialog bài viết)
+      // 1. Close the cookie banner if it covers the screen (don't close the post dialog)
       const cookieBanner = tab.locator('div[role="dialog"]:has-text("Cookie"), div[role="dialog"]:has-text("Cookies")').first();
       if (await cookieBanner.isVisible({ timeout: 400 }).catch(() => false)) {
         const acceptCookie = cookieBanner.locator('div[role="button"]:has-text("Chấp nhận"), div[role="button"]:has-text("Accept")').first();
@@ -2500,13 +2500,13 @@ async function executePageInteraction({
         }
       }
 
-      // Đảm bảo tab chắc chắn ở bài viết trước khi quét nút Like (ngăn chặn drift về trang chủ)
+      // Make sure the tab is on the post before scanning for the Like button (prevents drifting to the home page)
       if (!checkIsOnPostUrl()) {
         if (tab.url().includes('forced_account_switch')) {
           await handleForcedAccountSwitch(tab, targetUrl, workerTag, pageInfo);
         }
         if (!checkIsOnPostUrl()) {
-          console.warn(`[FB-Buff]${workerTag} 🔄 Tab bị trôi khỏi bài viết (${tab.url()}), đang phục hồi về: ${targetUrl}...`);
+          console.warn(`[FB-Buff]${workerTag} 🔄 Tab drifted off the post (${tab.url()}), restoring to: ${targetUrl}...`);
           await tab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => { });
           await tab.waitForTimeout(400);
         }
@@ -2535,17 +2535,17 @@ async function executePageInteraction({
       }
 
       if (likeBtn) {
-        // KIỂM TRA CHẮC CHẮN DANH TÍNH TRƯỚC KHI LIKE (Chống like nhầm bằng nick Mẹ)
+        // VERIFY THE IDENTITY BEFORE LIKING (prevents liking as the parent account by mistake)
         let currentActor = await getCurrentActor(tab);
         if (currentActor && pageInfo.id && pageInfo.id !== uid && !pageInfo.isProfile) {
           let isMatched = currentActor.id === String(pageInfo.id) ||
             (pageInfo.name && currentActor.name && currentActor.name.toLowerCase() === pageInfo.name.toLowerCase());
           if (!isMatched) {
-            // Nếu cookie i_user đã mang ID Page mới nhưng CurrentUserInitialData trên SPA bị cũ, tải lại tab 1 lần để làm mới actor
+            // If the i_user cookie already holds the new Page ID but CurrentUserInitialData in the SPA is stale, reload the tab once to refresh the actor
             const ctxCookies = await context.cookies('https://www.facebook.com').catch(() => []);
             const iUserCookie = ctxCookies.find((c) => c.name === 'i_user')?.value || '';
             if (iUserCookie === String(pageInfo.id)) {
-              console.log(`[FB-Buff]${workerTag} 🔄 Cookie đã sang Page "${pageInfo.name}" (${pageInfo.id}) nhưng DOM cũ vẫn ghi "${currentActor.name}", đang tải lại bài viết để đồng bộ...`);
+              console.log(`[FB-Buff]${workerTag} 🔄 Cookie is on Page "${pageInfo.name}" (${pageInfo.id}) but the stale DOM still says "${currentActor.name}", reloading the post to sync...`);
               await tab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
               await tab.waitForTimeout(800);
               currentActor = await getCurrentActor(tab);
@@ -2558,11 +2558,11 @@ async function executePageInteraction({
             }
           }
           if (!isMatched) {
-            console.warn(`[FB-Buff]${workerTag} ⚠️ Danh tính chưa khớp! Kỳ vọng "${pageInfo.name}" (${pageInfo.id}) nhưng hiện tại là "${currentActor?.name}" (${currentActor?.id}). TỪ CHỐI LIKE để bảo vệ Via.`);
-            // Ghi nhận như lỗi chuyển danh tính để Page hỏng lặp lại (vd: gán nhầm Via) được tự cách ly như nhánh switch thất bại.
-            // Trước đây nhánh này không ghi nhận → Page lỗi 9/9 lần vẫn bị thử lại ở mọi lượt chạy.
+            console.warn(`[FB-Buff]${workerTag} ⚠️ Identity mismatch! Expected "${pageInfo.name}" (${pageInfo.id}) but currently "${currentActor?.name}" (${currentActor?.id}). REFUSING TO LIKE to protect the Via.`);
+            // Record it as an identity-switch failure so repeatedly broken Pages (e.g. assigned to the wrong Via) get quarantined like the failed-switch branch.
+            // Previously this branch didn't record anything → a Page failing 9/9 times was still retried on every run.
             recordPageSwitchOutcome(uid, pageInfo.id, false, 'IDENTITY_MISMATCH');
-            throw new Error(`Chưa chuyển được danh tính sang Page "${pageInfo.name}" (Hiện tại: ${currentActor?.name || 'N/A'})`);
+            throw new Error(`Could not switch identity to Page "${pageInfo.name}" yet (current: ${currentActor?.name || 'N/A'})`);
           }
         }
 
@@ -2576,12 +2576,12 @@ async function executePageInteraction({
           currentAria.includes('Đã thích') ||
           currentAria.includes('Liked')
         ) {
-          console.log(`[FB-Buff]${workerTag} ℹ️ Page "${pageInfo.name}" đã Like trước đó (Trạng thái: ${currentAria}).`);
+          console.log(`[FB-Buff]${workerTag} ℹ️ Page "${pageInfo.name}" already liked earlier (state: ${currentAria}).`);
           likeStatus = 'ALREADY_LIKED';
         } else {
-          // KIỂM TRA CHẶN VƯỢT SCOPE: Nếu trước khi bấm Like mà đã đạt đủ KPI hoặc có lệnh dừng, SKIP ngay
+          // OVERSHOOT GUARD: if the KPI is already reached or a stop was issued before clicking Like, SKIP right away
           if (typeof shouldStop === 'function' && shouldStop()) {
-            console.warn(`[FB-Buff]${workerTag} 🛑 Đã đạt đủ KPI / nhận lệnh dừng, hủy lượt Like của Page "${pageInfo.name}" để không vượt scope.`);
+            console.warn(`[FB-Buff]${workerTag} 🛑 KPI reached / stop received, cancelling Page "${pageInfo.name}"'s Like so it doesn't overshoot.`);
             likeStatus = 'SKIPPED';
             return {
               item: {
@@ -2591,7 +2591,7 @@ async function executePageInteraction({
                 likeStatus: 'SKIPPED',
                 commentStatus: 'SKIPPED',
                 shareStatus: 'SKIPPED',
-                message: 'Hủy like do đã đạt đủ KPI mục tiêu',
+                message: 'Like cancelled because the KPI target was reached',
               },
             };
           }
@@ -2601,7 +2601,7 @@ async function executePageInteraction({
             const verifyTimeout = speedMode === 'TURBO' ? 700 : speedMode === 'FAST' ? 1200 : 2000;
             const verified = await verifyReacted(likeHandle, currentAria, () => findLikeButtonOnTab(tab), verifyTimeout, beforeText);
             likeStatus = verified ? 'SUCCESS' : 'UNVERIFIED';
-            console.log(`[FB-Buff]${workerTag} ${verified ? '✅' : '❔'} Page "${pageInfo.name}" thả LIKE ${verified ? 'đã xác nhận' : 'chưa xác nhận được trạng thái nút'}.`);
+            console.log(`[FB-Buff]${workerTag} ${verified ? '✅' : '❔'} Page "${pageInfo.name}" LIKE ${verified ? 'confirmed' : 'button state not confirmed'}.`);
           } else {
             const reactionMap = {
               LOVE: ['Yêu thích', 'Love'],
@@ -2641,24 +2641,24 @@ async function executePageInteraction({
               await rBtn.hover({ timeout: 800 }).catch(() => { });
               await rBtn.click({ timeout: 1500 }).catch(() => dispatchSyntheticClick(rBtn));
             } else {
-              console.log(`[FB-Buff]${workerTag} ℹ️ Không mở được thanh cảm xúc cho Page "${pageInfo.name}", chuyển sang thả LIKE.`);
+              console.log(`[FB-Buff]${workerTag} ℹ️ Could not open the reaction bar for Page "${pageInfo.name}", falling back to LIKE.`);
               currentReaction = 'LIKE';
               await dispatchSyntheticClick(likeBtn);
             }
             const verifyTimeout = speedMode === 'TURBO' ? 700 : speedMode === 'FAST' ? 1200 : 2000;
             const verified = await verifyReacted(likeHandle, currentAria, () => findLikeButtonOnTab(tab), verifyTimeout, beforeText);
             likeStatus = verified ? 'SUCCESS' : 'UNVERIFIED';
-            console.log(`[FB-Buff]${workerTag} ${verified ? '✅' : '❔'} Page "${pageInfo.name}" thả ${currentReaction} ${verified ? 'đã xác nhận' : 'chưa xác nhận được trạng thái nút'}.`);
+            console.log(`[FB-Buff]${workerTag} ${verified ? '✅' : '❔'} Page "${pageInfo.name}" ${currentReaction} ${verified ? 'confirmed' : 'button state not confirmed'}.`);
           }
 
           const blockInfoAfterClick = await detectActionBlockReason(tab);
           if (blockInfoAfterClick && blockInfoAfterClick.blocked) {
-            console.warn(`[FB-Buff]${workerTag} ⚠️ Facebook cảnh báo sau khi like bằng Page "${pageInfo.name}" (${blockInfoAfterClick.matched}).`);
+            console.warn(`[FB-Buff]${workerTag} ⚠️ Facebook warning after liking as Page "${pageInfo.name}" (${blockInfoAfterClick.matched}).`);
             likeStatus = 'ERROR';
             isAutomatedWarning = Boolean(blockInfoAfterClick.automatedWarning);
             likeError = isAutomatedWarning
-              ? 'Facebook cảnh báo nghi ngờ hành vi tự động - Dừng ngay bảo vệ Via'
-              : 'Facebook tạm thời hạn chế hành động (Action Blocked)';
+              ? 'Facebook warned about suspected automated behavior - stopping now to protect the Via'
+              : 'Facebook temporarily restricted the action (Action Blocked)';
             isActionBlocked = true;
           }
         }
@@ -2669,22 +2669,22 @@ async function executePageInteraction({
           isAutomatedWarning = Boolean(blockInfoMissing.automatedWarning);
           likeStatus = 'ERROR';
           likeError = isAutomatedWarning
-            ? 'Facebook cảnh báo nghi ngờ hành vi tự động - Tự động dừng bảo vệ Via'
-            : 'Facebook tạm thời hạn chế do thao tác nhanh (Action Blocked) - Tự động dừng bảo vệ Via';
-          console.warn(`[FB-Buff]${workerTag} 🛑 PHÁT HIỆN FACEBOOK CẢNH BÁO (${blockInfoMissing.matched}) trên Page "${pageInfo.name}"!`);
+            ? 'Facebook warned about suspected automated behavior - auto-stopping to protect the Via'
+            : 'Facebook temporarily restricted fast actions (Action Blocked) - auto-stopping to protect the Via';
+          console.warn(`[FB-Buff]${workerTag} 🛑 FACEBOOK WARNING DETECTED (${blockInfoMissing.matched}) on Page "${pageInfo.name}"!`);
         } else {
           const currentUrl = tab.url();
           const isUnavailable = await checkFacebookContentUnavailable(tab);
           if (isUnavailable) {
-            console.warn(`[FB-Buff]${workerTag} ⚠️ Phát hiện bài viết Facebook không khả dụng cho "${pageInfo.name}" (${isUnavailable})`);
+            console.warn(`[FB-Buff]${workerTag} ⚠️ Facebook post unavailable for "${pageInfo.name}" (${isUnavailable})`);
             likeStatus = 'ERROR';
-            likeError = 'Bài viết không tồn tại hoặc đã bị chủ bài viết xóa, ẩn, giới hạn quyền xem (Trang này hiện không hiển thị)';
+            likeError = 'The post does not exist or was deleted, hidden or restricted by its owner (This content isn\'t available)';
           } else {
-            console.warn(`[FB-Buff]${workerTag} ⚠️ Không tìm thấy nút Like cho "${pageInfo.name}" (URL: ${currentUrl})`);
+            console.warn(`[FB-Buff]${workerTag} ⚠️ Like button not found for "${pageInfo.name}" (URL: ${currentUrl})`);
 
-            // Lưu ảnh màn hình debug
+            // Save a debug screenshot
             try {
-              const debugDir = path.join(__dirname, 'data', 'debug_screens');
+              const debugDir = path.join(dataDir, 'debug_screens');
               if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
               const imgPath = path.join(debugDir, `no_like_${pageInfo.id}.png`);
               await tab.screenshot({ path: imgPath, fullPage: false }).catch(() => { });
@@ -2699,27 +2699,27 @@ async function executePageInteraction({
 
             likeStatus = 'NO_BUTTON';
             likeError = needsJoin
-              ? 'Nhóm Facebook yêu cầu tham gia (Chưa vào nhóm nên ẩn nút Like)'
+              ? 'The Facebook Group requires joining (Like button hidden until joined)'
               : isForcedSwitch
-                ? 'Facebook tạm giữ ở trang Chuyển tài khoản (forced_account_switch)'
+                ? 'Facebook is holding on the account switch page (forced_account_switch)'
                 : isHome
-                  ? 'Tab bị trôi về Trang chủ Facebook (Chuyển Page quá nhanh)'
+                  ? 'Tab drifted to the Facebook home page (switching Pages too fast)'
                   : isGroup
-                    ? 'Bài viết trong Nhóm kín hoặc chưa tải kịp nút Like'
-                    : 'Không tìm thấy nút Like trên bài viết';
+                    ? 'Post is in a private Group or the Like button had not loaded yet'
+                    : 'Like button not found on the post';
           }
         }
       }
     }
 
-    // BƯỚC 5: VIẾT BÌNH LUẬN (NẾU BẬT)
+    // STEP 5: WRITE A COMMENT (IF ENABLED)
     if (enableComment) {
       let rawComment = pageInfo.comment || (Array.isArray(comments) && comments.length > 0 ? comments[pageIndex % comments.length] : '');
       usedCommentText = resolveSpintax(rawComment ? rawComment.trim() : '');
 
       if (!usedCommentText.trim()) {
         commentStatus = 'SKIPPED';
-        commentError = 'Không có nội dung bình luận';
+        commentError = 'No comment content';
       } else {
         const normalized = usedCommentText.toLowerCase().replace(/[.,!?:;\s]+/g, '');
         if (usedCommentsHistory && usedCommentsHistory.has(normalized)) {
@@ -2732,7 +2732,7 @@ async function executePageInteraction({
 
         const botFilterRegex = /\b(test|tự động|bot|tool|toolzutter|auto|buff|hack|spam)\b/gi;
         if (botFilterRegex.test(usedCommentText)) {
-          console.warn(`[FB-Buff]${workerTag} ⚠️ PHÁT HIỆN TỪ KHÓA DỄ BỊ BẮT SPAM: "${usedCommentText}". Tự động chuyển hóa thành seeding tự nhiên.`);
+          console.warn(`[FB-Buff]${workerTag} ⚠️ SPAM-PRONE KEYWORD DETECTED: "${usedCommentText}". Automatically converting it into natural seeding.`);
           usedCommentText = usedCommentText
             .replace(/test\s*hệ\s*thống\s*comment\s*tự\s*động\s*từ\s*toolzutter!?\s*🚀?/gi, 'Bài viết rất hay và hữu ích ạ! ❤️')
             .replace(botFilterRegex, 'chia sẻ');
@@ -2789,32 +2789,32 @@ async function executePageInteraction({
             }
           }
 
-          // Nhịp dừng đọc lại comment trước khi bấm gửi (người thật)
+          // Pause to re-read the comment before sending (like a real person)
           await tab.waitForTimeout(900 + Math.floor(Math.random() * 600));
           await tab.keyboard.press('Enter');
           await tab.waitForTimeout(1600 + Math.floor(Math.random() * 800));
           commentStatus = 'SUCCESS';
-          console.log(`[FB-Buff]${workerTag} 💬 Page "${pageInfo.name}" đã bình luận tự nhiên: "${usedCommentText}"`);
+          console.log(`[FB-Buff]${workerTag} 💬 Page "${pageInfo.name}" commented naturally: "${usedCommentText}"`);
         } else {
           commentStatus = 'FAILED';
-          commentError = 'Không tìm thấy ô nhập bình luận';
-          console.warn(`[FB-Buff]${workerTag} ⚠️ Không tìm thấy ô bình luận cho Page "${pageInfo.name}"`);
+          commentError = 'Comment box not found';
+          console.warn(`[FB-Buff]${workerTag} ⚠️ Comment box not found for Page "${pageInfo.name}"`);
         }
       }
     }
 
-    // BƯỚC 5.5: CHIA SẺ BÀI VIẾT LÊN TƯỜNG FANPAGE (NẾU BẬT)
+    // STEP 5.5: SHARE THE POST TO THE FANPAGE WALL (IF ENABLED)
     if (enableShare) {
       const shareResult = await executePostShare(tab, workerTag);
       if (shareResult.success) {
         shareStatus = 'SUCCESS';
       } else {
         shareStatus = 'FAILED';
-        shareError = shareResult.error || 'Không chia sẻ được';
+        shareError = shareResult.error || 'Could not share';
       }
     }
 
-    // BƯỚC 6: TỔNG HỢP KẾT QUẢ CHO PAGE NÀY
+    // STEP 6: SUMMARIZE THE RESULT FOR THIS PAGE
     const likeOk = !enableLike || likeStatus === 'SUCCESS';
     const cmtOk = !enableComment || commentStatus === 'SUCCESS';
     const shareOk = !enableShare || shareStatus === 'SUCCESS';
@@ -2823,22 +2823,22 @@ async function executePageInteraction({
     let finalStatus = 'SUCCESS';
     const msgs = [];
     if (enableLike) {
-      if (likeStatus === 'SUCCESS') msgs.push(`Đã like (${currentReaction})`);
-      else if (likeStatus === 'ALREADY_LIKED') msgs.push('Đã like trước đó');
-      else msgs.push(`Lỗi like: ${likeError || 'Không thể like'}`);
+      if (likeStatus === 'SUCCESS') msgs.push(`Liked (${currentReaction})`);
+      else if (likeStatus === 'ALREADY_LIKED') msgs.push('Already liked');
+      else msgs.push(`Like error: ${likeError || 'Could not like'}`);
     }
     if (enableComment) {
-      if (commentStatus === 'SUCCESS') msgs.push('Đã bình luận');
-      else if (commentStatus === 'SKIPPED') msgs.push('Bỏ qua cmt');
-      else msgs.push(`Lỗi cmt: ${commentError || 'Không gửi được'}`);
+      if (commentStatus === 'SUCCESS') msgs.push('Commented');
+      else if (commentStatus === 'SKIPPED') msgs.push('Comment skipped (cmt)');
+      else msgs.push(`Comment error: ${commentError || 'Could not send'}`);
     }
     if (enableShare) {
-      if (shareStatus === 'SUCCESS') msgs.push('Đã chia sẻ lên tường Fanpage');
-      else if (shareStatus === 'SKIPPED') msgs.push('Bỏ qua share');
-      else msgs.push(`Lỗi share: ${shareError || 'Không chia sẻ được'}`);
+      if (shareStatus === 'SUCCESS') msgs.push('Shared to the Fanpage wall');
+      else if (shareStatus === 'SKIPPED') msgs.push('Share skipped');
+      else msgs.push(`Share error: ${shareError || 'Could not share'}`);
     }
     if (enableLike && likeStatus === 'UNVERIFIED') {
-      msgs[0] = `Đã bấm ${currentReaction} nhưng chưa xác nhận được`;
+      msgs[0] = `Clicked ${currentReaction} but could not confirm it`;
     }
 
     if (isAlready) finalStatus = 'ALREADY_LIKED';
@@ -2882,7 +2882,7 @@ async function executePageInteraction({
       },
     };
   } catch (err) {
-    console.error(`[FB-Buff]${workerTag} ❌ Lỗi khi Page "${pageInfo.name}" tương tác: ${err.message}`);
+    console.error(`[FB-Buff]${workerTag} ❌ Error while Page "${pageInfo.name}" was engaging: ${err.message}`);
     const errMsg = String(err?.message || '');
     const isTabCrashed = Boolean(
       errMsg.includes('Page crashed') ||
@@ -2904,8 +2904,8 @@ async function executePageInteraction({
     const blockOnCatch = (isBrowserDead || isTabCrashed) ? null : await detectActionBlockReason(tab).catch(() => null);
     const isBlockedOnCatch = Boolean(blockOnCatch && blockOnCatch.blocked);
     const isAutoWarnOnCatch = Boolean(blockOnCatch && blockOnCatch.automatedWarning);
-    const isCp = Boolean(errMsg.includes('checkpoint') || errMsg.includes('xác minh người thật'));
-    const isExp = Boolean(errMsg.includes('Cookie hết hạn') || errMsg.includes('đăng nhập') || errMsg.includes('/login'));
+    const isCp = Boolean(errMsg.includes('checkpoint') || errMsg.includes('xác minh người thật') || errMsg.includes('Confirm you are human'));
+    const isExp = Boolean(errMsg.includes('Cookie hết hạn') || errMsg.includes('Cookie expired') || errMsg.includes('đăng nhập') || errMsg.includes('login page') || errMsg.includes('/login'));
     const cookieDead = isCp || isExp;
     return {
       actionBlocked: isBlockedOnCatch,
@@ -2924,13 +2924,13 @@ async function executePageInteraction({
         commentStatus: enableComment ? 'ERROR' : 'SKIPPED',
         shareStatus: enableShare ? 'ERROR' : 'SKIPPED',
         error: isBrowserDead
-          ? 'Trình duyệt Chromium đã bị đóng hoặc mất kết nối.'
+          ? 'The Chromium browser was closed or lost its connection.'
           : isTabCrashed
-            ? 'Tab Chromium bị crash (đã tự khởi tạo lại tab sạch cho page tiếp theo).'
+            ? 'The Chromium tab crashed (a clean tab was reopened for the next page).'
             : isAutoWarnOnCatch
-              ? 'Facebook cảnh báo nghi ngờ hành vi tự động. Tự động dừng bảo vệ Via.'
+              ? 'Facebook warned about suspected automated behavior. Auto-stopping to protect the Via.'
               : isBlockedOnCatch
-                ? 'Facebook tạm thời hạn chế hành động (Action Blocked) do thao tác nhanh. Tự động dừng bảo vệ Via.'
+                ? 'Facebook temporarily restricted actions (Action Blocked) for acting too fast. Auto-stopping to protect the Via.'
                 : err.message,
       },
     };
@@ -2938,64 +2938,64 @@ async function executePageInteraction({
 }
 
 /**
- * Thực hiện buff Like/Reaction và Comment bài viết bằng các Fanpage
- * Hỗ trợ Đa luồng (Multi-Worker Concurrency 1 - 3 luồng song song) & Định tuyến Proxy Pool
- * @param {string} cookieStr - Cookie nick mẹ
- * @param {string} targetUrl - Link bài viết / Reels / Video cần buff
- * @param {object} options - Cấu hình: { reactionType, selectedPages, delayMs, enableLike, enableComment, comments, concurrency, proxyPool, proxyUrl, dripFeedMode, dripDurationMinutes }
+ * Runs the Like/Reaction and Comment buff on a post using Fanpages
+ * Supports multiple workers (Multi-Worker Concurrency, 1 - 3 parallel threads) & Proxy Pool routing
+ * @param {string} cookieStr - Parent account cookie
+ * @param {string} targetUrl - Post / Reels / Video link to buff
+ * @param {object} options - Config: { reactionType, selectedPages, delayMs, enableLike, enableComment, comments, concurrency, proxyPool, proxyUrl, dripFeedMode, dripDurationMinutes }
  */
 async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
   const {
-    reactionType = 'RANDOM_POSITIVE', // Mặc định RANDOM_POSITIVE (65% Like, 25% Love, 10% Care) để tương tác tự nhiên, chống Meta AI phát hiện bot
-    selectedPages = [],    // Mảng các page { id, name, comment? } hoặc để trống để tự quét
-    delayMs = 2500,        // Độ trễ cơ sở giữa mỗi lần tương tác
-    speedMode = 'NORMAL',  // Mặc định NORMAL (~2.4s) chạy êm, ổn định 1 luồng/Via
-    enableLike = true,     // Có thả Like/Reaction không (mặc định true)
-    enableComment = false, // Có viết bình luận bằng Fanpage không (mặc định false)
-    enableShare = false,   // Có chia sẻ bài viết lên tường Fanpage không (mặc định false)
-    enableHumanBehavior = true, // Hành vi lướt tự nhiên chống checkpoint (mặc định true)
-    fastSwitch = true,     // Ưu tiên đổi danh tính trực tiếp trên bài viết bằng Voice Switcher (tiết kiệm 15s/lần)
-    cooldownEvery = 25,    // Cứ mỗi 25 page nghỉ hạ nhiệt an toàn chống rate limit
-    cooldownDurationMs = 20000, // Thời gian nghỉ hạ nhiệt (20 giây) mỗi lô để Facebook reset bộ đếm tần suất
-    comments = [],         // Mảng danh sách nội dung bình luận
-    proxyUrl = '',         // URL Proxy riêng biệt cho Via (http://user:pass@host:port)
-    proxyPool = [],        // Danh sách Proxy Pool định tuyến cho từng luồng Worker
-    maxActionsPerPageToday = getDailyPageActionLimit(), // Giới hạn lượt tương tác/ngày cho mỗi Page (Cài đặt hệ thống)
-    concurrency = 1,       // Số luồng worker song song (khuyên dùng 1 luồng / Via để chống checkpoint)
-    dripFeedMode = false,  // Chế độ rải đều lượt like theo thời gian chống thuật toán quét
-    dripDurationMinutes = 30, // Thời gian rải đều (phút)
-    kpiTarget = 0,         // Mục tiêu KPI Like thành công cần đạt (0 = chạy hết toàn bộ selectedPages)
+    reactionType = 'RANDOM_POSITIVE', // Default RANDOM_POSITIVE (65% Like, 25% Love, 10% Care) for natural engagement that evades Meta's bot detection
+    selectedPages = [],    // Array of pages { id, name, comment? } or empty to auto-scan
+    delayMs = 2500,        // Base delay between engagements
+    speedMode = 'NORMAL',  // Default NORMAL (~2.4s) runs smoothly and stably at 1 thread/Via
+    enableLike = true,     // Whether to drop a Like/Reaction (default true)
+    enableComment = false, // Whether to comment as the Fanpage (default false)
+    enableShare = false,   // Whether to share the post to the Fanpage wall (default false)
+    enableHumanBehavior = true, // Natural browsing behavior against checkpoints (default true)
+    fastSwitch = true,     // Prefer switching identity right on the post via the Voice Switcher (saves 15s each)
+    cooldownEvery = 25,    // Safe cooldown every 25 pages to avoid rate limits
+    cooldownDurationMs = 20000, // Cooldown duration (20 seconds) per batch so Facebook resets its rate counter
+    comments = [],         // Array of comment texts
+    proxyUrl = '',         // Dedicated Proxy URL for the Via (http://user:pass@host:port)
+    proxyPool = [],        // Proxy Pool routed per Worker thread
+    maxActionsPerPageToday = getDailyPageActionLimit(), // Daily engagement limit per Page (System settings)
+    concurrency = 1,       // Number of parallel worker threads (1 per Via recommended to avoid checkpoints)
+    dripFeedMode = false,  // Spread likes out over time to evade scanning algorithms
+    dripDurationMinutes = 30, // Drip-feed duration (minutes)
+    kpiTarget = 0,         // Target number of successful Likes (0 = run through every selectedPage)
     targetLikes = 0,       // Alias cho kpiTarget
-    onProgress,            // Callback nhận tiến trình: onProgress(event)
-    shouldStop,            // () => boolean: người gọi yêu cầu dừng (client ngắt kết nối, dừng khẩn cấp...)
-    signal = options.signal || (options.fence?.signal) || null, // AbortSignal hỗ trợ deep cancellation
+    onProgress,            // Progress callback: onProgress(event)
+    shouldStop,            // () => boolean: caller requested a stop (client disconnected, emergency stop...)
+    signal = options.signal || (options.fence?.signal) || null, // AbortSignal for deep cancellation
   } = options;
   const isStopRequested = () => isEmergencyStopped() || Boolean(signal?.aborted) || (typeof shouldStop === 'function' && shouldStop());
 
   if (isEmergencyStopped()) {
-    throw new Error('Hệ thống đang ở trạng thái DỪNG KHẨN CẤP (Emergency Stop). Tác vụ đã bị từ chối thực thi.');
+    throw new Error('The system is in EMERGENCY STOP. The task was refused.');
   }
 
   const normalizedPostUrl = normalizeFbPostUrl(targetUrl);
 
   let pages = selectedPages;
   if (!pages || pages.length === 0) {
-    console.log('[FB-Buff] 🔄 Chưa truyền danh sách page, tự động quét Fanpage từ Cookie...');
+    console.log('[FB-Buff] 🔄 No page list passed, auto-scanning Fanpages from the Cookie...');
     pages = await getManagedPages(cookieStr, { proxyUrl });
   }
 
   if (pages.length === 0) {
-    throw new Error('Không tìm thấy Fanpage nào trong tài khoản để thực hiện');
+    throw new Error('No Fanpages found in the account to run with');
   }
 
-  // BẢO VỆ CHỐNG PAGE LỖI CHUYỂN DANH TÍNH (kể cả khi client gửi selectedPages từ cache cũ)
+  // GUARD AGAINST PAGES THAT FAIL IDENTITY SWITCHES (even when the client sends selectedPages from an old cache)
   const laneViaUid = getUserIdFromCookie(cookieStr);
   const cachedEntry = laneViaUid ? loadPagesCache()[laneViaUid] : null;
   const quarantinedMap = cachedEntry?.quarantined && typeof cachedEntry.quarantined === 'object' ? cachedEntry.quarantined : {};
   const beforeQuarantineCount = pages.length;
   pages = pages.filter((p) => p && p.id && !quarantinedMap[String(p.id)]);
   if (beforeQuarantineCount > pages.length) {
-    console.log(`[FB-Buff] 🛡️ Bỏ qua ${beforeQuarantineCount - pages.length} Page đã bị cách ly (không chuyển được danh tính).`);
+    console.log(`[FB-Buff] 🛡️ Skipping ${beforeQuarantineCount - pages.length} quarantined Pages (identity switch failed).`);
   }
   if (pages.length === 0) {
     return {
@@ -3003,28 +3003,28 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       success: 0,
       failed: 0,
       skipped: beforeQuarantineCount,
-      message: 'Toàn bộ Fanpage đã chọn đều nằm trong danh sách cách ly không chuyển được danh tính',
+      message: 'Every selected Fanpage is on the quarantine list (identity switch failed)',
       details: [],
     };
   }
 
-  // BẢO VỆ CHỐNG TRÙNG LẶP & CHỐNG HỦY LIKE (UN-LIKE)
+  // GUARD AGAINST DUPLICATES & UN-LIKES
   await resolvePostUrlCanonical(targetUrl).catch(() => normalizedPostUrl);
   const originalPagesCount = pages.length;
   pages = filterAvailablePagesForPost(normalizedPostUrl, pages);
   if (pages.length === 0) {
-    console.log(`[FB-Buff] ℹ️ Toàn bộ ${originalPagesCount} Fanpage đã tương tác với bài viết "${normalizedPostUrl}" trước đó. Không còn page nào mới để buff.`);
+    console.log(`[FB-Buff] ℹ️ All ${originalPagesCount} Fanpages already engaged with post "${normalizedPostUrl}". No new pages left to buff.`);
     return {
       total: originalPagesCount,
       success: 0,
       failed: 0,
       allAlreadyInteracted: true,
-      message: 'Toàn bộ Fanpage đã tương tác với bài viết này trước đó (đã tự động bỏ qua để chống hủy like)',
+      message: 'Every Fanpage already engaged with this post (skipped automatically to avoid un-liking)',
       details: [],
     };
   }
 
-  // GIỚI HẠN LƯỢT/NGÀY: bỏ qua Page đã đủ lượt hôm nay, ưu tiên Page hoạt động ít nhất
+  // DAILY LIMIT: skip Pages that reached today's limit, prefer the least active Pages
   const usageToday = loadPageUsage()[usageDateKey()] || {};
   const usedToday = (id) => usageToday[id] || 0;
   const cappedDetails = [];
@@ -3038,12 +3038,12 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       likeStatus: 'SKIPPED',
       commentStatus: 'SKIPPED',
       shareStatus: 'SKIPPED',
-      message: `Đã đủ ${maxActionsPerPageToday} lượt hôm nay`,
+      message: `Reached ${maxActionsPerPageToday} actions today`,
     });
     return false;
   });
   if (cappedDetails.length > 0) {
-    console.log(`[FB-Buff] 🛡️ Bỏ qua ${cappedDetails.length} Page đã đạt giới hạn ${maxActionsPerPageToday} lượt/ngày.`);
+    console.log(`[FB-Buff] 🛡️ Skipping ${cappedDetails.length} Pages that hit the ${maxActionsPerPageToday} actions/day limit.`);
     if (typeof onProgress === 'function') {
       cappedDetails.forEach((item, idx) => onProgress({ type: 'PAGE_FINISH', index: idx, total: cappedDetails.length, percent: 0, ...item }));
     }
@@ -3055,27 +3055,27 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       failed: 0,
       skipped: cappedDetails.length,
       allCapped: true,
-      message: `Toàn bộ Page đã đạt giới hạn ${maxActionsPerPageToday} lượt hôm nay`,
+      message: `Every Page reached the ${maxActionsPerPageToday} actions limit today`,
       details: cappedDetails,
     };
   }
   pages.sort((a, b) => (usedToday(a.id) - usedToday(b.id)) || ((b.verified ? 1 : 0) - (a.verified ? 1 : 0)));
 
-  // TÍNH TOÁN CẤU HÌNH ĐA LUỒNG (MULTI-WORKER CONCURRENCY) & BẢO VỆ VIA:
-  // Chỉ mở đa luồng trên cùng 1 Via khi có >= 2 Proxy riêng biệt trong proxyPool; nếu không, giữ 1 luồng tuần tự (Persistent Profile) tránh "sử dụng quá nhanh"
+  // MULTI-WORKER CONCURRENCY CONFIG & VIA PROTECTION:
+  // Only run multiple threads on the same Via when proxyPool has >= 2 distinct Proxies; otherwise keep 1 sequential thread (Persistent Profile) to avoid "using this too fast"
   const targetConcurrency = Math.max(1, Math.min(4, parseInt(concurrency, 10) || 1));
   const hasMultiProxyPool = Array.isArray(proxyPool) && proxyPool.length >= 2;
   let safeConcurrency = hasMultiProxyPool ? targetConcurrency : 1;
   if (safeConcurrency < targetConcurrency) {
-    console.log(`[FB-Buff] 🛡️ Chưa có Proxy Pool đa IP — giữ 1 luồng/Via (Persistent Profile) để tránh Facebook cảnh báo "sử dụng quá nhanh".`);
+    console.log(`[FB-Buff] 🛡️ No multi-IP Proxy Pool — keeping 1 thread/Via (Persistent Profile) to avoid Facebook's "using this too fast" warning.`);
   }
   const isMultiWorker = safeConcurrency > 1 && pages.length >= safeConcurrency;
   const actualConcurrency = safeConcurrency;
   const effectiveKpi = parseInt(kpiTarget || targetLikes, 10) || 0;
   let adaptiveSlowFactor = 1.0;
 
-  console.log(`[FB-Buff] 🚀 Bắt đầu Buff Tương Tác: ${targetUrl}`);
-  console.log(`[FB-Buff] 🎯 Mục tiêu: ${effectiveKpi > 0 ? `KPI ${effectiveKpi} Like thành công (kho dự phòng: ${pages.length} Pages)` : `${pages.length} Fanpage`} | Chế độ tốc độ: ${speedMode} (${delayMs}ms) | Thả Like: ${enableLike ? reactionType : 'TẮT'} | Bình luận: ${enableComment ? 'BẬT' : 'TẮT'} | Chia sẻ (Share): ${enableShare ? 'BẬT' : 'TẮT'} | Số luồng: ${actualConcurrency} luồng | Fast-Switch: ${fastSwitch ? 'BẬT' : 'TẮT'}`);
+  console.log(`[FB-Buff] 🚀 Starting engagement buff: ${targetUrl}`);
+  console.log(`[FB-Buff] 🎯 Target: ${effectiveKpi > 0 ? `KPI ${effectiveKpi} successful Likes (backup pool: ${pages.length} Pages)` : `${pages.length} Fanpages`} | Speed mode: ${speedMode} (${delayMs}ms) | Like: ${enableLike ? reactionType : 'OFF'} | Comment: ${enableComment ? 'ON' : 'OFF'} | Share: ${enableShare ? 'ON' : 'OFF'} | Threads: ${actualConcurrency} | Fast-Switch: ${fastSwitch ? 'ON' : 'OFF'}`);
 
   const results = {
     total: effectiveKpi > 0 ? effectiveKpi : (pages.length + cappedDetails.length),
@@ -3099,17 +3099,17 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
   const uid = cUserMatch ? cUserMatch[1] : '';
   const device = getDeviceForUid(uid);
   const baseProxy = parseProxy(proxyUrl);
-  console.log(`[FB-Buff] 📱 Giả lập phần cứng độc lập (${device.name}) cho UID: ${uid || 'N/A'}${baseProxy ? ` qua Proxy ${baseProxy.server}` : ''}`);
+  console.log(`[FB-Buff] 📱 Emulating independent hardware (${device.name}) for UID: ${uid || 'N/A'}${baseProxy ? ` via Proxy ${baseProxy.server}` : ''}`);
 
   const usedCommentsHistory = new Set();
   let completedCount = cappedDetails.length;
   let globalStopTriggered = false;
 
-  // QUẢN LÝ DEEP CANCELLATION: Đóng ngay toàn bộ tab/context khi AbortSignal kích hoạt
+  // DEEP CANCELLATION: close every tab/context immediately when the AbortSignal fires
   const trackedContexts = new Set();
   const trackedTabs = new Set();
   const abortCleanup = () => {
-    console.warn(`[FB-Buff] 🛑 AbortSignal kích hoạt (Lease hết hạn hoặc User Abort)! Đóng ngay lập tức các Tab/Context Playwright...`);
+    console.warn(`[FB-Buff] 🛑 AbortSignal fired (Lease expired or User Abort)! Closing every Playwright Tab/Context immediately...`);
     results.stopped = true;
     globalStopTriggered = true;
     for (const t of trackedTabs) {
@@ -3126,9 +3126,9 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
 
   if (isMultiWorker) {
     // ========================================================
-    // CHẾ ĐỘ 1: BUFF ĐA LUỒNG SONG SONG (MULTI-WORKER CONCURRENCY)
+    // MODE 1: MULTI-WORKER PARALLEL BUFF (MULTI-WORKER CONCURRENCY)
     // ========================================================
-    console.log(`[FB-Buff] ⚡ KÍCH HOẠT ĐA LUỒNG: Chia ${pages.length} Pages cho ${actualConcurrency} Browser Contexts độc lập`);
+    console.log(`[FB-Buff] ⚡ MULTI-THREAD ENABLED: splitting ${pages.length} Pages across ${actualConcurrency} independent Browser Contexts`);
     const browser = await chromium.launch({
       headless: true,
       args: [
@@ -3159,7 +3159,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       }
       const workerProxy = parseProxy(workerProxyStr);
       const workerTag = ` [Worker ${workerId}${workerProxy ? ' • ' + workerProxy.server.replace(/^https?:\/\//, '') : ''}]`;
-      console.log(`[FB-Buff]${workerTag} 🚀 Bắt đầu xử lý ${workerPages.length} Pages...`);
+      console.log(`[FB-Buff]${workerTag} 🚀 Starting to process ${workerPages.length} Pages...`);
 
       let workerContext = null;
       try {
@@ -3174,7 +3174,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           proxy: workerProxy ? { server: workerProxy.server, username: workerProxy.username, password: workerProxy.password } : undefined,
         });
       } catch (proxyErr) {
-        console.warn(`[FB-Buff]${workerTag} ⚠️ Lỗi Proxy (${workerProxyStr}): ${proxyErr.message}. Fallback sang Direct.`);
+        console.warn(`[FB-Buff]${workerTag} ⚠️ Proxy error (${workerProxyStr}): ${proxyErr.message}. Falling back to Direct.`);
         workerContext = await browser.newContext({
           userAgent: device.userAgent,
           viewport: device.viewport,
@@ -3198,7 +3198,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         trackedTabs.add(workerTab);
         registerLightweightTabRoutes(workerTab);
 
-        // Giãn cách mở bài viết ban đầu giữa các worker để tránh nghẽn phiên
+        // Stagger opening the initial post between workers to avoid session congestion
         await new Promise((r) => setTimeout(r, (workerId - 1) * 2000));
         let workerTargetUrl = targetUrl;
         try {
@@ -3212,22 +3212,22 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             }
           }
         } catch (e) {
-          console.warn(`[FB-Buff]${workerTag} ⚠️ Lỗi tải bài viết ban đầu: ${e.message}`);
+          console.warn(`[FB-Buff]${workerTag} ⚠️ Error loading the initial post: ${e.message}`);
         }
 
         const isUnavailable = await checkFacebookContentUnavailable(workerTab);
         if (isUnavailable) {
-          console.warn(`[FB-Buff]${workerTag} 🛑 Bài viết không khả dụng (bị ẩn/xóa/giới hạn riêng tư): ${isUnavailable}`);
+          console.warn(`[FB-Buff]${workerTag} 🛑 Post unavailable (hidden/deleted/privacy-restricted): ${isUnavailable}`);
           globalStopTriggered = true;
           results.stopped = true;
-          results.error = 'Bài viết không tồn tại hoặc đã bị người đăng xóa, ẩn, giới hạn riêng tư trên Facebook.';
+          results.error = 'The post does not exist or was deleted, hidden or privacy-restricted by its author on Facebook.';
           return;
         }
 
         for (let i = 0; i < workerPages.length; i++) {
           if (isStopRequested() || globalStopTriggered) {
             results.stopped = true;
-            console.warn(`[FB-Buff]${workerTag} 🛑 Dừng luồng tại page ${i + 1}/${workerPages.length}`);
+            console.warn(`[FB-Buff]${workerTag} 🛑 Stopping the thread at page ${i + 1}/${workerPages.length}`);
             break;
           }
 
@@ -3237,7 +3237,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             if (tErr.isBrowserDead || (tErr.message && tErr.message.includes('closed'))) {
               globalStopTriggered = true;
               results.stopped = true;
-              console.error(`[FB-Buff]${workerTag} 🛑 Trình duyệt đã bị đóng. Dừng ngay luồng worker.`);
+              console.error(`[FB-Buff]${workerTag} 🛑 The browser was closed. Stopping the worker thread now.`);
               break;
             }
           }
@@ -3253,7 +3253,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
               likeStatus: 'ALREADY_LIKED',
               commentStatus: 'SKIPPED',
               shareStatus: 'SKIPPED',
-              message: 'Đã like trước đó (bỏ qua tự động từ liên kết gốc)',
+              message: 'Already liked (skipped automatically via the original link)',
             };
             results.details.push(skippedItem);
             if (typeof onProgress === 'function') {
@@ -3275,7 +3275,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           try {
             options.touch?.() || options.fence?.touch?.() || options.fence?.heartbeat?.();
           } catch (_) {}
-          console.log(`[FB-Buff]${workerTag} [${i + 1}/${workerPages.length}] ⚡ Đang tương tác bằng Page: "${pageInfo.name}" (ID: ${pageInfo.id})...`);
+          console.log(`[FB-Buff]${workerTag} [${i + 1}/${workerPages.length}] ⚡ Engaging as Page: "${pageInfo.name}" (ID: ${pageInfo.id})...`);
 
           if (typeof onProgress === 'function') {
             onProgress({
@@ -3319,7 +3319,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
               results.stopped = true;
               results.failed++;
               results.details.push(resultItem);
-              console.error(`[FB-Buff]${workerTag} 🛑 Không thể khôi phục tab sau crash: ${tErr.message}`);
+              console.error(`[FB-Buff]${workerTag} 🛑 Could not recover the tab after a crash: ${tErr.message}`);
               break;
             }
           }
@@ -3329,7 +3329,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             results.stopped = true;
             results.failed++;
             results.details.push(resultItem);
-            console.error(`[FB-Buff]${workerTag} 🛑 Trình duyệt Chromium đã bị đóng hoặc mất kết nối! Dừng luồng ngay lập tức.`);
+            console.error(`[FB-Buff]${workerTag} 🛑 The Chromium browser was closed or lost its connection! Stopping the thread now.`);
             break;
           }
 
@@ -3343,7 +3343,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             results.deadReason = deadReason;
             results.failed++;
             results.details.push(resultItem);
-            console.error(`[FB-Buff]${workerTag} 🚨 PHÁT HIỆN VIA BỊ HẾT HẠN COOKIE / CHECKPOINT (${deadReason})! Dừng luồng ngay để bảo vệ.`);
+            console.error(`[FB-Buff]${workerTag} 🚨 VIA COOKIE EXPIRED / CHECKPOINT DETECTED (${deadReason})! Stopping the thread now to protect it.`);
             if (typeof onProgress === 'function') {
               onProgress({
                 type: 'COOKIE_EXPIRED',
@@ -3370,7 +3370,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             results.consecutiveBlocks = (results.consecutiveBlocks || 0) + 1;
             results.failed++;
             results.details.push(resultItem);
-            console.warn(`[FB-Buff]${workerTag} ⚠️ Page "${pageInfo.name}" bị ${automatedWarning ? 'CẢNH BÁO HÀNH VI TỰ ĐỘNG' : 'Action Blocked'} (lần ${results.consecutiveBlocks} liên tiếp). Skip qua page tiếp theo...`);
+            console.warn(`[FB-Buff]${workerTag} ⚠️ Page "${pageInfo.name}" hit ${automatedWarning ? 'an AUTOMATED BEHAVIOR WARNING' : 'Action Blocked'} (${results.consecutiveBlocks} in a row). Skipping to the next page...`);
             if (typeof onProgress === 'function') {
               onProgress({
                 type: 'PAGE_FINISH',
@@ -3388,12 +3388,12 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
                 results.cookieDead = true;
                 results.isCheckpoint = true;
                 results.deadViaUid = uid;
-                results.deadReason = 'Facebook cảnh báo nghi ngờ hành vi tự động';
+                results.deadReason = 'Facebook warned about suspected automated behavior';
               }
-              console.error(`[FB-Buff]${workerTag} 🛑 ${automatedWarning ? 'Dừng ngay lập tức vì Facebook nghi ngờ hành vi tự động!' : `Bị Action Blocked liên tiếp ${results.consecutiveBlocks} lần! Dừng worker này để bảo vệ Via.`}`);
+              console.error(`[FB-Buff]${workerTag} 🛑 ${automatedWarning ? 'Stopping immediately because Facebook suspects automated behavior!' : `Action Blocked ${results.consecutiveBlocks} times in a row! Stopping this worker to protect the Via.`}`);
               break;
             }
-            // Nghỉ thêm 8s trước khi thử page tiếp theo
+            // Rest another 8s before trying the next page
             await new Promise((r) => setTimeout(r, 8000));
             continue;
           } else {
@@ -3429,7 +3429,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           }
 
           if (effectiveKpi > 0 && results.success >= effectiveKpi) {
-            console.log(`[FB-Buff]${workerTag} 🎯 [KPI REACHED] Đã đạt đủ KPI ${results.success}/${effectiveKpi} Like thành công!`);
+            console.log(`[FB-Buff]${workerTag} 🎯 [KPI REACHED] Reached KPI ${results.success}/${effectiveKpi} successful Likes!`);
             globalStopTriggered = true;
             results.kpiReached = true;
             results.autoRefilled = results.failed;
@@ -3441,19 +3441,19 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
                 failed: results.failed,
                 autoRefilled: results.failed,
                 percent: 100,
-                message: `🎯 Đã đạt đủ KPI ${results.success}/${effectiveKpi} Like thành công!`,
+                message: `🎯 Reached KPI ${results.success}/${effectiveKpi} successful Likes!`,
               });
             }
             break;
           }
 
-          // Chống checkpoint: Nghỉ ngơi an toàn theo lô (Batch Cooldown) per worker
+          // Anti-checkpoint: safe per-worker Batch Cooldown
           if (cooldownEvery < 9999 && i > 0 && i % cooldownEvery === 0 && i < workerPages.length - 1) {
             const isBigBatch = i % (cooldownEvery * 2) === 0;
             const batchRest = computeBatchCooldownMs(cooldownDurationMs, speedMode, isBigBatch);
             const restSec = Math.round(batchRest / 1000);
-            const restMsg = `🛡️ [Safe Human Pacing] Đang hạ nhiệt Via (${restSec}s) để reset bộ đếm tần suất của Facebook...`;
-            console.log(`[FB-Buff]${workerTag} 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. ${restMsg}`);
+            const restMsg = `🛡️ [Safe Human Pacing] Cooling down the Via (${restSec}s) to reset Facebook's rate counter...`;
+            console.log(`[FB-Buff]${workerTag} 🛡️ [ANTI-CHECKPOINT BM] Finished ${i} Pages. ${restMsg}`);
 
             if (typeof onProgress === 'function') {
               onProgress({
@@ -3478,14 +3478,14 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             }
           }
 
-          // Giảm tải RAM cho Chromium khi chạy lô lớn: tái tạo tab sạch mỗi 20 page
+          // Reduce Chromium RAM on large batches: recreate a clean tab every 20 pages
           if (i > 0 && i % 20 === 0 && i < workerPages.length - 1) {
             try {
               workerTab = await recycleHealthyTab(workerContext, workerTab, trackedTabs);
             } catch (_) {}
           }
 
-          // Độ trễ tối ưu giữa các page
+          // Optimal delay between pages
           if (i < workerPages.length - 1) {
             const waitTime = calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMinutes, pages.length, actualConcurrency, speedMode);
             await cancellableSleep(waitTime, signal);
@@ -3506,13 +3506,13 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     }
   } else {
     // ========================================================
-    // CHẾ ĐỘ 2: BUFF 1 LUỒNG TUẦN TỰ (SINGLE-WORKER PERSISTENT)
+    // MODE 2: SINGLE-THREAD SEQUENTIAL BUFF (SINGLE-WORKER PERSISTENT)
     // ========================================================
     let context = null;
     let browser = null;
 
     if (uid) {
-      const profileDir = path.join(__dirname, 'browser_profiles', `via_${uid}`);
+      const profileDir = path.join(PROFILES_DIR, `via_${uid}`);
       fs.mkdirSync(profileDir, { recursive: true });
       context = await chromium.launchPersistentContext(profileDir, {
         headless: true,
@@ -3572,7 +3572,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         registerLightweightTabRoutes(tab);
       }
 
-      console.log(`[FB-Buff] 🌐 Tải bài viết mục tiêu trước khi chạy luồng: ${targetUrl}`);
+      console.log(`[FB-Buff] 🌐 Loading the target post before starting the thread: ${targetUrl}`);
       let effectiveTargetUrl = targetUrl;
       try {
         await tab.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
@@ -3580,27 +3580,27 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         const redirected = tab.url();
         if (redirected && redirected.includes('facebook.com') && !redirected.includes('/share/')) {
           effectiveTargetUrl = redirected;
-          console.log(`[FB-Buff] 🔗 Đã phát hiện link bài viết gốc: ${effectiveTargetUrl}`);
+          console.log(`[FB-Buff] 🔗 Detected the original post link: ${effectiveTargetUrl}`);
           if (isValidCanonicalFbPostUrl(redirected)) {
             registerPostUrlAlias(normalizedPostUrl, redirected);
           }
         }
       } catch (e) {
-        console.warn(`[FB-Buff] ⚠️ Lỗi tải bài viết ban đầu (${e.message}), sẽ tự động thử lại.`);
+        console.warn(`[FB-Buff] ⚠️ Error loading the initial post (${e.message}), will retry automatically.`);
       }
 
       const isUnavailable = await checkFacebookContentUnavailable(tab);
       if (isUnavailable) {
-        console.warn(`[FB-Buff] 🛑 Bài viết không khả dụng (bị ẩn/xóa/giới hạn riêng tư): ${isUnavailable}`);
+        console.warn(`[FB-Buff] 🛑 Post unavailable (hidden/deleted/privacy-restricted): ${isUnavailable}`);
         results.stopped = true;
-        results.error = 'Bài viết không tồn tại hoặc đã bị người đăng xóa, ẩn, giới hạn riêng tư trên Facebook.';
+        results.error = 'The post does not exist or was deleted, hidden or privacy-restricted by its author on Facebook.';
         return results;
       }
 
       for (let i = 0; i < pages.length; i++) {
         if (isStopRequested()) {
           results.stopped = true;
-          console.warn(`[FB-Buff] 🛑 Phát hiện lệnh DỪNG KHẨN CẤP! Dừng vòng lặp tại page ${i + 1}/${pages.length}`);
+          console.warn(`[FB-Buff] 🛑 EMERGENCY STOP detected! Stopping the loop at page ${i + 1}/${pages.length}`);
           break;
         }
 
@@ -3609,7 +3609,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         } catch (tErr) {
           if (tErr.isBrowserDead || (tErr.message && tErr.message.includes('closed'))) {
             results.stopped = true;
-            console.error(`[FB-Buff] 🛑 Trình duyệt đã bị đóng. Dừng ngay tác vụ.`);
+            console.error(`[FB-Buff] 🛑 The browser was closed. Stopping the task now.`);
             break;
           }
         }
@@ -3625,7 +3625,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             likeStatus: 'ALREADY_LIKED',
             commentStatus: 'SKIPPED',
             shareStatus: 'SKIPPED',
-            message: 'Đã like trước đó (bỏ qua tự động từ liên kết gốc)',
+            message: 'Already liked (skipped automatically via the original link)',
           };
           results.details.push(skippedItem);
           if (typeof onProgress === 'function') {
@@ -3644,7 +3644,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           }
           continue;
         }
-        console.log(`[FB-Buff] [${i + 1}/${pages.length}] ⚡ Đang tương tác bằng Page: "${pageInfo.name}" (ID: ${pageInfo.id})...`);
+        console.log(`[FB-Buff] [${i + 1}/${pages.length}] ⚡ Engaging as Page: "${pageInfo.name}" (ID: ${pageInfo.id})...`);
 
         if (typeof onProgress === 'function') {
           onProgress({
@@ -3687,7 +3687,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
               results.stopped = true;
               results.failed++;
               results.details.push(resultItem);
-              console.error(`[FB-Buff] 🛑 Không thể khôi phục tab sau crash: ${tErr.message}`);
+              console.error(`[FB-Buff] 🛑 Could not recover the tab after a crash: ${tErr.message}`);
               break;
             }
           }
@@ -3696,7 +3696,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             results.stopped = true;
             results.failed++;
             results.details.push(resultItem);
-            console.error('[FB-Buff] 🛑 Trình duyệt Chromium đã bị đóng hoặc mất kết nối! Dừng tác vụ ngay lập tức.');
+            console.error('[FB-Buff] 🛑 The Chromium browser was closed or lost its connection! Stopping the task now.');
             break;
           }
 
@@ -3709,7 +3709,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             results.deadReason = deadReason;
             results.failed++;
             results.details.push(resultItem);
-            console.error(`[FB-Buff] 🚨 PHÁT HIỆN VIA BỊ HẾT HẠN COOKIE / CHECKPOINT (${deadReason})! Dừng tác vụ ngay lập tức.`);
+            console.error(`[FB-Buff] 🚨 VIA COOKIE EXPIRED / CHECKPOINT DETECTED (${deadReason})! Stopping the task now.`);
             if (typeof onProgress === 'function') {
               onProgress({
                 type: 'COOKIE_EXPIRED',
@@ -3733,12 +3733,12 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           }
 
           if (actionBlocked || automatedWarning) {
-            // Không dừng toàn bộ — chỉ skip page này, tiếp tục page tiếp theo
-            // Nhưng nếu bị block liên tiếp >= 3 lần (hoặc gặp cảnh báo tự động) thì dừng để bảo vệ Via
+            // Don't stop everything — just skip this page and continue with the next
+            // But if blocked >= 3 times in a row (or an automated warning appears), stop to protect the Via
             results.consecutiveBlocks = (results.consecutiveBlocks || 0) + 1;
             results.failed++;
             results.details.push(resultItem);
-            console.warn(`[FB-Buff] ⚠️ Page "${pageInfo.name}" bị ${automatedWarning ? 'CẢNH BÁO HÀNH VI TỰ ĐỘNG' : 'Action Blocked'} (lần ${results.consecutiveBlocks} liên tiếp). Skip qua page tiếp theo...`);
+            console.warn(`[FB-Buff] ⚠️ Page "${pageInfo.name}" hit ${automatedWarning ? 'an AUTOMATED BEHAVIOR WARNING' : 'Action Blocked'} (${results.consecutiveBlocks} in a row). Skipping to the next page...`);
             if (typeof onProgress === 'function') {
               onProgress({
                 type: 'PAGE_FINISH',
@@ -3755,18 +3755,18 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
                 results.cookieDead = true;
                 results.isCheckpoint = true;
                 results.deadViaUid = uid;
-                results.deadReason = 'Facebook cảnh báo nghi ngờ hành vi tự động';
+                results.deadReason = 'Facebook warned about suspected automated behavior';
               }
-              console.error(`[FB-Buff] 🛑 ${automatedWarning ? 'Dừng ngay lập tức vì Facebook nghi ngờ hành vi tự động!' : `Bị Action Blocked liên tiếp ${results.consecutiveBlocks} lần! Dừng tác vụ để bảo vệ Via.`}`);
+              console.error(`[FB-Buff] 🛑 ${automatedWarning ? 'Stopping immediately because Facebook suspects automated behavior!' : `Action Blocked ${results.consecutiveBlocks} times in a row! Stopping the task to protect the Via.`}`);
               break;
             }
-            // Nghỉ thêm 15s trước khi thử page tiếp theo
+            // Rest another 15s before trying the next page
             await cancellableSleep(15000, signal);
             completedCount++;
             continue;
           }
 
-          // Reset đếm block liên tiếp khi page thành công
+          // Reset the consecutive block counter when a page succeeds
           results.consecutiveBlocks = 0;
 
           completedCount++;
@@ -3797,9 +3797,9 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             });
           }
 
-          // SMART KPI AUTO-REFILL: Khi đạt đủ KPI thành công, hoàn tất sớm và tự động dừng tác vụ
+          // SMART KPI AUTO-REFILL: once the KPI is reached, finish early and stop the task automatically
           if (effectiveKpi > 0 && results.success >= effectiveKpi) {
-            console.log(`[FB-Buff] 🎯 [KPI REACHED] Đã đạt đủ KPI ${results.success}/${effectiveKpi} Like thành công! Tự động dừng tác vụ (đã qua ${i + 1} lượt thử, tự động bù ${results.failed} Page lỗi).`);
+            console.log(`[FB-Buff] 🎯 [KPI REACHED] Reached KPI ${results.success}/${effectiveKpi} successful Likes! Stopping the task (after ${i + 1} attempts, auto-replaced ${results.failed} failed Pages).`);
             results.kpiReached = true;
             results.autoRefilled = results.failed;
             if (typeof onProgress === 'function') {
@@ -3810,19 +3810,19 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
                 failed: results.failed,
                 autoRefilled: results.failed,
                 percent: 100,
-                message: `🎯 Đã đạt đủ KPI ${results.success}/${effectiveKpi} Like thành công! (Tự động bù ${results.failed} page lỗi)`,
+                message: `🎯 Reached KPI ${results.success}/${effectiveKpi} successful Likes! (auto-replaced ${results.failed} failed pages)`,
               });
             }
             break;
           }
 
-          // Chống checkpoint: Nghỉ ngơi an toàn theo lô (Batch Cooldown)
+          // Anti-checkpoint: safe Batch Cooldown
           if (cooldownEvery < 9999 && i > 0 && i % cooldownEvery === 0 && i < pages.length - 1) {
             const isBigBatch = i % (cooldownEvery * 2) === 0;
             const batchRest = computeBatchCooldownMs(cooldownDurationMs, speedMode, isBigBatch);
             const restSec = Math.round(batchRest / 1000);
-            const restMsg = `🛡️ [Safe Human Pacing] Đang hạ nhiệt Via (${restSec}s) để reset bộ đếm tần suất của Facebook...`;
-            console.log(`[FB-Buff] 🛡️ [ANTI-CHECKPOINT BM] Đã chạy xong ${i} Page. ${restMsg}`);
+            const restMsg = `🛡️ [Safe Human Pacing] Cooling down the Via (${restSec}s) to reset Facebook's rate counter...`;
+            console.log(`[FB-Buff] 🛡️ [ANTI-CHECKPOINT BM] Finished ${i} Pages. ${restMsg}`);
 
             if (typeof onProgress === 'function') {
               onProgress({
@@ -3845,14 +3845,14 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             }
           }
 
-          // Giảm tải RAM cho Chromium khi chạy lô lớn: tái tạo tab sạch mỗi 20 page
+          // Reduce Chromium RAM on large batches: recreate a clean tab every 20 pages
           if (i > 0 && i % 20 === 0 && i < pages.length - 1) {
             try {
               tab = await recycleHealthyTab(context, tab, trackedTabs);
             } catch (_) {}
           }
 
-          // Độ trễ tối ưu giữa các page
+          // Optimal delay between pages
           if (i < pages.length - 1) {
             const waitTime = calculatePageDelay(delayMs, enableComment, dripFeedMode, dripDurationMinutes, pages.length, 1, speedMode);
             await cancellableSleep(waitTime, signal);
@@ -3871,35 +3871,35 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     if (signal) signal.removeEventListener('abort', abortCleanup);
     flushRegistry();
 
-    console.log(`[FB-Buff] 🏁 Hoàn thành buff Like: Thành công ${results.success}/${effectiveKpi > 0 ? effectiveKpi : results.total} (Đã like trước: ${results.alreadyLiked}, Thất bại/Bù lỗi: ${results.failed}, Luồng: ${actualConcurrency})`);
+    console.log(`[FB-Buff] 🏁 Like buff finished: ${results.success}/${effectiveKpi > 0 ? effectiveKpi : results.total} successful (already liked: ${results.alreadyLiked}, failed/replaced: ${results.failed}, threads: ${actualConcurrency})`);
     return results;
   }
 
   // ==========================================
-  // 4. BUFF VIEW VIDEO / REELS ĐA LUỒNG TỐI ƯU RAM
+  // 4. RAM-OPTIMIZED MULTI-THREAD VIDEO / REELS VIEW BUFF
   // ==========================================
 
   /**
-   * Tăng lượt xem (View) cho Video / Reels Facebook (Tối ưu RAM và CPU)
-   * @param {string} targetVideoUrl - Link Video / Reels cần buff view
+   * Increases views for Facebook Videos / Reels (RAM and CPU optimized)
+   * @param {string} targetVideoUrl - Video / Reels link to buff views for
    * @param {object} options - { targetViews, concurrency, watchTimeSeconds, cookieStr }
    */
   async function buffViews(targetVideoUrl, options = {}) {
     const {
-      targetViews = 10,       // Số lượt view cần buff
-      concurrency = 2,        // Số luồng xem song song
-      watchTimeSeconds = 6,   // Thời gian xem mỗi lượt (chuẩn FB tính view từ 3-5s+)
-      cookieStr = null,       // Cookie (tùy chọn, không bắt buộc vì view công khai không cần login)
+      targetViews = 10,       // Number of views to buff
+      concurrency = 2,        // Number of parallel viewing threads
+      watchTimeSeconds = 6,   // Watch time per view (FB counts a view after 3-5s+)
+      cookieStr = null,       // Cookie (optional, public views don't need a login)
     } = options;
 
-    console.log(`[FB-Buff] 🚀 Bắt đầu Buff View Siêu Tốc & Tiết Kiệm RAM cho video: ${targetVideoUrl}`);
-    console.log(`[FB-Buff] 🎯 Mục tiêu: ${targetViews} Views | Luồng: ${concurrency} | Thời lượng xem: ${watchTimeSeconds}s/view`);
+    console.log(`[FB-Buff] 🚀 Starting fast, RAM-saving view buff for video: ${targetVideoUrl}`);
+    console.log(`[FB-Buff] 🎯 Target: ${targetViews} Views | Threads: ${concurrency} | Watch time: ${watchTimeSeconds}s/view`);
 
     const cookies = cookieStr ? parseCookieString(cookieStr) : [];
     let completedViews = 0;
     let failedViews = 0;
 
-    // Khởi tạo DUY NHẤT 1 instance browser Playwright (tiết kiệm 90% RAM so với mở nhiều browser)
+    // Create ONE single Playwright browser instance (saves 90% RAM vs opening many browsers)
     const browser = await chromium.launch({
       headless: true,
       args: OPTIMIZED_CHROMIUM_ARGS,
@@ -3925,13 +3925,13 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             }
 
             const page = await context.newPage();
-            // Chặn tải các resource nặng để tiết kiệm tối đa CPU và băng thông mạng
+            // Block heavy resources to save as much CPU and network bandwidth as possible
             await page.route('**/*.{png,jpg,jpeg,gif,webp,svg,woff,woff2,ttf,eot,ico}', (route) => route.abort());
 
-            console.log(`[FB-Buff] [Luồng ${workerId}] Đang xem video (View #${currentTaskNum}/${targetViews})...`);
+            console.log(`[FB-Buff] [Thread ${workerId}] Watching video (View #${currentTaskNum}/${targetViews})...`);
             await page.goto(targetVideoUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
 
-            // Tự động play video nếu đang pause
+            // Auto-play the video if paused
             await page.evaluate(() => {
               const videos = document.querySelectorAll('video');
               videos.forEach((v) => {
@@ -3940,24 +3940,24 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
               });
             });
 
-            // Giữ xem trong thời lượng watchTimeSeconds
+            // Keep watching for watchTimeSeconds
             await page.waitForTimeout(watchTimeSeconds * 1000);
 
             completedViews++;
-            console.log(`[FB-Buff] [Luồng ${workerId}] ✅ Đã xem xong 1 view (${completedViews}/${targetViews})`);
+            console.log(`[FB-Buff] [Thread ${workerId}] ✅ Finished 1 view (${completedViews}/${targetViews})`);
           } catch (err) {
             failedViews++;
-            console.warn(`[FB-Buff] [Luồng ${workerId}] ⚠️ Lỗi khi xem video: ${err.message}`);
+            console.warn(`[FB-Buff] [Thread ${workerId}] ⚠️ Error while watching the video: ${err.message}`);
           } finally {
             if (context) await context.close().catch(() => { });
           }
 
-          // Delay nhẹ giữa các lượt xem
+          // Short delay between views
           await new Promise((r) => setTimeout(r, 600));
         }
       };
 
-      // Khởi chạy các worker song song trong cùng 1 browser
+      // Launch the parallel workers in the same browser
       const workers = [];
       const actualConcurrency = Math.min(concurrency, targetViews);
       for (let i = 1; i <= actualConcurrency; i++) {
@@ -3969,7 +3969,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       await browser.close().catch(() => { });
     }
 
-    console.log(`[FB-Buff] 🏁 Hoàn thành Buff View: Thành công ${completedViews}/${targetViews}`);
+    console.log(`[FB-Buff] 🏁 View buff finished: ${completedViews}/${targetViews} successful`);
     return {
       totalTarget: targetViews,
       completed: completedViews,
@@ -3978,12 +3978,12 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
   }
 
   /**
-   * 6. FACEBOOK POST HUNTER — Quét và trích xuất danh sách bài viết mới nhất từ Fanpage / Group / Profile
-   * Tối ưu hóa siêu nhẹ (chặn media/font), hỗ trợ tự động tìm bài viết mới để nạp vào hàng đợi Auto-Buff
-   * @param {string} targetUrl URL của Fanpage, Group hoặc Profile
-   * @param {object} options Các tùy chọn: cookieStr, maxPosts, timeoutMs
+   * 6. FACEBOOK POST HUNTER — Scans and extracts the latest posts from a Fanpage / Group / Profile
+   * Ultra-light (blocks media/fonts), auto-finds new posts to feed into the Auto-Buff queue
+   * @param {string} targetUrl URL of the Fanpage, Group or Profile
+   * @param {object} options Options: cookieStr, maxPosts, timeoutMs
    */
-  // Xác định loại mục tiêu (Group / Page) để quét đúng thứ tự và lọc đúng link bài
+  // Determine the target type (Group / Page) to scan in the right order and filter the right post links
   function getScanTargetInfo(rawUrl) {
     let url;
     try {
@@ -3993,7 +3993,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     }
     const segments = url.pathname.split('/').filter(Boolean);
     if (segments[0] === 'groups' && segments[1]) {
-      // Group: xem theo "Bài viết mới" để bài mới nhất nằm trên cùng
+      // Group: view by "New posts" so the newest post is on top
       const groupKey = segments[1];
       return {
         type: 'GROUP',
@@ -4017,11 +4017,11 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     const first = (segments[0] || '').toLowerCase();
 
     if (info.type === 'GROUP') {
-      // Trong feed Group chỉ nhận link bài Group (link Page/Reel là bài chia sẻ lại)
+      // In a Group feed only accept Group post links (Page/Reel links are reshares)
       return first === 'groups' && /^(posts|permalink)$/.test(segments[2] || '');
     }
     if (info.type === 'PAGE') {
-      if (first === 'reel' || first === 'watch' || first === 'share') return true; // Reel/Video/Share link không mang tên chủ sở hữu trong link
+      if (first === 'reel' || first === 'watch' || first === 'share') return true; // Reel/Video/Share links don't carry the owner's name
       const ownerId = url.searchParams.get('id');
       if (ownerId) return Boolean(info.pageId) && ownerId === info.pageId;
       if (info.pageId) return first === info.pageId;
@@ -4040,13 +4040,13 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     } = options;
 
     if (!targetUrl || typeof targetUrl !== 'string') {
-      throw new Error('Thiếu URL trang mục tiêu');
+      throw new Error('Missing target page URL');
     }
 
     const targetInfo = getScanTargetInfo(targetUrl.trim());
     const cleanTarget = targetInfo.scanUrl;
     const proxy = parseProxy(proxyUrl);
-    console.log(`[FB-Hunter] 🔍 Đang quét bài viết mới từ: ${cleanTarget} (Max: ${maxPosts})`);
+    console.log(`[FB-Hunter] 🔍 Scanning new posts from: ${cleanTarget} (Max: ${maxPosts})`);
 
     let browser = externalBrowser;
     const ownsBrowser = !externalBrowser;
@@ -4069,7 +4069,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         locale: 'vi-VN',
       });
 
-      // Chặn ảnh/video/font để quét cực nhanh, tiết kiệm 80% RAM & mạng
+      // Block images/video/fonts to scan very fast, saving 80% RAM & network
       await context.route('**/*.{png,jpg,jpeg,webp,gif,svg,ico,mp4,webm,woff,woff2,ttf,otf}', (route) => {
         route.abort();
       });
@@ -4083,20 +4083,20 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
 
       const page = await context.newPage();
       await page.goto(cleanTarget, { waitUntil: 'domcontentloaded', timeout: timeoutMs }).catch((e) => {
-        console.warn(`[FB-Hunter] ⚠️ Tải trang (${e.message}), tiếp tục đọc DOM hiện có...`);
+        console.warn(`[FB-Hunter] ⚠️ Page load (${e.message}), continuing with the current DOM...`);
       });
 
       await page.waitForTimeout(3000);
 
-      // Cuộn nhẹ 1-2 lần để kích hoạt lazy loading bài viết của Facebook Feed
+      // Scroll gently 1-2 times to trigger lazy loading of the Facebook Feed
       for (let s = 0; s < 2; s++) {
         await page.evaluate(() => window.scrollBy({ top: 900, behavior: 'smooth' })).catch(() => { });
         await page.waitForTimeout(1400);
       }
 
-      // Facebook giấu link bài trong mốc thời gian (href "?__cft__..." / "#"), chỉ hiện link thật khi rê chuột.
-      // Rê chuột vào các link đó trong từng khối bài (theo thứ tự feed, bài mới ở trên) để lộ permalink.
-      // Link lộ ra chỉ tồn tại khi chuột còn đặt trên đó → đọc ngay sau khi rê.
+      // Facebook hides post links in the timestamp (href "?__cft__..." / "#") and only shows the real link on hover.
+      // Hover those links in each post block (in feed order, newest on top) to reveal the permalink.
+      // The revealed link only exists while the mouse is over it → read it right after hovering.
       const revealedLinks = [];
       const feedUnits = await page.$$('[role="main"] div[data-virtualized], [role="feed"] > div, [aria-posinset]').catch(() => []);
       for (const unit of feedUnits.slice(0, maxPosts * 3)) {
@@ -4112,12 +4112,12 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
             const isPinned = /đã ghim|bài viết đã ghim|pinned post/i.test(unitText) ||
               Boolean(await unit.$('[aria-label*="ghim" i], [aria-label*="pin" i]').catch(() => null));
             revealedLinks.push({ href: revealed, text: unitText.slice(0, 150), isPinned });
-            break; // 1 permalink cho mỗi khối bài là đủ
+            break; // 1 permalink per post block is enough
           }
         }
       }
 
-      // Trích xuất toàn bộ liên kết bài viết (bài lộ ra từ mốc thời gian xếp trước, đúng thứ tự feed)
+      // Extract every post link (posts revealed from timestamps first, in feed order)
       const pageLinks = await page.$$eval('a[href]', (anchors) => {
         return anchors.map((a) => {
           const text = (a.innerText || a.getAttribute('aria-label') || '').trim();
@@ -4147,14 +4147,14 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
 
         const isPost = postUrlPatterns.some((pattern) => pattern.test(href));
         if (!isPost) continue;
-        // Bỏ link bài của nơi khác (bài chia sẻ, gợi ý...) — chỉ giữ bài thuộc chính mục tiêu
+        // Drop post links from elsewhere (reshares, suggestions...) — only keep posts that belong to the target
         if (!isLinkOwnedByTarget(href, targetInfo)) continue;
 
-        // Chuẩn hóa loại bỏ tracking query Facebook
+        // Normalize by stripping Facebook tracking queries
         const cleanUrl = href.replace(/[?&](?:mibextid|fbclid|rdid|__cft__\[0\]|__tn__|ref)=[^&]*/g, '').replace(/[?&]$/, '');
         const normalized = normalizeFbPostUrl(cleanUrl);
 
-        // Loại bỏ các đường link không phải bài viết cụ thể
+        // Drop links that aren't specific posts
         if (/\/(posts|videos|reels)$/.test(normalized.split('?')[0])) {
           continue;
         }
@@ -4165,7 +4165,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         discoveredPosts.push({
           url: cleanUrl,
           normalizedUrl: normalized,
-          title: item.text || 'Bài viết Facebook',
+          title: item.text || 'Facebook post',
           isPinned: Boolean(item.isPinned),
           foundAt: new Date().toISOString(),
         });
@@ -4173,9 +4173,9 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         if (discoveredPosts.length >= maxPosts) break;
       }
 
-      console.log(`[FB-Hunter] 🎯 Tìm thấy ${discoveredPosts.length} bài viết hợp lệ từ ${cleanTarget}`);
+      console.log(`[FB-Hunter] 🎯 Found ${discoveredPosts.length} valid posts from ${cleanTarget}`);
     } catch (err) {
-      console.error(`[FB-Hunter] ❌ Lỗi quét mục tiêu ${cleanTarget}:`, err.message);
+      console.error(`[FB-Hunter] ❌ Error scanning target ${cleanTarget}:`, err.message);
     } finally {
       if (context) await context.close().catch(() => { });
       if (ownsBrowser && browser) await browser.close().catch(() => { });
@@ -4185,14 +4185,14 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
   }
 
   /**
-   * 7. VIA SESSION VALIDATOR — Kiểm tra sức khỏe tài khoản Via (LIVE vs CHECKPOINT / EXPIRED)
-   * @param {string} cookieStr Cookie của Via
-   * @param {object} options Tùy chọn proxyUrl, timeoutMs
+   * 7. VIA SESSION VALIDATOR — Checks Via account health (LIVE vs CHECKPOINT / EXPIRED)
+   * @param {string} cookieStr The Via's Cookie
+   * @param {object} options Options proxyUrl, timeoutMs
    */
   async function validateViaSession(cookieStr, options = {}) {
     const { proxyUrl = '', timeoutMs = 20000 } = options;
     if (!cookieStr || !cookieStr.includes('c_user=')) {
-      return { isLive: false, status: 'NO_COOKIE', error: 'Chuỗi Cookie rỗng hoặc không có c_user' };
+      return { isLive: false, status: 'NO_COOKIE', error: 'Cookie string is empty or has no c_user' };
     }
 
     const cookies = parseCookieString(cookieStr);
@@ -4239,7 +4239,7 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
           errStr.includes('ERR_NAME_NOT_RESOLVED') ||
           errStr.includes('Timeout')
         ) {
-          console.warn(`[ViaValidator] ⚠️ Lỗi kết nối mạng khi kiểm tra Via ${uid}: ${errStr}`);
+          console.warn(`[ViaValidator] ⚠️ Network error while checking Via ${uid}: ${errStr}`);
           return { isLive: false, status: 'NETWORK_ERROR', uid, error: errStr };
         }
       }
@@ -4247,14 +4247,14 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       await page.waitForTimeout(2500);
       const currentUrl = page.url();
 
-      // Nếu không tải được trang Facebook do lỗi mạng / blank
+      // If the Facebook page can't load due to a network error / blank page
       if (!currentUrl || currentUrl === 'about:blank' || !currentUrl.startsWith('http')) {
-        console.warn(`[ViaValidator] ⚠️ Trang không phản hồi Facebook (URL: ${currentUrl}), bỏ qua không đánh dấu lỗi.`);
-        return { isLive: false, status: 'NETWORK_ERROR', uid, error: 'Không tải được trang Facebook' };
+        console.warn(`[ViaValidator] ⚠️ Facebook page not responding (URL: ${currentUrl}), not marking as an error.`);
+        return { isLive: false, status: 'NETWORK_ERROR', uid, error: 'Could not load the Facebook page' };
       }
 
       if (currentUrl.includes('/checkpoint') || currentUrl.includes('checkpoint')) {
-        console.warn(`[ViaValidator] 🛑 Via ${uid} BỊ CHECKPOINT! (URL: ${currentUrl})`);
+        console.warn(`[ViaValidator] 🛑 Via ${uid} IS CHECKPOINTED! (URL: ${currentUrl})`);
         return { isLive: false, status: 'CHECKPOINT', uid, url: currentUrl };
       }
 
@@ -4263,11 +4263,11 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       const isLoginPage = hasLoginForm || /đăng nhập|log in|login/i.test(title);
 
       if (currentUrl.includes('/login') || currentUrl.includes('login_attempt') || isLoginPage) {
-        console.warn(`[ViaValidator] ❌ Via ${uid} ĐÃ HẾT HẠN COOKIE / BỊ ĐĂNG XUẤT! (Phát hiện form đăng nhập)`);
-        return { isLive: false, status: 'EXPIRED', uid, url: currentUrl, error: 'Cookie đã hết hạn hoặc bị đăng xuất khỏi Facebook' };
+        console.warn(`[ViaValidator] ❌ Via ${uid} COOKIE EXPIRED / LOGGED OUT! (login form detected)`);
+        return { isLive: false, status: 'EXPIRED', uid, url: currentUrl, error: 'Cookie expired or logged out of Facebook' };
       }
 
-      console.log(`[ViaValidator] ✅ Via ${uid} HOẠT ĐỘNG TỐT (LIVE)! (Tên: ${title})`);
+      console.log(`[ViaValidator] ✅ Via ${uid} IS HEALTHY (LIVE)! (Name: ${title})`);
       return {
         isLive: true,
         status: 'LIVE',
@@ -4285,8 +4285,8 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
   }
 
   /**
-   * Chụp ảnh màn hình bài viết Facebook làm bằng chứng nghiệm thu kết quả buff
-   * @param {string} targetUrl - URL bài viết
+   * Screenshots the Facebook post as proof of the buff result
+   * @param {string} targetUrl - Post URL
    * @param {object} options - { cookieStr, proxyUrl, outputPath, timeoutMs }
    * @returns {Promise<{ success: boolean, filePath?: string, error?: string }>}
    */
@@ -4300,11 +4300,11 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
 
     const targetPath =
       outputPath ||
-      path.join(__dirname, 'data', 'screenshots', `proof_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.png`);
+      path.join(dataDir, 'screenshots', `proof_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.png`);
     const dir = path.dirname(targetPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-    // Tự động dọn dẹp ảnh bằng chứng cũ hơn 7 ngày để chống đầy ổ đĩa
+    // Automatically clean up proof images older than 7 days so the disk doesn't fill up
     try {
       const files = fs.readdirSync(dir);
       const nowMs = Date.now();
@@ -4345,14 +4345,14 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       }
 
       const page = await context.newPage();
-      // Chặn video nặng để tiết kiệm RAM & CPU, giữ ảnh để render bài viết đẹp mắt
+      // Block heavy video to save RAM & CPU, keep images so the post renders nicely
       await page.route('**/*.{mp4,mov,m4v,avi,webm,m3u8,ts}', (route) => route.abort());
       await page.route('**/*{google-analytics,doubleclick,connect.facebook.net/signals,pixel.facebook.com,facebook.com/tr/}*', (route) => route.abort());
 
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs }).catch(() => { });
       await page.waitForTimeout(3000);
 
-      // Chụp lại khối bài viết chính hoặc viewport
+      // Capture the main post block or the viewport
       const article = await page.$('div[role="article"]').catch(() => null);
       if (article) {
         await article.screenshot({ path: targetPath }).catch(async () => {
@@ -4362,10 +4362,10 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
         await page.screenshot({ path: targetPath, fullPage: false });
       }
 
-      console.log(`[FB-Proof] 📸 Đã chụp ảnh nghiệm thu thành công: ${targetPath}`);
+      console.log(`[FB-Proof] 📸 Proof screenshot captured: ${targetPath}`);
       return { success: true, filePath: targetPath };
     } catch (err) {
-      console.warn(`[FB-Proof] ⚠️ Lỗi chụp ảnh nghiệm thu: ${err.message}`);
+      console.warn(`[FB-Proof] ⚠️ Error capturing the proof screenshot: ${err.message}`);
       return { success: false, error: err.message };
     } finally {
       if (context) await context.close().catch(() => { });
@@ -4413,14 +4413,14 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
   };
 
   // ==========================================
-  // 5. TEST CLI TRỰC TIẾP
+  // 5. DIRECT CLI TEST
   // ==========================================
   if (require.main === module) {
     const args = process.argv.slice(2);
     const action = args[0]; // 'get-pages' | 'buff-like' | 'buff-view'
 
     console.log('--- FB BUFF ENGAGEMENT TOOL ---');
-    console.log('Sử dụng:');
+    console.log('Usage:');
     console.log('  node fb-buff-tool.js get-pages "<COOKIE>"');
     console.log('  node fb-buff-tool.js buff-like "<COOKIE>" "<POST_URL>" [REACTION_TYPE]');
     console.log('  node fb-buff-tool.js buff-view "<VIDEO_URL>" [TARGET_VIEWS] [CONCURRENCY]');
@@ -4429,33 +4429,33 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
     if (action === 'get-pages') {
       const cookie = args[1];
       if (!cookie) {
-        console.error('Vui lòng cung cấp chuỗi Cookie!');
+        console.error('Please provide a Cookie string!');
         process.exit(1);
       }
       getManagedPages(cookie)
-        .then((pages) => console.log('KẾT QUẢ:', JSON.stringify(pages, null, 2)))
-        .catch((err) => console.error('LỖI:', err.message));
+        .then((pages) => console.log('RESULT:', JSON.stringify(pages, null, 2)))
+        .catch((err) => console.error('ERROR:', err.message));
     } else if (action === 'buff-like') {
       const cookie = args[1];
       const postUrl = args[2];
       const reaction = args[3] || 'LIKE';
       if (!cookie || !postUrl) {
-        console.error('Vui lòng cung cấp Cookie và Link bài viết!');
+        console.error('Please provide a Cookie and a post link!');
         process.exit(1);
       }
       buffLikesWithPages(cookie, postUrl, { reactionType: reaction })
-        .then((res) => console.log('KẾT QUẢ:', res))
-        .catch((err) => console.error('LỖI:', err.message));
+        .then((res) => console.log('RESULT:', res))
+        .catch((err) => console.error('ERROR:', err.message));
     } else if (action === 'buff-view') {
       const videoUrl = args[1];
       const targetViews = parseInt(args[2], 10) || 5;
       const concurrency = parseInt(args[3], 10) || 2;
       if (!videoUrl) {
-        console.error('Vui lòng cung cấp Link Video/Reels!');
+        console.error('Please provide a Video/Reels link!');
         process.exit(1);
       }
       buffViews(videoUrl, { targetViews, concurrency })
-        .then((res) => console.log('KẾT QUẢ:', res))
-        .catch((err) => console.error('LỖI:', err.message));
+        .then((res) => console.log('RESULT:', res))
+        .catch((err) => console.error('ERROR:', err.message));
     }
   }

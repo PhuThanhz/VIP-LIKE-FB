@@ -29,13 +29,13 @@ function triggerCrashRecovery() {
       } else if (!hasExternalSideEffects) {
         it.status = 'QUEUED';
         it.executionStage = 'INITIALIZED';
-        it.error = 'Máy chủ đã khởi động lại trước khi tác vụ bắt đầu thao tác bên ngoài. Đã phục hồi về hàng đợi an toàn.';
+        it.error = 'The server restarted before the task started any external action. Safely restored to the queue.';
         recoveredCount++;
       } else {
         it.status = 'NEEDS_REVIEW';
         it.executionStage = 'NEEDS_REVIEW';
         it.reviewReason = 'CRASH_DURING_EXTERNAL_INTERACTION';
-        it.error = `Tác vụ bị gián đoạn khi máy chủ khởi động lại trong lúc đang tương tác bên ngoài (Đã like thành công: ${it.progress?.success || it.progressLikes || 0}). Chuyển sang NEEDS_REVIEW để đối soát thủ công, chống duplicate tương tác.`;
+        it.error = `The task was interrupted by a server restart while engaging externally (successful likes: ${it.progress?.success || it.progressLikes || 0}). Moved to NEEDS_REVIEW for manual reconciliation to prevent duplicate engagement.`;
         reviewCount++;
       }
     }
@@ -45,7 +45,7 @@ function triggerCrashRecovery() {
 }
 
 async function testFencingPreemption() {
-  // Giả lập 2 lease trên cùng 1 resource uid
+  // Simulate 2 leases on the same resource uid
   const uid = 'test_fence_uid_' + Date.now();
   const token1 = await db.allocateFencingToken();
   const token2 = await db.allocateFencingToken();
@@ -53,17 +53,17 @@ async function testFencingPreemption() {
   const activeLeases = new Map();
   activeLeases.set(uid, { leaseToken: token1 });
 
-  // Task 1 kiểm tra xem lease còn hiệu lực không
+  // Task 1 checks whether its lease is still valid
   const isToken1ValidBefore = activeLeases.get(uid)?.leaseToken === token1;
 
-  // Task 2 preempts (chiếm lease mới)
+  // Task 2 preempts (takes a new lease)
   activeLeases.set(uid, { leaseToken: token2 });
 
-  // Task 1 kiểm tra lại
+  // Task 1 checks again
   const isToken1ValidAfter = activeLeases.get(uid)?.leaseToken === token1;
   const isToken2Valid = activeLeases.get(uid)?.leaseToken === token2;
 
-  // Giả lập ghi kết quả: Task 1 cố ghi nhưng fence bị stale
+  // Simulate writing the result: Task 1 tries to write but its fence is stale
   let writeRejected = false;
   if (!isToken1ValidAfter) {
     writeRejected = true; // Reject stale write!
@@ -78,7 +78,7 @@ async function testFencingPreemption() {
 async function testDeepAbortSpeed() {
   const controller = new AbortController();
 
-  // Đăng ký cancellableSleep 2000ms
+  // Register a 2000ms cancellableSleep
   function cancellableSleep(ms, signal) {
     if (ms <= 0 || signal?.aborted) return Promise.resolve();
     return new Promise((resolve) => {
@@ -117,7 +117,7 @@ function resolveReviewTask(task, action) {
     task.executionStage = 'INITIALIZED';
     task.error = null;
     task.reviewResolvedAt = new Date().toISOString();
-    task.reviewResolution = `Tiếp tục chạy nốt ${remainingTarget} like còn thiếu (đã trừ ${currentSuccess} like đã like trước đó).`;
+    task.reviewResolution = `Continue running the ${remainingTarget} missing likes (minus the ${currentSuccess} likes already done).`;
     return { success: true, task };
   } else if (action === 'COMPLETE') {
     task.status = 'COMPLETED';
@@ -129,7 +129,7 @@ function resolveReviewTask(task, action) {
     task.executionStage = 'CANCELLED';
     return { success: true, task };
   }
-  return { success: false, error: 'Hành động không hợp lệ' };
+  return { success: false, error: 'Invalid action' };
 }
 
 module.exports = {

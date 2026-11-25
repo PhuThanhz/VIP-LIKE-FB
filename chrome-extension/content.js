@@ -1,16 +1,16 @@
-// content.js - Engine tự động hóa trình duyệt chạy trực tiếp trên Tab Facebook
-// Tự động duy trì trạng thái qua các lần chuyển danh tính Fanpage (Profile Switch) bằng chrome.storage.local
+// content.js - Browser automation engine running directly in the Facebook tab
+// Keeps state across Fanpage identity switches (Profile Switch) via chrome.storage.local
 
 (function () {
   if (window.__VIPLIKE_AVATAR_INJECTED__) return;
   window.__VIPLIKE_AVATAR_INJECTED__ = true;
 
-  console.log('[VIPLIKE Avatar Uploader] 🚀 Content Script đã kích hoạt trên Facebook!');
+  console.log('[VIPLIKE Avatar Uploader] 🚀 Content Script activated on Facebook!');
 
   let floatingHud = null;
   let isExecuting = false;
 
-  // 1. Lắng nghe thông điệp từ Extension Popup
+  // 1. Listen for messages from the Extension Popup
   chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
     if (req.action === 'GET_FB_INFO') {
       sendResponse(getFacebookUserInfo());
@@ -41,7 +41,7 @@
     }
   });
 
-  // Tự động kiểm tra và tiếp tục tiến trình ngay khi trang Facebook tải xong
+  // Automatically check and resume the run as soon as the Facebook page finishes loading
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => setTimeout(checkAndResumeEngine, 1500));
   } else {
@@ -49,7 +49,7 @@
   }
 
   // =========================================================================
-  // CORE ENGINE: KIỂM TRA TRẠNG THÁI & THỰC THI QUA NAVIGATION
+  // CORE ENGINE: CHECK STATE & EXECUTE ACROSS NAVIGATION
   // =========================================================================
   async function checkAndResumeEngine() {
     if (isExecuting) return;
@@ -73,12 +73,12 @@
         return;
       }
 
-      // Khởi động chạy bước tiếp theo
+      // Start the next step
       isExecuting = true;
       createFloatingHud(activeJob);
       await executeNextStep(activeJob);
     } catch (err) {
-      console.error('[VIPLIKE Avatar] Lỗi trong Engine:', err);
+      console.error('[VIPLIKE Avatar] Engine error:', err);
     } finally {
       isExecuting = false;
     }
@@ -88,7 +88,7 @@
     if (job.currentIndex >= job.total) {
       job.isRunning = false;
       job.completed = true;
-      job.statusMessage = `🎉 Hoàn tất toàn bộ: ${job.success} thành công, ${job.failed} lỗi!`;
+      job.statusMessage = `🎉 All done: ${job.success} successful, ${job.failed} errors!`;
       await chrome.storage.local.set({ activeJob: job });
       updateFloatingHud(job);
       notifyPopup(job);
@@ -100,7 +100,7 @@
     updateFloatingHud(job);
     notifyPopup(job);
 
-    // Kiểm tra xem chúng ta đã ở đúng trang Fanpage này chưa
+    // Check whether we're already on this Fanpage
     const activeProfileId = getActiveProfileId();
     const isSwitchedToPage = activeProfileId === String(targetPage.id);
     const onTargetPageUrl =
@@ -111,28 +111,28 @@
     const readyToUpload = isSwitchedToPage || (job.switchedToId === targetPage.id && onTargetPageUrl);
 
     if (!readyToUpload) {
-      // 1. Chuyển sang danh tính Fanpage (Profile Switch)
-      job.statusMessage = `🔄 Đang chuyển sang: ${targetPage.name}...`;
+      // 1. Switch to the Fanpage identity (Profile Switch)
+      job.statusMessage = `🔄 Switching to: ${targetPage.name}...`;
       job.switchedToId = targetPage.id;
       job.phase = 'SWITCHING';
       await chrome.storage.local.set({ activeJob: job });
       updateFloatingHud(job);
 
-      // Thử xác nhận hộp thoại nếu đang ở trang có nút Chuyển
+      // Try to confirm the dialog if this page has a Switch button
       await autoConfirmSwitchDialog();
 
       await sleep(800);
       const switchUrl = `https://www.facebook.com/profile/switch/?target_id=${targetPage.id}`;
-      console.log(`[VIPLIKE Avatar] Chuyển danh tính sang Page: ${targetPage.name} (${targetPage.id})`);
+      console.log(`[VIPLIKE Avatar] Switching identity to Page: ${targetPage.name} (${targetPage.id})`);
       window.location.href = switchUrl;
-      // Trình duyệt sẽ navigate sang trang mới. Content script trên trang mới sẽ tự tiếp tục!
+      // The browser navigates to the new page; the content script there resumes automatically!
       return;
     }
 
-    // 2. Chúng ta đã ở trên đúng Page -> Tiến hành đổi Avatar
-    job.switchedToId = null; // Đã đến nơi, reset cờ
+    // 2. We're on the right Page -> change the Avatar
+    job.switchedToId = null; // Arrived, reset the flag
     job.phase = 'UPLOADING';
-    job.statusMessage = `📸 Đang cập nhật ảnh đại diện: ${targetPage.name}...`;
+    job.statusMessage = `📸 Updating avatar: ${targetPage.name}...`;
     await chrome.storage.local.set({ activeJob: job });
     updateFloatingHud(job);
 
@@ -141,13 +141,13 @@
       await sleep(2500);
       await dismissFacebookPopups();
 
-      // KIỂM TRA BẢO VỆ AN TOÀN TRƯỚC KHI TẢI:
-      // Nếu phát hiện Page này trên thực tế ĐÃ CÓ avatar thật trên Facebook (không phải bóng mờ silhouette)
+      // SAFETY CHECK BEFORE UPLOADING:
+      // If this Page actually ALREADY HAS a real avatar on Facebook (not the default silhouette)
       const hasRealAvatarOnFb = detectIfPageHasAvatarOnFacebook();
       if (hasRealAvatarOnFb && !targetPage.forceUpdate) {
-        console.log(`[VIPLIKE Avatar] 🛡️ Page "${targetPage.name}" đã có Avatar thật trên Facebook. Bỏ qua an toàn!`);
-        addLog(job, `🛡️ Bỏ qua an toàn: ${targetPage.name} (Đã có Avatar thật)`, 'info');
-        job.statusMessage = `🛡️ Đã có avatar thật: Bỏ qua ${targetPage.name}...`;
+        console.log(`[VIPLIKE Avatar] 🛡️ Page "${targetPage.name}" already has a real Avatar on Facebook. Skipping safely!`);
+        addLog(job, `🛡️ Skipped safely: ${targetPage.name} (already has a real Avatar)`, 'info');
+        job.statusMessage = `🛡️ Real avatar exists: skipping ${targetPage.name}...`;
         await chrome.storage.local.set({ activeJob: job });
         updateFloatingHud(job);
         notifyPopup(job);
@@ -158,52 +158,52 @@
           ? window.getRandomAvatar(preset)
           : 'https://randomuser.me/api/portraits/women/1.jpg';
 
-        console.log(`[VIPLIKE Avatar] Tải ảnh đại diện mẫu: ${avatarUrl}`);
+        console.log(`[VIPLIKE Avatar] Downloading sample avatar: ${avatarUrl}`);
         const imageFile = await urlToFile(avatarUrl, `avatar_${targetPage.id}.jpg`);
 
         await processAvatarUploadOnPage(imageFile, targetPage.name);
 
         job.success++;
-        addLog(job, `✅ Thành công: ${targetPage.name}`, 'success');
-        console.log(`[VIPLIKE Avatar] ✅ Cập nhật thành công cho ${targetPage.name}`);
+        addLog(job, `✅ Success: ${targetPage.name}`, 'success');
+        console.log(`[VIPLIKE Avatar] ✅ Updated successfully for ${targetPage.name}`);
       }
     } catch (err) {
-      console.warn(`[VIPLIKE Avatar] ⚠️ Lỗi Page ${targetPage.name}:`, err.message);
+      console.warn(`[VIPLIKE Avatar] ⚠️ Page error ${targetPage.name}:`, err.message);
       job.failed++;
-      addLog(job, `⚠️ Lỗi [${targetPage.name}]: ${err.message}`, 'error');
+      addLog(job, `⚠️ Error [${targetPage.name}]: ${err.message}`, 'error');
     }
 
-    // Bước tiếp theo
+    // Next step
     job.currentIndex++;
     if (job.currentIndex >= job.total) {
       job.isRunning = false;
       job.completed = true;
-      job.statusMessage = `🎉 Hoàn tất: ${job.success} thành công, ${job.failed} lỗi!`;
+      job.statusMessage = `🎉 Done: ${job.success} successful, ${job.failed} errors!`;
       await chrome.storage.local.set({ activeJob: job });
       updateFloatingHud(job);
       notifyPopup(job);
       return;
     }
 
-    // Chuẩn bị sang Page kế tiếp
+    // Prepare for the next Page
     const nextTarget = job.pages[job.currentIndex];
     job.currentPageName = nextTarget.name;
     job.switchedToId = null;
     const delay = job.delaySeconds || 4.0;
-    job.statusMessage = `⏳ Nghỉ ${delay}s trước khi chuyển sang ${nextTarget.name}...`;
+    job.statusMessage = `⏳ Resting ${delay}s before switching to ${nextTarget.name}...`;
     await chrome.storage.local.set({ activeJob: job });
     updateFloatingHud(job);
     notifyPopup(job);
 
     await sleep(delay * 1000);
 
-    // Kiểm tra lại nếu người dùng đã bấm Tạm dừng / Dừng trong lúc ngủ
+    // Re-check whether the user clicked Pause / Stop while sleeping
     const { activeJob: checkJob } = await chrome.storage.local.get('activeJob');
     if (!checkJob || !checkJob.isRunning || checkJob.isPaused) {
       return;
     }
 
-    // Chuyển trang tiếp theo
+    // Move to the next page
     checkJob.switchedToId = nextTarget.id;
     checkJob.phase = 'SWITCHING';
     await chrome.storage.local.set({ activeJob: checkJob });
@@ -211,14 +211,14 @@
   }
 
   // =========================================================================
-  // DOM INTERACTIONS: CLICK NÚT CAMERA & NẠP ẢNH TRÊN FACEBOOK COMET
+  // DOM INTERACTIONS: CLICK THE CAMERA BUTTON & UPLOAD THE IMAGE ON FACEBOOK COMET
   // =========================================================================
 
   async function processAvatarUploadOnPage(imageFile, pageName) {
-    // 1. Tắt popup quảng cáo / chào mừng nếu có
+    // 1. Close any promo / welcome popup
     await dismissFacebookPopups();
 
-    // 2. Tìm điểm kích hoạt đổi Avatar (Trigger: Nút Camera, Ảnh tròn đại diện, hoặc Nút Chỉnh sửa)
+    // 2. Find the avatar-change trigger (camera button, round avatar image, or Edit button)
     let trigger = null;
     for (let retry = 0; retry < 8; retry++) {
       trigger = findAvatarTrigger();
@@ -228,15 +228,15 @@
     }
 
     if (!trigger) {
-      throw new Error('Không tìm thấy điểm kích hoạt Avatar trên Fanpage này');
+      throw new Error('Avatar trigger not found on this Fanpage');
     }
 
-    console.log('[VIPLIKE Avatar] 🎯 Đã tìm thấy điểm kích hoạt, đang click...', trigger);
+    console.log('[VIPLIKE Avatar] 🎯 Found the trigger, clicking...', trigger);
     trigger.click();
     await sleep(2000);
 
-    // 3. Xử lý sau khi click trigger:
-    // 3a. Nếu mở Menu popup (Chọn ảnh đại diện / Cập nhật ảnh đại diện / Tải ảnh lên)
+    // 3. After clicking the trigger:
+    // 3a. If a menu popup opens (Choose profile picture / Update profile picture / Upload photo)
     const menuButtons = Array.from(document.querySelectorAll('div[role="menuitem"], div[role="button"], span'));
     const uploadOption = menuButtons.find((el) => {
       const text = (el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim().toLowerCase();
@@ -250,13 +250,13 @@
     });
 
     if (uploadOption) {
-      console.log('[VIPLIKE Avatar] Click mục menu:', uploadOption.innerText || uploadOption.textContent);
+      console.log('[VIPLIKE Avatar] Clicking menu item:', uploadOption.innerText || uploadOption.textContent);
       uploadOption.click();
       await sleep(1800);
     }
 
-    // 3b. Nếu mở Modal "Chỉnh sửa trang cá nhân" (do click nút "Chỉnh sửa")
-    // Trong modal này có nút "Thêm" hoặc "Chỉnh sửa" dưới mục Ảnh đại diện
+    // 3b. If the "Edit profile" modal opens (from clicking the "Edit" button)
+    // This modal has an "Add" or "Edit" button under the Profile picture section
     const dialogBtns = Array.from(document.querySelectorAll('div[role="dialog"] div[role="button"], div[role="dialog"] button'));
     const modalAvatarEditBtn = dialogBtns.find((b) => {
       const txt = (b.innerText || b.getAttribute('aria-label') || '').trim().toLowerCase();
@@ -271,15 +271,15 @@
     });
 
     if (modalAvatarEditBtn && !document.querySelector('div[role="dialog"] input[type="file"]')) {
-      console.log('[VIPLIKE Avatar] Click nút đổi ảnh trong Modal Chỉnh sửa trang cá nhân...');
+      console.log('[VIPLIKE Avatar] Clicking the change-photo button in the Edit profile modal...');
       modalAvatarEditBtn.click();
       await sleep(1800);
     }
 
-    // 4. Tìm thẻ input[type="file"]
+    // 4. Find the input[type="file"]
     let fileInput = document.querySelector('div[role="dialog"] input[type="file"], input[type="file"]');
     if (!fileInput) {
-      // Tìm nút "Tải ảnh lên" bên trong Dialog
+      // Find the "Upload photo" button inside the Dialog
       const dialogUploadBtn = Array.from(document.querySelectorAll('div[role="dialog"] div[role="button"], div[role="dialog"] button')).find((b) => {
         const txt = (b.innerText || b.getAttribute('aria-label') || '').toLowerCase();
         return txt.includes('tải ảnh') || txt.includes('upload');
@@ -292,19 +292,19 @@
     }
 
     if (!fileInput) {
-      throw new Error('Không tìm thấy ô chọn tệp ảnh của Facebook');
+      throw new Error('Facebook file picker input not found');
     }
 
-    // 5. Nạp file ảnh bằng DataTransfer
-    console.log('[VIPLIKE Avatar] 📁 Nạp file ảnh vào input[type="file"]...');
+    // 5. Load the image file via DataTransfer
+    console.log('[VIPLIKE Avatar] 📁 Loading image file into input[type="file"]...');
     const dt = new DataTransfer();
     dt.items.add(imageFile);
     fileInput.files = dt.files;
     fileInput.dispatchEvent(new Event('input', { bubbles: true }));
     fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 
-    // 6. Chờ nút "Lưu" (Save) xuất hiện và nhấp Lưu (tối đa 18s)
-    console.log('[VIPLIKE Avatar] ⏳ Đang đợi nút "Lưu" xuất hiện...');
+    // 6. Wait for the "Save" button to appear and click it (up to 18s)
+    console.log('[VIPLIKE Avatar] ⏳ Waiting for the "Save" button to appear...');
     let saveClicked = false;
 
     for (let s = 0; s < 18; s++) {
@@ -319,7 +319,7 @@
       });
 
       if (saveBtn) {
-        console.log('[VIPLIKE Avatar] 💾 Đã bấm nút "Lưu"!');
+        console.log('[VIPLIKE Avatar] 💾 Clicked "Save"!');
         saveBtn.click();
         saveClicked = true;
         break;
@@ -327,15 +327,15 @@
     }
 
     if (!saveClicked) {
-      throw new Error('Nút "Lưu" không xuất hiện (Thời gian tải ảnh lên Facebook quá hạn)');
+      throw new Error('"Save" button did not appear (image upload to Facebook timed out)');
     }
 
-    // Chờ 3.5s để Facebook xử lý xong
+    // Wait 3.5s for Facebook to finish processing
     await sleep(3500);
     return true;
   }
 
-  // Lấy ID danh tính đang hoạt động (i_user: ID Fanpage nếu đã switch, c_user: nick mẹ)
+  // Get the active identity ID (i_user: Fanpage ID if switched, c_user: parent account)
   function getActiveProfileId() {
     const m = document.cookie.match(/(?:^|;\s*)i_user=([^;]+)/);
     if (m) return m[1];
@@ -343,7 +343,7 @@
     return c ? c[1] : null;
   }
 
-  // Tự động click xác nhận Chuyển trang nếu Facebook hiện hộp thoại xác nhận
+  // Automatically confirm the page switch if Facebook shows a confirmation dialog
   async function autoConfirmSwitchDialog() {
     for (let r = 0; r < 4; r++) {
       const btns = Array.from(
@@ -362,7 +362,7 @@
         );
       });
       if (confirmBtn && confirmBtn.offsetParent !== null) {
-        console.log('[VIPLIKE Avatar] 🔄 Tự động click xác nhận Chuyển trang...');
+        console.log('[VIPLIKE Avatar] 🔄 Automatically confirming the page switch...');
         confirmBtn.click();
         await sleep(1500);
         break;
@@ -371,9 +371,9 @@
     }
   }
 
-  // Tìm điểm kích hoạt đổi Avatar với 3 chiến lược linh hoạt
+  // Find the avatar-change trigger with 3 flexible strategies
   function findAvatarTrigger() {
-    // Chiến lược 1: Quét tất cả các phần tử có aria-label liên quan đến Avatar (không phân biệt hoa thường)
+    // Strategy 1: scan every element with an avatar-related aria-label (case-insensitive)
     const elementsWithAria = Array.from(
       document.querySelectorAll('div[role="button"], button, [aria-label], svg, image')
     );
@@ -398,13 +398,13 @@
       }
     }
 
-    // Chiến lược 2: Click trực tiếp vào khung tròn Avatar / Silhouette lớn trên Fanpage
+    // Strategy 2: click the round Avatar / large silhouette on the Fanpage directly
     const roundAvatars = Array.from(
       document.querySelectorAll('svg[role="img"], div[role="img"], image, img')
     ).filter((el) => {
       const rect = el.getBoundingClientRect();
       const isTopNav = rect.top < 60;
-      // Khung avatar chính lớn (kích thước >= 70px, nằm trong vùng header)
+      // Main large avatar frame (>= 70px, inside the header area)
       return !isTopNav && rect.width >= 70 && rect.height >= 70 && rect.top < 500 && rect.top > 80;
     });
 
@@ -413,7 +413,7 @@
       return avatarEl.closest('div[role="button"], a, div[tabindex="0"]') || avatarEl;
     }
 
-    // Chiến lược 3: Click vào nút "Chỉnh sửa" (có icon bút chì kế bên tên Fanpage)
+    // Strategy 3: click the "Edit" button (pencil icon next to the Fanpage name)
     const editBtns = Array.from(
       document.querySelectorAll('div[role="button"], button')
     ).filter((b) => {
@@ -430,7 +430,7 @@
     return null;
   }
 
-  // Phát hiện xem Page hiện tại trên Facebook đã có avatar thật hay chỉ là silhouette mặc định
+  // Detect whether the current Page on Facebook has a real avatar or just the default silhouette
   function detectIfPageHasAvatarOnFacebook() {
     try {
       const avatarImgs = Array.from(
@@ -447,7 +447,7 @@
         const isRealPhoto = (src.includes('t39.30808-1') || src.includes('fbcdn.net')) && !isSilhouette;
 
         const rect = el.getBoundingClientRect();
-        // Ảnh đại diện chính thường nằm ở phần header (top < 450px) và kích thước lớn (>= 50px)
+        // The main avatar usually sits in the header (top < 450px) and is large (>= 50px)
         if (isRealPhoto && rect.width >= 50 && rect.height >= 50 && rect.top < 450) {
           return true;
         }
@@ -469,7 +469,7 @@
     }
   }
 
-  // Tải ảnh từ URL về Blob và File
+  // Download an image from a URL into a Blob and File
   async function urlToFile(imageUrl, filename = 'avatar.jpg') {
     const res = await fetch(imageUrl);
     const blob = await res.blob();
@@ -509,14 +509,14 @@
     } catch (e) {}
   }
 
-  // Lấy thông tin tài khoản Facebook từ Cookie
+  // Get Facebook account info from the Cookie
   function getFacebookUserInfo() {
     const cUserMatch = document.cookie.match(/(?:^|;\s*)c_user=([^;]+)/);
     const uid = cUserMatch ? cUserMatch[1] : null;
 
     if (!uid) return { loggedIn: false };
 
-    let name = 'Tài khoản Facebook';
+    let name = 'Facebook account';
     const profileLink = document.querySelector('a[href*="/me/"], a[href*="/profile.php"], div[aria-label="Tài khoản"], div[aria-label="Account"]');
     if (profileLink) {
       name = profileLink.getAttribute('aria-label') || profileLink.innerText || name;
@@ -533,7 +533,7 @@
     };
   }
 
-  // Quét danh sách Fanpage từ DOM
+  // Scan the Fanpage list from the DOM
   async function scanPagesFromFacebookDom() {
     const pages = [];
     const seen = new Set();
@@ -553,7 +553,7 @@
   }
 
   // =========================================================================
-  // FLOATING HUD: THANH ĐIỀU KHIỂN NỔI NGAY TRÊN FACEBOOK
+  // FLOATING HUD: FLOATING CONTROL BAR RIGHT ON FACEBOOK
   // =========================================================================
 
   function createFloatingHud(job) {
@@ -566,28 +566,28 @@
         <span class="vl-hud-badge">⚡ VIPLIKE</span>
         <span class="vl-hud-title">Avatar Uploader</span>
         <span id="vl-hud-percent" class="vl-hud-percent">0%</span>
-        <button id="vl-hud-btn-close" class="vl-hud-btn-sm" title="Đóng bảng">✕</button>
+        <button id="vl-hud-btn-close" class="vl-hud-btn-sm" title="Close panel">✕</button>
       </div>
       <div class="vl-hud-body">
         <div class="vl-hud-bar-bg">
           <div id="vl-hud-bar-fill" class="vl-hud-bar-fill" style="width: 0%;"></div>
         </div>
         <div class="vl-hud-stats">
-          <span>Tiến trình: <b id="vl-hud-current">0</b>/${job.total || 0}</span>
-          <span style="color: #34d399;">Thành công: <b id="vl-hud-success">${job.success || 0}</b></span>
-          <span style="color: #f87171;">Lỗi: <b id="vl-hud-failed">${job.failed || 0}</b></span>
+          <span>Progress: <b id="vl-hud-current">0</b>/${job.total || 0}</span>
+          <span style="color: #34d399;">Success: <b id="vl-hud-success">${job.success || 0}</b></span>
+          <span style="color: #f87171;">Errors: <b id="vl-hud-failed">${job.failed || 0}</b></span>
         </div>
-        <div id="vl-hud-page-name" class="vl-hud-current-page">Đang khởi động...</div>
+        <div id="vl-hud-page-name" class="vl-hud-current-page">Starting...</div>
       </div>
       <div class="vl-hud-footer">
-        <button id="vl-hud-btn-pause" class="vl-hud-btn-action">⏸️ Tạm dừng</button>
-        <button id="vl-hud-btn-stop" class="vl-hud-btn-action vl-hud-btn-danger">⏹️ Dừng</button>
+        <button id="vl-hud-btn-pause" class="vl-hud-btn-action">⏸️ Pause</button>
+        <button id="vl-hud-btn-stop" class="vl-hud-btn-action vl-hud-btn-danger">⏹️ Stop</button>
       </div>
     `;
 
     document.body.appendChild(floatingHud);
 
-    // CSS Styling trực tiếp cho Floating Widget
+    // Inline CSS styling for the Floating Widget
     if (!document.getElementById('viplike-avatar-hud-style')) {
       const style = document.createElement('style');
       style.id = 'viplike-avatar-hud-style';
@@ -718,7 +718,7 @@
       document.head.appendChild(style);
     }
 
-    // Gắn sự kiện điều khiển
+    // Attach control events
     document.getElementById('vl-hud-btn-close').addEventListener('click', removeFloatingHud);
 
     document.getElementById('vl-hud-btn-pause').addEventListener('click', async () => {
@@ -760,7 +760,7 @@
     if (currentEl) currentEl.textContent = job.currentIndex || 0;
     if (successEl) successEl.textContent = job.success || 0;
     if (failedEl) failedEl.textContent = job.failed || 0;
-    if (pageNameEl) pageNameEl.textContent = job.statusMessage || (job.currentPageName ? `Đang xử lý: ${job.currentPageName}` : 'Đang xử lý...');
+    if (pageNameEl) pageNameEl.textContent = job.statusMessage || (job.currentPageName ? `Processing: ${job.currentPageName}` : 'Processing...');
 
     updateHudControls(job.isPaused);
   }
@@ -768,7 +768,7 @@
   function updateHudControls(isPaused) {
     const btnPause = document.getElementById('vl-hud-btn-pause');
     if (btnPause) {
-      btnPause.textContent = isPaused ? '▶️ Tiếp tục' : '⏸️ Tạm dừng';
+      btnPause.textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
       btnPause.style.background = isPaused ? '#d97706' : '#1e293b';
     }
   }

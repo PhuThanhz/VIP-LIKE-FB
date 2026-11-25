@@ -23,17 +23,17 @@ export type NavKey =
 
 export interface NavItem {
   key: NavKey;
-  /** Mục con hiển thị dưới dạng tab bên trong trang cha (ẩn khỏi Sidebar) */
+  /** Child item shown as a tab inside the parent page (hidden from the Sidebar) */
   parent?: NavKey;
-  /** Nhãn ngắn trên Sidebar */
+  /** Short label on the Sidebar */
   label: string;
-  /** Tiêu đề đầy đủ trên Header */
+  /** Full title on the Header */
   title: string;
   subtitle: string;
-  /** Lớp màu Tailwind cho icon, dùng chung giữa Sidebar và Header */
+  /** Tailwind color class for the icon, shared by Sidebar and Header */
   iconColor: string;
   Icon: React.ComponentType<{ className?: string }>;
-  /** Nhóm để Sidebar chèn đường kẻ phân cách */
+  /** Group used by the Sidebar to insert a divider */
   group: 'engagement' | 'management';
 }
 
@@ -42,9 +42,9 @@ export const DEFAULT_NAV_KEY: NavKey = 'buff-like';
 export const NAV_ITEMS: NavItem[] = [
   {
     key: 'buff-like',
-    label: 'Like & Bình luận',
-    title: 'Like & Bình luận',
-    subtitle: 'Tạo chiến dịch, theo dõi hàng đợi và xem lịch sử',
+    label: 'Likes & Comments',
+    title: 'Likes & Comments',
+    subtitle: 'Create campaigns, track the queue and view history',
     iconColor: 'text-cyan-400',
     Icon: ThunderboltOutlined,
     group: 'engagement',
@@ -52,9 +52,9 @@ export const NAV_ITEMS: NavItem[] = [
   {
     key: 'buff-running',
     parent: 'buff-like',
-    label: 'Tiến trình chạy',
-    title: 'Tiến Trình Tương Tác Trực Tiếp',
-    subtitle: 'Theo dõi trực tiếp quá trình bot thả Like / Comment theo thời gian thực',
+    label: 'Live progress',
+    title: 'Live Engagement Progress',
+    subtitle: 'Watch the bot drop Likes / Comments in real time',
     iconColor: 'text-blue-400',
     Icon: PlayCircleOutlined,
     group: 'engagement',
@@ -62,9 +62,9 @@ export const NAV_ITEMS: NavItem[] = [
   {
     key: 'buff-queue',
     parent: 'buff-like',
-    label: 'Hàng Đợi Tự Động',
-    title: 'Hàng Đợi Tự Động (Auto-Buff Queue)',
-    subtitle: 'Xếp lịch chạy ngầm với độ trễ tự nhiên, xoay vòng dàn Page chống kiệt sức',
+    label: 'Auto Queue',
+    title: 'Auto Queue (Auto-Buff Queue)',
+    subtitle: 'Schedule background runs with natural delays, rotating Pages to avoid burnout',
     iconColor: 'text-amber-400',
     Icon: ClockCircleOutlined,
     group: 'engagement',
@@ -72,20 +72,20 @@ export const NAV_ITEMS: NavItem[] = [
   {
     key: 'buff-history',
     parent: 'buff-like',
-    label: 'Nhật Ký & Lịch Sử',
-    title: 'Nhật Ký & Lịch Sử Tương Tác',
-    subtitle: 'Sổ chống trùng lặp và thống kê chi tiết toàn bộ lượt tương tác',
+    label: 'Logs & History',
+    title: 'Engagement Logs & History',
+    subtitle: 'Dedupe registry and detailed stats for every engagement',
     iconColor: 'text-blue-400',
     Icon: HistoryOutlined,
     group: 'engagement',
   },
   {
     key: 'buff-hunter',
-    // Mở từ thanh tab trong trang "Like & Bình luận", không lặp lại trên Sidebar
+    // Opened from the tab bar on the "Likes & Comments" page, not repeated on the Sidebar
     parent: 'buff-like',
-    label: 'Săn Bài & VIP Like',
-    title: 'Săn Bài & VIP Like (Tự Động Theo Dõi Page/Group)',
-    subtitle: 'Theo dõi 20 Fanpage/Group mục tiêu, tự động săn bài mới để buff và báo cáo tổng quan cuối ngày',
+    label: 'Post Hunter & VIP Like',
+    title: 'Post Hunter & VIP Like (Auto-Monitor Pages/Groups)',
+    subtitle: 'Monitor 20 target Fanpages/Groups, auto-hunt new posts to buff and send an end-of-day summary',
     iconColor: 'text-emerald-400',
     Icon: AimOutlined,
     group: 'engagement',
@@ -94,25 +94,25 @@ export const NAV_ITEMS: NavItem[] = [
     key: 'via-management',
     label: 'Via & Fanpage',
     title: 'Via & Fanpage',
-    subtitle: 'Quản lý tài khoản, Cookie, Proxy và Fanpage',
+    subtitle: 'Manage accounts, Cookies, Proxies and Fanpages',
     iconColor: 'text-sky-400',
     Icon: IdcardOutlined,
     group: 'management',
   },
   {
     key: 'system-settings',
-    label: 'Cài đặt',
-    title: 'Cài đặt',
-    subtitle: 'Telegram, thông báo và tự động',
+    label: 'Settings',
+    title: 'Settings',
+    subtitle: 'Telegram, notifications and automation',
     iconColor: 'text-slate-400',
     Icon: SettingOutlined,
     group: 'management',
   },
   {
     key: 'license-management',
-    label: 'Bản quyền',
-    title: 'Bản Quyền & Cho Thuê Phần Mềm',
-    subtitle: 'Quản lý thời hạn bản quyền, kích hoạt mã máy và quản lý khách thuê tool',
+    label: 'License',
+    title: 'Licensing & Software Rental',
+    subtitle: 'Manage license terms, activate machine IDs and manage tool renters',
     iconColor: 'text-amber-400',
     Icon: KeyOutlined,
     group: 'management',
@@ -124,7 +124,7 @@ const NAV_BY_KEY = new Map<string, NavItem>(NAV_ITEMS.map((item) => [item.key, i
 export const getNavItem = (key: string): NavItem =>
   NAV_BY_KEY.get(key) || NAV_BY_KEY.get(DEFAULT_NAV_KEY)!;
 
-/** Mục hiển thị trên Sidebar/Header: tab con quy về trang cha */
+/** Item shown on the Sidebar/Header: child tabs resolve to their parent page */
 export const getRootNavItem = (key: string): NavItem => {
   const item = getNavItem(key);
   return item.parent ? getNavItem(item.parent) : item;

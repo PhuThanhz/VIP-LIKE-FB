@@ -1,6 +1,6 @@
 /**
  * run-push-100-likes.js
- * Chiến dịch đẩy 100 Like thật an toàn bằng Multi-Via Rotation (Chia đều 3 Via)
+ * Safe real 100-Like push campaign with Multi-Via Rotation (split across 3 Vias)
  * Target: https://www.facebook.com/share/p/1CFB1A8SRm/
  */
 
@@ -12,8 +12,8 @@ const { notifyBuffStarted, notifyBuffCompleted } = require('./telegram-alert');
 
 async function main() {
   console.log('================================================================');
-  console.log('🚀 [VIPLIKE-RADIANT] KHỞI ĐỘNG CHIẾN DỊCH PUSH 100 LIKE THẬT');
-  console.log('🎯 Phân bổ đa Via (Multi-Via Rotation) chống chặn tính năng 100%');
+  console.log('🚀 [VIPLIKE-RADIANT] STARTING THE REAL 100-LIKE PUSH CAMPAIGN');
+  console.log('🎯 Multi-Via Rotation to avoid feature blocks 100%');
   console.log('================================================================\n');
 
   await store.init(db);
@@ -21,18 +21,18 @@ async function main() {
   const normalizedUrl = normalizeFbPostUrl(targetUrl);
   const pool = db.getPool();
 
-  // 1. Lấy danh sách 3 Via chủ lực
+  // 1. Get the 3 main Vias
   const [vias] = await pool.execute(
     'SELECT platform_account_id, page_name, access_token FROM social_accounts WHERE platform_account_id IN (?, ?, ?) AND access_token IS NOT NULL',
     ['100009194846268', '61568198025556', '100023403136194']
   );
 
   if (!vias.length) {
-    console.error('❌ Không tìm thấy tài khoản Via nào!');
+    console.error('❌ No Via accounts found!');
     process.exit(1);
   }
 
-  // 2. Thu thập Page của từng Via và lọc bỏ các Page đã like bài này trước đó
+  // 2. Collect each Via's Pages and drop Pages that already liked this post
   const TARGET_TOTAL = 100;
   const viaBuckets = [];
 
@@ -42,7 +42,7 @@ async function main() {
       [via.platform_account_id]
     );
     const freshPages = filterAvailablePagesForPost(normalizedUrl, pages);
-    console.log(`📋 Via [${via.page_name}] (UID: ${via.platform_account_id}): Có ${pages.length} Page (Khả dụng chưa like: ${freshPages.length})`);
+    console.log(`📋 Via [${via.page_name}] (UID: ${via.platform_account_id}): ${pages.length} Pages (available, not yet liked: ${freshPages.length})`);
     if (freshPages.length > 0) {
       viaBuckets.push({
         viaName: via.page_name,
@@ -54,15 +54,15 @@ async function main() {
   }
 
   if (!viaBuckets.length) {
-    console.error('❌ Toàn bộ các Page của mọi Via đã like bài viết này!');
+    console.error('❌ Every Page of every Via already liked this post!');
     process.exit(0);
   }
 
-  // 3. Phân bổ cân bằng 100 Page qua các Via
+  // 3. Balance 100 Pages across the Vias
   const selectedGroups = [];
   let remainingNeeded = TARGET_TOTAL;
 
-  // Lấy tỷ lệ hợp lý: Via Thạnh Phú (tối đa ~14), Huỳnh Hồng Phước (~43), Thành An (~43)
+  // Reasonable split: Via Thạnh Phú (max ~14), Huỳnh Hồng Phước (~43), Thành An (~43)
   for (let i = 0; i < viaBuckets.length; i++) {
     const bucket = viaBuckets[i];
     const isLast = (i === viaBuckets.length - 1);
@@ -82,7 +82,7 @@ async function main() {
   }
 
   const grandTotal = selectedGroups.reduce((acc, g) => acc + g.pages.length, 0);
-  console.log(`\n🎯 TỔNG SỐ LIKE CẦN BƠM: ${grandTotal} LIKE`);
+  console.log(`\n🎯 TOTAL LIKES TO PUSH: ${grandTotal} LIKES`);
   selectedGroups.forEach(g => console.log(`   👉 Via [${g.viaName}]: ${g.pages.length} Page`));
   console.log('----------------------------------------------------------------\n');
 
@@ -92,7 +92,7 @@ async function main() {
     reactionType: 'LIKE',
     speedMode: 'FAST',
     concurrency: 1,
-    accountName: `Dàn 3 Via (${grandTotal} Page)`,
+    accountName: `3-Via fleet (${grandTotal} Pages)`,
   }).catch(() => {});
 
   const startTime = Date.now();
@@ -107,7 +107,7 @@ async function main() {
     if (group.pages.length === 0) continue;
 
     console.log(`\n==================================================`);
-    console.log(`⚡ [NHÓM ${gIdx + 1}/${selectedGroups.length}] Đang chạy Via: "${group.viaName}" (${group.pages.length} Page)...`);
+    console.log(`⚡ [GROUP ${gIdx + 1}/${selectedGroups.length}] Running Via: "${group.viaName}" (${group.pages.length} Pages)...`);
     console.log(`==================================================`);
 
     try {
@@ -132,7 +132,7 @@ async function main() {
             else overallFailed++;
 
             const pct = Math.round((overallDone / grandTotal) * 100);
-            console.log(`[${overallDone}/${grandTotal}] (${pct}%) [${group.viaName}] [${evt.pageName}] ➔ ${evt.status} (Thành công: ${overallSuccess}, Đã like: ${overallAlreadyLiked}, Lỗi: ${overallFailed})`);
+            console.log(`[${overallDone}/${grandTotal}] (${pct}%) [${group.viaName}] [${evt.pageName}] ➔ ${evt.status} (Success: ${overallSuccess}, Already liked: ${overallAlreadyLiked}, Errors: ${overallFailed})`);
           }
         },
       });
@@ -141,26 +141,26 @@ async function main() {
         allDetails.push(...res.details.map(d => ({ ...d, viaName: group.viaName })));
       }
     } catch (err) {
-      console.error(`⚠️ Lỗi khi chạy nhóm Via [${group.viaName}]:`, err.message);
-      console.log(`🔄 Tự động chuyển sang Via tiếp theo...`);
+      console.error(`⚠️ Error running Via group [${group.viaName}]:`, err.message);
+      console.log(`🔄 Switching to the next Via automatically...`);
     }
 
     if (gIdx < selectedGroups.length - 1) {
-      console.log(`\n⏳ Nghỉ an toàn 5 giây trước khi chuyển sang Via tiếp theo...`);
+      console.log(`\n⏳ Safe 5-second rest before switching to the next Via...`);
       await new Promise(r => setTimeout(r, 5000));
     }
   }
 
   const durationSec = Math.round((Date.now() - startTime) / 1000);
   console.log(`\n================================================================`);
-  console.log(`🎉 HOÀN TẤT CHIẾN DỊCH PUSH 100 LIKE!`);
-  console.log(`⏱️ Thời gian: ${durationSec}s (~${Math.round(durationSec / 60)} phút)`);
-  console.log(`✅ Thành công thực tế: ${overallSuccess}/${grandTotal}`);
-  console.log(`ℹ️ Đã like từ trước: ${overallAlreadyLiked}`);
-  console.log(`❌ Lỗi / Bỏ qua: ${overallFailed}`);
+  console.log(`🎉 100-LIKE PUSH CAMPAIGN COMPLETE!`);
+  console.log(`⏱️ Time: ${durationSec}s (~${Math.round(durationSec / 60)} min)`);
+  console.log(`✅ Actual successes: ${overallSuccess}/${grandTotal}`);
+  console.log(`ℹ️ Already liked: ${overallAlreadyLiked}`);
+  console.log(`❌ Errors / Skipped: ${overallFailed}`);
   console.log(`================================================================\n`);
 
-  // Lưu log vào MySQL
+  // Save the log to MySQL
   const logId = 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
   await db.saveBuffLogs({
     id: logId,
@@ -174,11 +174,11 @@ async function main() {
     failedCount: overallFailed,
     engagementMode: 'LIKE_ONLY',
     commentCount: 0,
-    accountName: `Dàn 3 Via (${grandTotal} Page)`,
+    accountName: `3-Via fleet (${grandTotal} Pages)`,
     details: allDetails,
   }).catch(() => {});
 
-  // Báo cáo Telegram
+  // Telegram report
   await notifyBuffCompleted({
     targetUrl,
     success: overallSuccess,

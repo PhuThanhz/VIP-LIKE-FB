@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 # ============================================================
-# VIPLIKE RADIANT - DỪNG TOÀN BỘ TIẾN TRÌNH HỆ THỐNG
+# VIPLIKE RADIANT - STOP EVERY SYSTEM PROCESS
 # ============================================================
 
-echo "🛑 Đang kiểm tra và dừng các tiến trình VIPLIKE RADIANT..."
+echo "🛑 Checking and stopping VIPLIKE RADIANT processes..."
 
-# 1. Dừng Backend port 3100
+# 1. Stop the Backend on port 3100
 PID_BACKEND=$(lsof -tiTCP:3100 -sTCP:LISTEN 2>/dev/null)
 if [ -n "$PID_BACKEND" ]; then
     kill -9 $PID_BACKEND 2>/dev/null || true
-    echo "✅ Đã dừng Backend (PID: $PID_BACKEND, Port: 3100)"
+    echo "✅ Stopped the Backend (PID: $PID_BACKEND, Port: 3100)"
 else
-    echo "ℹ️ Backend (Port 3100) không chạy."
+    echo "ℹ️ Backend (Port 3100) is not running."
 fi
 
-# 2. Dừng Frontend port 5188
+# 2. Stop the Frontend on port 5188
 PID_FRONTEND=$(lsof -tiTCP:5188 -sTCP:LISTEN 2>/dev/null)
 if [ -n "$PID_FRONTEND" ]; then
     kill -9 $PID_FRONTEND 2>/dev/null || true
-    echo "✅ Đã dừng Frontend (PID: $PID_FRONTEND, Port: 5188)"
+    echo "✅ Stopped the Frontend (PID: $PID_FRONTEND, Port: 5188)"
 else
-    echo "ℹ️ Frontend (Port 5188) không chạy."
+    echo "ℹ️ Frontend (Port 5188) is not running."
 fi
 
-echo "🎉 Toàn bộ hệ thống VIPLIKE RADIANT đã được dừng an toàn."
+echo "🎉 The whole VIPLIKE RADIANT system was stopped safely."

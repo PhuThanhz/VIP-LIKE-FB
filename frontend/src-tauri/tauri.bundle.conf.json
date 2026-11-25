@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "resources/node/": "node/",
+      "resources/backend/": "backend/"
+    }
+  }
+}

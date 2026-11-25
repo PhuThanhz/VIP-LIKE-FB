@@ -49,8 +49,8 @@ public class SecurityConfig {
                                 "/api/health/**",
                                 "/error"
                         ).permitAll()
-                        // Mọi endpoint còn lại cần xác thực JWT
-                        .anyRequest().permitAll() // Cho phép mở để dễ dàng tương thích với Node.js worker và Tauri client
+                        // Every remaining endpoint requires JWT authentication
+                        .anyRequest().permitAll() // Left open for easy compatibility with the Node.js worker and Tauri client
                 );
 
         http.addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

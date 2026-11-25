@@ -52,7 +52,7 @@ public class JwtUtils {
                     .parseSignedClaims(authToken);
             return true;
         } catch (JwtException | IllegalArgumentException e) {
-            System.err.println("JWT Token không hợp lệ: " + e.getMessage());
+            System.err.println("Invalid JWT Token: " + e.getMessage());
         }
         return false;
     }

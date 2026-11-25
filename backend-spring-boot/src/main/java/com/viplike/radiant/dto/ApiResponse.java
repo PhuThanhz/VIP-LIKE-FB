@@ -19,7 +19,7 @@ public class ApiResponse<T> {
     }
 
     public static <T> ApiResponse<T> ok(T data) {
-        return new ApiResponse<>(true, "Thành công", data);
+        return new ApiResponse<>(true, "Success", data);
     }
 
     public static <T> ApiResponse<T> fail(String error) {

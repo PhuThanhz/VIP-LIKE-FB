@@ -2,7 +2,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-// Đọc API Key từ .env hoặc môi trường
+// Read the API Key from .env or the environment
 let GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 if (!GEMINI_API_KEY) {
   try {
@@ -15,7 +15,7 @@ if (!GEMINI_API_KEY) {
   } catch (e) {}
 }
 
-// Cập nhật 2026-10-06: gemini-2.0-* đã bị khai tử, 2.5-flash hay hết quota
+// Updated 2026-10-06: gemini-2.0-* was retired, 2.5-flash often runs out of quota
 const FALLBACK_MODELS = [
   'gemini-3.5-flash',
   'gemini-flash-latest',
@@ -25,7 +25,7 @@ const FALLBACK_MODELS = [
 ];
 
 /**
- * Mẫu bình luận dự phòng chất lượng cao theo ngành nghề khi không có mạng/API
+ * High-quality fallback comment templates by industry when there's no network/API
  */
 const NICHE_FALLBACKS = {
   FASHION: [
@@ -122,7 +122,7 @@ const NICHE_FALLBACKS = {
 };
 
 /**
- * Gọi Gemini AI tạo danh sách bình luận seeding tự nhiên theo ngữ cảnh
+ * Calls Gemini AI to generate a list of natural seeding comments from the context
  */
 async function generateSeedingComments({
   topic = 'GENERAL',
@@ -134,7 +134,7 @@ async function generateSeedingComments({
   const safeCount = Math.max(3, Math.min(25, Number(count) || 8));
 
   if (!GEMINI_API_KEY) {
-    console.warn('[AI Seeding] ⚠️ Chưa có GEMINI_API_KEY, sử dụng bộ bình luận tự nhiên dự phòng.');
+    console.warn('[AI Seeding] ⚠️ No GEMINI_API_KEY yet, using the natural fallback comment set.');
     const pool = NICHE_FALLBACKS[topic.toUpperCase()] || NICHE_FALLBACKS.GENERAL;
     return pool.slice(0, safeCount);
   }
@@ -177,16 +177,16 @@ YÊU CẦU NGHIÊM NGẶT:
           .filter((line) => line.length > 3 && !line.toLowerCase().includes('dưới đây'));
 
         if (lines.length > 0) {
-          console.log(`[AI Seeding] ✅ Đã sinh thành công ${lines.length} bình luận bằng model ${model}!`);
+          console.log(`[AI Seeding] ✅ Generated ${lines.length} comments with model ${model}!`);
           return lines.slice(0, safeCount);
         }
       }
     } catch (err) {
-      console.warn(`[AI Seeding] ⚠️ Model ${model} gặp lỗi: ${err.response?.data?.error?.message || err.message}`);
+      console.warn(`[AI Seeding] ⚠️ Model ${model} error: ${err.response?.data?.error?.message || err.message}`);
     }
   }
 
-  // Fallback nếu các model đều lỗi
+  // Fallback if every model failed
   const pool = NICHE_FALLBACKS[topic.toUpperCase()] || NICHE_FALLBACKS.GENERAL;
   return pool.slice(0, safeCount);
 }

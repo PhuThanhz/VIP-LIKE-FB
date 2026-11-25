@@ -25,7 +25,7 @@ public class LicenseService {
         if (activeOpt.isEmpty()) {
             Map<String, Object> resp = new HashMap<>();
             resp.put("activated", false);
-            resp.put("message", "Chưa kích hoạt bản quyền hoặc đã hết hạn thuê.");
+            resp.put("message", "No license activated or the rental has expired.");
             return ApiResponse.ok(resp);
         }
 
@@ -53,30 +53,30 @@ public class LicenseService {
 
     public ApiResponse<Map<String, Object>> activateLicense(LicenseActivateRequest request) {
         if (request.getLicenseKey() == null || request.getLicenseKey().trim().isEmpty()) {
-            return ApiResponse.fail("Vui lòng cung cấp mã License Key.");
+            return ApiResponse.fail("Please provide a License Key.");
         }
 
         String key = request.getLicenseKey().trim();
         Optional<SoftwareLicense> licOpt = licenseRepository.findByLicenseKey(key);
 
         if (licOpt.isEmpty()) {
-            return ApiResponse.fail("Mã License không tồn tại trên hệ thống máy chủ.");
+            return ApiResponse.fail("This License Key does not exist on the server.");
         }
 
         SoftwareLicense lic = licOpt.get();
 
         if ("LOCKED".equalsIgnoreCase(lic.getStatus())) {
-            return ApiResponse.fail("Mã License này đã bị KHÓA. Vui lòng liên hệ Admin.");
+            return ApiResponse.fail("This License Key has been LOCKED. Please contact the Admin.");
         }
 
         LocalDateTime now = LocalDateTime.now();
         if (lic.getExpiresAt().isBefore(now)) {
-            return ApiResponse.fail("Mã License này đã HẾT HẠN sử dụng.");
+            return ApiResponse.fail("This License Key has EXPIRED.");
         }
 
         String hwid = request.getHardwareHwid();
         if (lic.getHardwareHwid() != null && hwid != null && !lic.getHardwareHwid().equals(hwid)) {
-            return ApiResponse.fail("License này đã được kích hoạt cho thiết bị khác (" + lic.getHardwareHwid() + "). Không thể dùng trên máy này.");
+            return ApiResponse.fail("This License is already activated on another device (" + lic.getHardwareHwid() + "). It can't be used on this machine.");
         }
 
         if (lic.getHardwareHwid() == null && hwid != null) {
@@ -103,7 +103,7 @@ public class LicenseService {
         resp.put("activated", true);
         resp.put("license", licData);
 
-        return ApiResponse.ok("🎉 Kích hoạt Bản Quyền VIPLIKE RADIANT thành công!", resp);
+        return ApiResponse.ok("🎉 VIPLIKE RADIANT license activated successfully!", resp);
     }
 
     public ApiResponse<List<SoftwareLicense>> getAllLicenses() {
@@ -112,7 +112,7 @@ public class LicenseService {
 
     public ApiResponse<SoftwareLicense> createLicense(LicenseCreateRequest request) {
         if (request.getCustomerName() == null || request.getCustomerName().trim().isEmpty()) {
-            return ApiResponse.fail("Tên khách hàng thuê là bắt buộc.");
+            return ApiResponse.fail("The renter name is required.");
         }
 
         String randomCode = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
@@ -132,13 +132,13 @@ public class LicenseService {
         lic.setNotes(request.getNotes());
 
         SoftwareLicense saved = licenseRepository.save(lic);
-        return ApiResponse.ok("Đã tạo License Key thành công cho khách hàng: " + lic.getCustomerName(), saved);
+        return ApiResponse.ok("License Key created for customer: " + lic.getCustomerName(), saved);
     }
 
     public ApiResponse<SoftwareLicense> updateStatus(Long id, String status, Integer addDays) {
         Optional<SoftwareLicense> licOpt = licenseRepository.findById(id);
         if (licOpt.isEmpty()) {
-            return ApiResponse.fail("Không tìm thấy License với ID: " + id);
+            return ApiResponse.fail("License not found with ID: " + id);
         }
 
         SoftwareLicense lic = licOpt.get();
@@ -153,6 +153,6 @@ public class LicenseService {
         }
 
         SoftwareLicense updated = licenseRepository.save(lic);
-        return ApiResponse.ok("Cập nhật trạng thái License thành công", updated);
+        return ApiResponse.ok("License status updated successfully", updated);
     }
 }

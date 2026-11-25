@@ -2,15 +2,15 @@ const fs = require('fs');
 const path = require('path');
 const store = require('./state-store');
 
-const dataDir = path.join(__dirname, 'data');
+const { DATA_DIR: dataDir } = require('./paths');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-// Cấu trúc: { [normalizedPostUrl]: { [pageId]: { pageName, reactionType, commentText, reactedAt, status } } }
-// Lưu qua state-store: MySQL (bảng app_state) là nguồn chính, file JSON là bản dự phòng.
+// Structure: { [normalizedPostUrl]: { [pageId]: { pageName, reactionType, commentText, reactedAt, status } } }
+// Saved via state-store: MySQL (app_state table) is the primary source, the JSON file is the backup.
 let pruned = false;
 
-// Khoá chuẩn hoá duy nhất cho 1 bài viết: dùng chung cho registry, history queue và hunter.
-// Giữ lại query định danh bài (story_fbid, fbid, v, id...) và chỉ bỏ tham số tracking.
+// The single normalized key for a post: shared by the registry, the history queue and the hunter.
+// Keeps the post-identifying query (story_fbid, fbid, v, id...) and only drops tracking params.
 function normalizeFbPostUrl(rawUrl) {
   if (!rawUrl || typeof rawUrl !== 'string') return '';
   try {
@@ -35,7 +35,7 @@ function normalizeFbPostUrl(rawUrl) {
   }
 }
 
-// Bỏ các bài đã quá REGISTRY_RETENTION_DAYS ngày kể từ lần tương tác cuối (bài cũ hầu như không buff lại)
+// Drop posts older than REGISTRY_RETENTION_DAYS days since their last engagement (old posts are almost never re-buffed)
 const REGISTRY_RETENTION_DAYS = 45;
 function pruneRegistry(registry) {
   const cutoff = Date.now() - REGISTRY_RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -51,7 +51,7 @@ function pruneRegistry(registry) {
       removed++;
     }
   }
-  if (removed > 0) console.log(`[PagePostRegistry] 🧹 Đã dọn ${removed} bài quá ${REGISTRY_RETENTION_DAYS} ngày khỏi sổ chống trùng.`);
+  if (removed > 0) console.log(`[PagePostRegistry] 🧹 Removed ${removed} posts older than ${REGISTRY_RETENTION_DAYS} days from the dedupe registry.`);
   return removed;
 }
 
@@ -65,13 +65,13 @@ function loadRegistry() {
   return reg;
 }
 
-// Ghi được gộp theo thời gian trong state-store (nhiều via chạy song song không làm mỗi like ghi lại cả sổ)
+// Writes are batched over time in state-store (many vias running in parallel don't rewrite the whole registry on every like)
 function scheduleSaveRegistry(reg) {
   store.write('page_post_registry', reg || loadRegistry());
 }
 
 function flushRegistry() {
-  store.flush().catch((err) => console.error(`[PagePostRegistry] ❌ Lỗi flush sổ chống trùng: ${err.message}`));
+  store.flush().catch((err) => console.error(`[PagePostRegistry] ❌ Error flushing the dedupe registry: ${err.message}`));
 }
 
 function isFacebookShareUrl(rawUrl) {
@@ -107,7 +107,7 @@ function scheduleSaveAliases(aliases) {
 }
 
 /**
- * Liên kết 2 URL cùng trỏ về 1 bài viết (ví dụ: /share/p/... <-> canonical URL)
+ * Links 2 URLs that point to the same post (e.g. /share/p/... <-> canonical URL)
  */
 function registerPostUrlAlias(rawUrlA, rawUrlB) {
   const normA = normalizeFbPostUrl(rawUrlA);
@@ -138,7 +138,7 @@ function registerPostUrlAlias(rawUrlA, rawUrlB) {
       changed = true;
     }
   }
-  // Cập nhật các khóa cũ trỏ về normA/normB nếu có
+  // Update old keys pointing to normA/normB if any
   for (const [k, v] of Object.entries(aliases)) {
     if ((v === normA || v === normB) && v !== canonical) {
       aliases[k] = canonical;
@@ -151,7 +151,7 @@ function registerPostUrlAlias(rawUrlA, rawUrlB) {
 }
 
 /**
- * Trả về tập hợp tất cả URL tương đương (chính nó + canonical + các share alias cùng trỏ về canonical)
+ * Returns the set of every equivalent URL (itself + canonical + share aliases pointing to the canonical)
  */
 function getEquivalentPostUrls(normalizedPostUrl) {
   const urls = new Set();
@@ -174,7 +174,7 @@ function getEquivalentPostUrls(normalizedPostUrl) {
 }
 
 /**
- * Phân giải nhanh link /share/... sang canonical post URL qua HTTP redirect (không cần mở trình duyệt)
+ * Quickly resolves a /share/... link to the canonical post URL via HTTP redirect (no browser needed)
  */
 async function resolvePostUrlCanonical(rawUrl, { timeoutMs = 2500 } = {}) {
   const normUrl = normalizeFbPostUrl(rawUrl);
@@ -199,8 +199,8 @@ async function resolvePostUrlCanonical(rawUrl, { timeoutMs = 2500 } = {}) {
   };
 
   try {
-    // Lưu ý: KHÔNG gửi Chrome User-Agent giả (Facebook trả 400 nếu thiếu sec-ch-ua/cookies);
-    // UA mặc định của Node/curl được Facebook trả 302 Location trực tiếp.
+    // Note: do NOT send a fake Chrome User-Agent (Facebook returns 400 without sec-ch-ua/cookies);
+    // Facebook answers Node/curl's default UA with a direct 302 Location.
     let result = await tryFetch('HEAD');
     if (!result.location && (result.status === 405 || result.status === 403 || result.status === 400)) {
       result = await tryFetch('GET');
@@ -222,7 +222,7 @@ async function resolvePostUrlCanonical(rawUrl, { timeoutMs = 2500 } = {}) {
 }
 
 /**
- * Đồng bộ ngầm các link /share/ cũ đã có trong registry sang canonical URL
+ * Background-syncs old /share/ links already in the registry to their canonical URL
  */
 async function backfillShareAliases({ concurrency = 4 } = {}) {
   const reg = loadRegistry();
@@ -244,14 +244,14 @@ async function backfillShareAliases({ concurrency = 4 } = {}) {
   await Promise.all(workers);
 
   if (resolvedCount > 0) {
-    console.log(`[PagePostRegistry] 🔗 Đã liên kết ${resolvedCount}/${shareKeys.length} link /share/ về URL bài viết gốc.`);
+    console.log(`[PagePostRegistry] 🔗 Linked ${resolvedCount}/${shareKeys.length} /share/ links to the original post URL.`);
     flushRegistry();
   }
   return resolvedCount;
 }
 
 /**
- * Kiểm tra xem Page này đã từng Like/Comment trên bài viết này chưa (bao gồm cả alias)
+ * Checks whether this Page has ever Liked/Commented on this post (including aliases)
  */
 function hasPageInteractedWithPost(normalizedPostUrl, pageId) {
   if (!normalizedPostUrl || !pageId) return false;
@@ -265,7 +265,7 @@ function hasPageInteractedWithPost(normalizedPostUrl, pageId) {
 }
 
 /**
- * Ghi nhận tương tác của Page lên bài viết
+ * Records a Page's engagement on a post
  */
 function recordPagePostInteraction(normalizedPostUrl, pageId, details = {}) {
   if (!normalizedPostUrl || !pageId) return;
@@ -290,8 +290,8 @@ function recordPagePostInteraction(normalizedPostUrl, pageId, details = {}) {
 }
 
 /**
- * Lọc danh sách Fanpage: CHỈ GIỮ LẠI các page CHƯA TỪNG tương tác bài viết này.
- * Đảm bảo 100% không bao giờ bị click lần 2 làm HỦY LIKE (Unlike) hoặc spam trùng lặp!
+ * Filters the Fanpage list: ONLY KEEPS pages that have NEVER engaged with this post.
+ * Guarantees a second click never UN-LIKES the post or spams duplicates!
  */
 function filterAvailablePagesForPost(normalizedPostUrl, pages = []) {
   if (!normalizedPostUrl || !Array.isArray(pages)) return pages;
@@ -310,7 +310,7 @@ function filterAvailablePagesForPost(normalizedPostUrl, pages = []) {
 
   if (skippedCount > 0) {
     console.log(
-      `[Anti-Overlap] 🛡️ Đã tự động loại bỏ ${skippedCount} Fanpage đã tương tác với bài "${normalizedPostUrl}" trước đó để TRÁNH HỦY LIKE (UN-LIKE). Còn lại ${available.length} Fanpage mới.`
+      `[Anti-Overlap] 🛡️ Automatically removed ${skippedCount} Fanpages that already engaged with post "${normalizedPostUrl}" to AVOID UN-LIKING. ${available.length} new Fanpages remain.`
     );
   }
 
@@ -318,7 +318,7 @@ function filterAvailablePagesForPost(normalizedPostUrl, pages = []) {
 }
 
 /**
- * Lấy danh sách ID các Page đã từng tương tác bài viết (gộp cả các URL alias cùng bài viết)
+ * Gets the IDs of Pages that already engaged with the post (merging alias URLs of the same post)
  */
 function getPostInteractedPageIds(normalizedPostUrl) {
   const result = new Set();
@@ -334,7 +334,7 @@ function getPostInteractedPageIds(normalizedPostUrl) {
 }
 
 /**
- * Thống kê tổng quan registry
+ * Registry overview stats
  */
 function getGlobalRegistryStats() {
   const reg = loadRegistry();
@@ -350,7 +350,7 @@ function getGlobalRegistryStats() {
 }
 
 /**
- * Xóa lịch sử tương tác của 1 bài viết (nếu admin muốn reset)
+ * Deletes a post's engagement history (if an admin wants to reset)
  */
 function clearPostInteractions(normalizedPostUrl) {
   const reg = loadRegistry();
@@ -369,7 +369,26 @@ function clearPostInteractions(normalizedPostUrl) {
   return false;
 }
 
+
+/**
+ * Counts Pages that successfully liked a post since `sinceMs` (merging every alias URL of the post).
+ * Used to tell how many likes a post really got today when deciding a top-up.
+ */
+function countPostSuccessSince(normalizedPostUrl, sinceMs) {
+  if (!normalizedPostUrl) return 0;
+  const reg = loadRegistry();
+  const counted = new Set();
+  for (const urlKey of getEquivalentPostUrls(normalizedPostUrl)) {
+    for (const [pid, rec] of Object.entries(reg[urlKey] || {})) {
+      if (rec?.status !== 'SUCCESS') continue;
+      if (Date.parse(rec.reactedAt || '') >= sinceMs) counted.add(pid);
+    }
+  }
+  return counted.size;
+}
+
 module.exports = {
+  countPostSuccessSince,
   normalizeFbPostUrl,
   isFacebookShareUrl,
   isValidCanonicalFbPostUrl,

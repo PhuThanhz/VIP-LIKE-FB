@@ -27,8 +27,8 @@ const VIA_PAGES_STORAGE_KEY_V3 = 'toolzutter:via_fanpages_map_v3';
 const VIA_PAGES_STORAGE_KEY_BUFF = 'buff_via_fanpages';
 
 /**
- * Lấy danh sách 3 Nick Mẹ mặc định (Thành An, Hồng Phước, Thạnh Phú),
- * tự động ghép Cookie mới nhất đã lưu trong LocalStorage nếu người dùng đã cập nhật.
+ * Returns the 3 default parent accounts (Thành An, Hồng Phước, Thạnh Phú),
+ * automatically merging the latest cookie saved in LocalStorage if the user has updated it.
  */
 export function getInitialSeedVias(): SeedVia[] {
   const vias: SeedVia[] = (seedData.vias as SeedVia[]).map((v) => {
@@ -44,14 +44,14 @@ export function getInitialSeedVias(): SeedVia[] {
 }
 
 /**
- * Lấy toàn bộ 508 Fanpage mẫu phân theo từng UID nick mẹ.
+ * Returns all 508 sample Fanpages grouped by parent account UID.
  */
 export function getInitialSeedPages(): Record<string, SeedPage[]> {
   return (seedData.pagesByUid || {}) as Record<string, SeedPage[]>;
 }
 
 /**
- * Lấy cookie đã lưu trong máy cho một UID.
+ * Reads the cookie saved on this machine for a UID.
  */
 export function getStoredCookieForVia(uid: string): string {
   if (typeof window === 'undefined') return '';
@@ -59,7 +59,7 @@ export function getStoredCookieForVia(uid: string): string {
 }
 
 /**
- * Lưu cookie cập nhật cho một UID vào LocalStorage.
+ * Saves an updated cookie for a UID to LocalStorage.
  */
 export function saveStoredCookieForVia(uid: string, cookie: string): void {
   if (typeof window === 'undefined' || !uid) return;
@@ -71,14 +71,14 @@ export function saveStoredCookieForVia(uid: string, cookie: string): void {
 }
 
 /**
- * Tự động nạp 508 Fanpage vào LocalStorage nếu máy mới mở app lần đầu hoặc đang trống.
+ * Automatically loads the 508 Fanpages into LocalStorage the first time the app opens on a machine or when it is empty.
  */
 export function seedLocalStorageIfEmpty(): void {
   if (typeof window === 'undefined') return;
 
   const seedPages = getInitialSeedPages();
 
-  // 1. Đồng bộ cho key 'toolzutter:via_fanpages_map_v3' (BuffEngagement dùng)
+  // 1. Sync the 'toolzutter:via_fanpages_map_v3' key (used by BuffEngagement)
   try {
     const rawV3 = localStorage.getItem(VIA_PAGES_STORAGE_KEY_V3);
     const mapV3: Record<string, any[]> = rawV3 ? JSON.parse(rawV3) : {};
@@ -96,10 +96,10 @@ export function seedLocalStorageIfEmpty(): void {
       localStorage.setItem(VIA_PAGES_STORAGE_KEY_V3, JSON.stringify(mapV3));
     }
   } catch (e) {
-    console.warn('[Seed] Lỗi seed toolzutter:via_fanpages_map_v3:', e);
+    console.warn('[Seed] Failed to seed toolzutter:via_fanpages_map_v3:', e);
   }
 
-  // 2. Đồng bộ cho key 'buff_via_fanpages' (ViaManagementPage dùng)
+  // 2. Sync the 'buff_via_fanpages' key (used by ViaManagementPage)
   try {
     const rawBuff = localStorage.getItem(VIA_PAGES_STORAGE_KEY_BUFF);
     const mapBuff: Record<string, any[]> = rawBuff ? JSON.parse(rawBuff) : {};
@@ -116,6 +116,6 @@ export function seedLocalStorageIfEmpty(): void {
       localStorage.setItem(VIA_PAGES_STORAGE_KEY_BUFF, JSON.stringify(mapBuff));
     }
   } catch (e) {
-    console.warn('[Seed] Lỗi seed buff_via_fanpages:', e);
+    console.warn('[Seed] Failed to seed buff_via_fanpages:', e);
   }
 }

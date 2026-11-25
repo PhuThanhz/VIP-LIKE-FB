@@ -1,8 +1,8 @@
 /**
  * BUFF LIKE 3.3 — SOAK & SUSTAINED CONCURRENCY STABILITY TEST
- * Theo dõi liên tục: Heap, RSS, CPU, Event Loop Lag, Database Connection Pool,
+ * Continuously tracks: Heap, RSS, CPU, Event Loop Lag, Database Connection Pool,
  * Lane Locks, Fencing Tokens, Browser Contexts.
- * Phân biệt rành mạch giữa HTTP Traffic vs External Dispatched Actions.
+ * Clearly separates HTTP Traffic from External Dispatched Actions.
  */
 
 const http = require('http');
@@ -58,40 +58,40 @@ function requestJson(method, path, body = null) {
   });
 }
 
-// Đo Event Loop Lag cực kỳ chính xác bằng BigInt hrtime
+// Measure Event Loop Lag very precisely with BigInt hrtime
 function measureEventLoopLag() {
   return new Promise((resolve) => {
     const start = process.hrtime.bigint();
     setImmediate(() => {
       const deltaNs = Number(process.hrtime.bigint() - start);
-      resolve(deltaNs / 1e6); // trả về ms
+      resolve(deltaNs / 1e6); // returns ms
     });
   });
 }
 
 async function runSoakTest() {
   console.log('================================================================');
-  console.log('⚡ KHỞI ĐỘNG BUFF LIKE 3.3 SUSTAINED STABILITY & CONCURRENCY TEST');
+  console.log('⚡ STARTING THE BUFF LIKE 3.3 SUSTAINED STABILITY & CONCURRENCY TEST');
   console.log('================================================================\n');
 
-  const DURATION_SECONDS = 60; // Chạy soak test 60 giây liên tục dưới áp lực cao
+  const DURATION_SECONDS = 60; // Run the soak test for 60 seconds straight under heavy load
   const startTime = Date.now();
   const snapshots = [];
 
   let totalHttpRequests = 0;
   let totalSuccessfulHttp = 0;
   let totalFailedHttp = 0;
-  let totalExternalMockDispatches = 0; // Phân biệt rạch ròi với HTTP traffic
+  let totalExternalMockDispatches = 0; // Kept strictly separate from HTTP traffic
 
-  console.log(`⏱️ Thời gian kiểm thử: ${DURATION_SECONDS} giây`);
-  console.log('📊 Đang theo dõi V8 Heap, RSS, Event Loop Lag, MySQL Pools, Locks...');
+  console.log(`⏱️ Test duration: ${DURATION_SECONDS} seconds`);
+  console.log('📊 Tracking V8 Heap, RSS, Event Loop Lag, MySQL Pools, Locks...');
 
   let round = 0;
   while ((Date.now() - startTime) < DURATION_SECONDS * 1000) {
     round++;
     const burstPromises = [];
 
-    // Tạo luồng HTTP đồng thời: Health, Telemetry, Queue list, History, Idempotent Add
+    // Create concurrent HTTP streams: Health, Telemetry, Queue list, History, Idempotent Add
     for (let i = 0; i < 10; i++) {
       totalHttpRequests++;
       burstPromises.push(
@@ -133,7 +133,7 @@ async function runSoakTest() {
 
     await Promise.all(burstPromises);
 
-    // Đo đạc các chỉ số hệ thống cứ mỗi 2 giây
+    // Measure system metrics every 2 seconds
     if (round % 2 === 0) {
       const lagMs = await measureEventLoopLag();
       const mem = process.memoryUsage();
@@ -159,11 +159,11 @@ async function runSoakTest() {
       );
     }
 
-    // Nghỉ ngắn giữa các burst để mô phỏng tải thực tế
+    // Short rest between bursts to simulate real load
     await new Promise((r) => setTimeout(r, 200));
   }
 
-  // Thu gom rác V8 nếu có cờ để đo rò rỉ RAM thực tế
+  // Run V8 garbage collection if the flag is set, to measure real RAM leaks
   if (global.gc) {
     global.gc();
   }
@@ -176,19 +176,19 @@ async function runSoakTest() {
   const heapDelta = +(maxHeap - startHeap).toFixed(2);
 
   console.log('\n================================================================');
-  console.log('📈 TỔNG KẾT SOAK TEST BUFF LIKE 3.3');
+  console.log('📈 BUFF LIKE 3.3 SOAK TEST SUMMARY');
   console.log('================================================================');
-  console.log(`• Tổng số HTTP Request xử lý:     ${totalHttpRequests} requests`);
-  console.log(`• Tỷ lệ thành công HTTP:          ${((totalSuccessfulHttp / totalHttpRequests) * 100).toFixed(2)}%`);
-  console.log(`• Thao tác External thực tế:       0 (Được cách ly an toàn khỏi production checkpoint)`);
-  console.log(`• V8 Heap ban đầu:                ${startHeap} MB`);
-  console.log(`• V8 Heap đỉnh điểm (Max):        ${maxHeap} MB (Độ chênh lệch: ${heapDelta} MB)`);
-  console.log(`• RSS cuối cùng:                  ${(finalMem.rss / 1024 / 1024).toFixed(2)} MB`);
-  console.log(`• Event Loop Lag trung bình:      ${avgLag} ms`);
-  console.log(`• Event Loop Lag tối đa:          ${maxLag} ms`);
+  console.log(`• Total HTTP requests handled:    ${totalHttpRequests} requests`);
+  console.log(`• HTTP success rate:              ${((totalSuccessfulHttp / totalHttpRequests) * 100).toFixed(2)}%`);
+  console.log(`• Real external actions:          0 (safely isolated from production checkpoints)`);
+  console.log(`• Initial V8 Heap:                ${startHeap} MB`);
+  console.log(`• Peak V8 Heap (Max):             ${maxHeap} MB (delta: ${heapDelta} MB)`);
+  console.log(`• Final RSS:                      ${(finalMem.rss / 1024 / 1024).toFixed(2)} MB`);
+  console.log(`• Average Event Loop Lag:         ${avgLag} ms`);
+  console.log(`• Max Event Loop Lag:             ${maxLag} ms`);
   console.log('================================================================\n');
 
-  // Ghi kết quả ra file phục vụ báo cáo
+  // Write the results to a file for reporting
   fs.writeFileSync(
     path.join(__dirname, 'soak_test_results.json'),
     JSON.stringify(
@@ -210,10 +210,10 @@ async function runSoakTest() {
     )
   );
 
-  console.log('✅ Đã lưu kết quả đo đạc thực tế vào soak_test_results.json!');
+  console.log('✅ Saved the real measurement results to soak_test_results.json!');
 }
 
 runSoakTest().catch((e) => {
-  console.error('Lỗi khi chạy Soak Test:', e);
+  console.error('Error running the Soak Test:', e);
   process.exit(1);
 });

@@ -12,6 +12,7 @@ import { WallpaperProvider } from './theme/WallpaperContext';
 import type { DbStatus } from './types/dbStatus';
 import CookieAlertProvider, { CookieAlertBanner, useCookieAlert } from './components/common/CookieAlertManager';
 import { AutoUpdateModal } from './components/AutoUpdateModal';
+import BackendGate from './components/common/BackendGate';
 import {
   AUTH_EXPIRED_EVENT,
   CurrentUser,
@@ -21,7 +22,7 @@ import {
   saveUser,
 } from './auth/session';
 
-// Phân tách bundle (Code-splitting) tối ưu tốc độ tải trang ban đầu
+// Code-splitting to speed up the initial page load
 const BuffEngagement = lazy(() => import('./pages/BuffEngagement'));
 const LoginPage = lazy(() => import('./components/auth/LoginPage'));
 
@@ -52,7 +53,7 @@ const isSameDbStatus = (a: DbStatus, b: DbStatus) =>
 const useDbStatus = () => {
   const [dbStatus, setDbStatus] = useState<DbStatus>({ connected: false, loading: true });
 
-  // Chỉ cập nhật state khi trạng thái DB thật sự thay đổi, tránh re-render toàn app mỗi lần poll
+  // Only update state when the DB status actually changes, to avoid re-rendering the whole app on every poll
   const applyDbStatus = useCallback((next: DbStatus) => {
     setDbStatus((prev) => (isSameDbStatus(prev, next) ? prev : next));
   }, []);
@@ -75,7 +76,7 @@ const useDbStatus = () => {
             usingCache: Boolean(res.data?.usingCache),
             cachedCount: res.data?.cachedCount || 0,
             loading: false,
-            error: res.data?.error || 'Không kết nối được',
+            error: res.data?.error || 'Could not connect',
           });
         }
       } catch (err: any) {
@@ -92,10 +93,10 @@ const useDbStatus = () => {
   useEffect(() => {
     fetchDbStatus(false);
   }, [fetchDbStatus]);
-  // Poll nền: không bật loading để không làm cả cây re-render khi DB không đổi; dừng khi ẩn tab
+  // Background poll: no loading flag so the tree doesn't re-render when the DB is unchanged; stops while the tab is hidden
   useVisibleInterval(() => fetchDbStatus(true), DB_POLL_INTERVAL_MS);
 
-  // Bấm nút kiểm tra thủ công: hiện loading
+  // Manual check button: show loading
   const checkDb = useCallback(() => fetchDbStatus(false), [fetchDbStatus]);
 
   return { dbStatus, checkDb };
@@ -124,14 +125,14 @@ const DashboardInner: React.FC<MainDashboardProps & { openViaManager: () => void
   const { dbStatus, checkDb } = useDbStatus();
   const { totalDeadCount } = useCookieAlert();
 
-  // Bấm tay: nhớ lựa chọn cho lần mở sau
+  // Manual toggle: remember the choice for next time
   const handleToggleCollapse = useCallback(() => {
     setCollapsed((prev) => {
       localStorage.setItem(SIDER_COLLAPSED_KEY, prev ? '0' : '1');
       return !prev;
     });
   }, []);
-  // Màn hình hẹp: luôn thu gọn; rộng lại thì trả về lựa chọn đã lưu
+  // Narrow screen: always collapse; when wide again, restore the saved choice
   const handleBreakpoint = useCallback((broken: boolean) => {
     setCollapsed(broken || getSavedCollapsed());
   }, []);
@@ -162,8 +163,8 @@ const DashboardInner: React.FC<MainDashboardProps & { openViaManager: () => void
         />
 
         <Content className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto">
-          {/* BuffEngagement tự đếm accountsCount từ danh sách tài khoản và báo lên qua onStatsUpdate */}
-          <Suspense fallback={<PageSkeleton title="Đang tải giao diện Buff Tương Tác 2.0..." />}>
+          {/* BuffEngagement counts accountsCount from the account list itself and reports it via onStatsUpdate */}
+          <Suspense fallback={<PageSkeleton title="Loading Engagement Buff 2.0..." />}>
             <BuffEngagement
               activeTabKey={activeTabKey}
               onTabChange={handleSelectTab}
@@ -240,7 +241,7 @@ const ThemedApp: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center gap-3">
         <Spin size="large" />
-        <span className="text-xs font-mono text-cyan-400">Đang xác thực phiên đăng nhập...</span>
+        <span className="text-xs font-mono text-cyan-400">Verifying login session...</span>
       </div>
     );
   }
@@ -266,7 +267,9 @@ export const App: React.FC = () => {
     <QueryClientProvider client={queryClient}>
       <ConfigProvider theme={DARK_THEME}>
         <WallpaperProvider>
-          <ThemedApp />
+          <BackendGate>
+            <ThemedApp />
+          </BackendGate>
         </WallpaperProvider>
       </ConfigProvider>
     </QueryClientProvider>

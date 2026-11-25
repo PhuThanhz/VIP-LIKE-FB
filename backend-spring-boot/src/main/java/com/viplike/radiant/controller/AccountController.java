@@ -28,12 +28,12 @@ public class AccountController {
             account.setPageName("Via " + System.currentTimeMillis());
         }
         SocialAccount saved = accountRepository.save(account);
-        return ApiResponse.ok("Lưu tài khoản thành công", saved);
+        return ApiResponse.ok("Account saved successfully", saved);
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<String> deleteAccount(@PathVariable Long id) {
         accountRepository.deleteById(id);
-        return ApiResponse.ok("Xóa tài khoản thành công", "ID: " + id);
+        return ApiResponse.ok("Account deleted successfully", "ID: " + id);
     }
 }

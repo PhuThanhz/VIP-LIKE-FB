@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, Button, Progress, Typography, Space, Tag } from 'antd';
 import { CloudDownloadOutlined, CheckCircleOutlined, SyncOutlined, RocketOutlined } from '@ant-design/icons';
-import { isTauri } from '../utils/tauriBridge';
+import { isTauri, startBackend, stopBackend } from '../utils/tauriBridge';
 
 const { Text, Paragraph, Title } = Typography;
 
@@ -29,16 +29,16 @@ export const AutoUpdateModal: React.FC = () => {
         if (update && update.available && isMounted) {
           setUpdateAvailable(true);
           setVersion(update.version);
-          setNotes(update.body || 'Bản cập nhật tối ưu hóa hiệu năng, cập nhật giao diện mới và sửa lỗi.');
+          setNotes(update.body || 'This update improves performance, refreshes the UI and fixes bugs.');
           setUpdateHandle(update);
         }
       } catch (err) {
-        // Im lặng khi chưa có release hoặc dev mode
-        console.log('[Tauri AutoUpdate] Kiểm tra cập nhật:', err);
+        // Stay silent when there is no release yet or in dev mode
+        console.log('[Tauri AutoUpdate] Update check:', err);
       }
     }
 
-    // Kiểm tra sau 3 giây khi khởi động app
+    // Check 3 seconds after the app starts
     const timer = setTimeout(() => {
       checkForUpdates();
     }, 3000);
@@ -57,6 +57,8 @@ export const AutoUpdateModal: React.FC = () => {
     let contentLength = 0;
 
     try {
+      // Windows cannot overwrite the bundled node.exe while it runs.
+      await stopBackend();
       await updateHandle.downloadAndInstall((event: any) => {
         switch (event.event) {
           case 'Started':
@@ -79,8 +81,9 @@ export const AutoUpdateModal: React.FC = () => {
 
       setIsReadyToRestart(true);
     } catch (error) {
-      console.error('Lỗi tải bản cập nhật:', error);
+      console.error('Failed to download update:', error);
       setIsDownloading(false);
+      startBackend();
     }
   };
 
@@ -89,7 +92,7 @@ export const AutoUpdateModal: React.FC = () => {
       const { relaunch } = await import('@tauri-apps/plugin-process');
       await relaunch();
     } catch (e) {
-      console.error('Lỗi khởi động lại app:', e);
+      console.error('Failed to restart app:', e);
     }
   };
 
@@ -136,7 +139,7 @@ export const AutoUpdateModal: React.FC = () => {
         <Space direction="vertical" size={4}>
           <Space>
             <Title level={4} style={{ margin: 0, color: '#f8fafc', fontWeight: 700 }}>
-              {isReadyToRestart ? 'Đã cài đặt xong!' : 'Có bản cập nhật mới!'}
+              {isReadyToRestart ? 'Installed!' : 'A new update is available!'}
             </Title>
             <Tag color="blue" style={{ borderRadius: 6, fontWeight: 700, padding: '2px 8px' }}>
               v{version}
@@ -144,8 +147,8 @@ export const AutoUpdateModal: React.FC = () => {
           </Space>
           <Text style={{ color: '#94a3b8', fontSize: 13 }}>
             {isReadyToRestart
-              ? 'Bản cập nhật đã được cài đặt thành công. Khởi động lại để trải nghiệm ngay.'
-              : 'VIPLIKE RADIANT đã có phiên bản mới với nhiều cải tiến và tối ưu.'}
+              ? 'The update was installed successfully. Restart to use it now.'
+              : 'A new version of VIPLIKE RADIANT is available with many improvements.'}
           </Text>
         </Space>
       </div>
@@ -171,7 +174,7 @@ export const AutoUpdateModal: React.FC = () => {
               fontWeight: 700,
             }}
           >
-            Nội dung cập nhật:
+            What's new:
           </Text>
           <Paragraph style={{ color: '#cbd5e1', fontSize: 13, margin: '6px 0 0', whiteSpace: 'pre-line' }}>
             {notes}
@@ -191,7 +194,7 @@ export const AutoUpdateModal: React.FC = () => {
           />
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
             <Text style={{ color: '#64748b', fontSize: 12 }}>
-              <SyncOutlined spin style={{ marginRight: 6 }} /> Đang tải dữ liệu...
+              <SyncOutlined spin style={{ marginRight: 6 }} /> Downloading...
             </Text>
             {totalBytes > 0 && (
               <Text style={{ color: '#94a3b8', fontSize: 12 }}>
@@ -215,7 +218,7 @@ export const AutoUpdateModal: React.FC = () => {
               }}
               onClick={() => setUpdateAvailable(false)}
             >
-              Để sau
+              Later
             </Button>
             <Button
               type="primary"
@@ -229,7 +232,7 @@ export const AutoUpdateModal: React.FC = () => {
               }}
               onClick={handleStartUpdate}
             >
-              Cập nhật ngay
+              Update now
             </Button>
           </>
         )}
@@ -249,7 +252,7 @@ export const AutoUpdateModal: React.FC = () => {
             }}
             onClick={handleRestartNow}
           >
-            Khởi động lại ngay để áp dụng
+            Restart now to apply
           </Button>
         )}
       </div>

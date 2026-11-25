@@ -29,8 +29,8 @@ const { chromium } = require('playwright');
   await context.addCookies(cookies);
   const page = await context.newPage();
 
-  // Thử mở trang Fanpage VTV24 hoặc một bài post public
-  console.log('Mở bài post public của VTV24...');
+  // Try opening the VTV24 Fanpage or a public post
+  console.log('Opening a public VTV24 post...');
   await page.goto('https://www.facebook.com/tintucvtv24', { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForTimeout(5000);
 

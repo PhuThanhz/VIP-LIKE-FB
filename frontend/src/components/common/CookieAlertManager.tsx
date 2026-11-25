@@ -1,3 +1,4 @@
+import { offerTopUpAfterCookieUpdate } from '../../utils/topUp';
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Modal, Tabs, Alert, Input, Button, Tag, Space, Typography, Table, Badge, App } from 'antd';
 import {
@@ -64,7 +65,7 @@ export const useCookieAlert = () => {
   return ctx;
 };
 
-/** Phát âm thanh cảnh báo bằng Web Audio API (không phụ thuộc file âm thanh bên ngoài) */
+/** Plays an alert sound with the Web Audio API (no external audio file needed) */
 export const playAlertSound = () => {
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -88,7 +89,7 @@ export const playAlertSound = () => {
   } catch {}
 };
 
-/** Helper gửi sự kiện cookie hết hạn từ bất kỳ đâu trong app */
+/** Helper to emit a cookie-expired event from anywhere in the app */
 export const triggerCookieExpiredAlert = (detail: {
   uid: string;
   viaName?: string;
@@ -132,7 +133,7 @@ export const CookieAlertProvider: React.FC<{
 
         const currentUids = new Set(incomingDeadVias.map((v) => v.uid));
 
-        // Nếu phát hiện có Via mới bị chết mà trước đó chưa biết
+        // If a newly dead Via is detected that we didn't know about before
         if (!isFirstLoadRef.current) {
           const newDead = incomingDeadVias.filter((v) => !knownDeadUidsRef.current.has(v.uid));
           if (newDead.length > 0) {
@@ -142,11 +143,11 @@ export const CookieAlertProvider: React.FC<{
 
             notification.error({
               key: `dead-cookie-alert-${Date.now()}`,
-              message: '🚨 CẢNH BÁO: COOKIE VIA ĐÃ HẾT HẠN!',
+              message: '🚨 WARNING: VIA COOKIE EXPIRED!',
               description: (
                 <div className="space-y-1">
                   <div>
-                    Phát hiện <span className="font-bold text-rose-400">{newDead.length} Via</span> bị lỗi Cookie hoặc Checkpoint.
+                    Detected <span className="font-bold text-rose-400">{newDead.length} Vias</span> with a Cookie error or Checkpoint.
                   </div>
                   <div className="text-xs text-slate-400">
                     {newDead.map((v) => `${v.viaName || v.uid} (${v.tokenStatus})`).join(', ')}
@@ -162,7 +163,7 @@ export const CookieAlertProvider: React.FC<{
                         setIsModalOpen(true);
                       }}
                     >
-                      Cập nhật Cookie ngay
+                      Update Cookie now
                     </Button>
                   </div>
                 </div>
@@ -172,12 +173,12 @@ export const CookieAlertProvider: React.FC<{
             });
           }
         } else {
-          // Lần đầu tải: nếu đã có Via chết sẵn, cảnh báo một lần để người dùng nắm bắt
+          // First load: if some Vias are already dead, warn once so the user knows
           if (deadCount > 0) {
             notification.warning({
               key: 'init-dead-cookie-warning',
-              message: '⚠️ Có Via cần cập nhật Cookie',
-              description: `Hệ thống ghi nhận ${deadCount} Via đang bị hết hạn hoặc Checkpoint. Hãy cập nhật để tránh gián đoạn tương tác.`,
+              message: '⚠️ Some Vias need a Cookie update',
+              description: `${deadCount} Vias are expired or checkpointed. Update them to avoid interrupting engagement.`,
               placement: 'bottomRight',
               duration: 8,
               btn: (
@@ -187,7 +188,7 @@ export const CookieAlertProvider: React.FC<{
                   onClick={() => setIsModalOpen(true)}
                   icon={<ThunderboltOutlined />}
                 >
-                  Xem & Cập nhật
+                  View & Update
                 </Button>
               ),
             });
@@ -199,7 +200,7 @@ export const CookieAlertProvider: React.FC<{
       }
     } catch (err: any) {
       if (!silent) {
-        console.warn('[CookieAlert] Lỗi kiểm tra cảnh báo cookie:', err?.message);
+        console.warn('[CookieAlert] Failed to check cookie alerts:', err?.message);
       }
     }
   }, [notification]);
@@ -209,7 +210,7 @@ export const CookieAlertProvider: React.FC<{
   }, [fetchAlerts]);
   useVisibleInterval(() => fetchAlerts(true), POLL_INTERVAL_MS);
 
-  // Lắng nghe sự kiện tức thì từ Buff Stream hoặc Queue Worker
+  // Listen for instant events from the Buff Stream or Queue Worker
   useEffect(() => {
     const handleImmediateDead = (evt: Event) => {
       const custom = evt as CustomEvent<{
@@ -232,14 +233,14 @@ export const CookieAlertProvider: React.FC<{
 
       notification.error({
         key: `immediate-cookie-dead-${detail.uid || Date.now()}`,
-        message: '🚨 COOKIE VIA VỪA HẾT HẠN TRONG LÚC TƯƠNG TÁC!',
+        message: '🚨 A VIA COOKIE JUST EXPIRED DURING ENGAGEMENT!',
         description: (
           <div className="space-y-1">
             <div className="font-semibold text-rose-400">
-              {detail.viaName || `Via ${detail.uid}`} · {detail.isCheckpoint ? 'Checkpoint' : 'Hết hạn Cookie'}
+              {detail.viaName || `Via ${detail.uid}`} · {detail.isCheckpoint ? 'Checkpoint' : 'Cookie expired'}
             </div>
             <div className="text-xs text-slate-300">
-              {detail.reason || 'Facebook đã chuyển hướng về trang đăng nhập hoặc yêu cầu xác minh bảo mật.'}
+              {detail.reason || 'Facebook redirected to the login page or asked for a security check.'}
             </div>
           </div>
         ),
@@ -280,15 +281,16 @@ export const CookieAlertProvider: React.FC<{
           proxyUrl,
         });
         if (res.data?.success) {
-          message.success(res.data.message || 'Cập nhật Cookie mới thành công!');
+          message.success(res.data.message || 'New Cookie saved!');
           await fetchAlerts(true);
+          offerTopUpAfterCookieUpdate();
           return true;
         } else {
-          message.error(res.data?.error || 'Không thể cập nhật cookie');
+          message.error(res.data?.error || 'Could not update the cookie');
           return false;
         }
       } catch (err: any) {
-        message.error(err.response?.data?.error || err.message || 'Lỗi khi cập nhật Cookie');
+        message.error(err.response?.data?.error || err.message || 'Error updating the Cookie');
         return false;
       }
     },
@@ -302,8 +304,8 @@ export const CookieAlertProvider: React.FC<{
       setIsCheckingHealth(true);
       message.loading({
         content: cookieString
-          ? 'Đang kiểm tra tính hợp lệ của Cookie trên Facebook...'
-          : 'Đang kiểm tra hạn của toàn bộ dàn Via trên Facebook...',
+          ? 'Checking the Cookie on Facebook...'
+          : 'Checking every Via on Facebook...',
         key: 'checkHealth',
       });
       try {
@@ -313,20 +315,20 @@ export const CookieAlertProvider: React.FC<{
             const first = res.data.vias?.[0];
             if (first?.isLive) {
               message.success({
-                content: `✅ Cookie CÒN HẠN (LIVE)! Nick: ${first.name || first.uid}`,
+                content: `✅ Cookie is VALID (LIVE)! Account: ${first.name || first.uid}`,
                 key: 'checkHealth',
                 duration: 4,
               });
             } else {
               message.error({
-                content: `❌ Cookie ĐÃ HẾT HẠN hoặc CHECKPOINT: ${first?.error || first?.status}`,
+                content: `❌ Cookie EXPIRED or CHECKPOINT: ${first?.error || first?.status}`,
                 key: 'checkHealth',
                 duration: 5,
               });
             }
           } else {
             message.success({
-              content: `Kiểm tra hoàn tất: ${res.data.liveCount}/${res.data.total} Via còn LIVE hoạt động tốt!`,
+              content: `Check complete: ${res.data.liveCount}/${res.data.total} Vias are LIVE and healthy!`,
               key: 'checkHealth',
               duration: 4,
             });
@@ -334,12 +336,12 @@ export const CookieAlertProvider: React.FC<{
           await fetchAlerts(true);
           return res.data;
         } else {
-          message.error({ content: res.data?.error || 'Lỗi khi kiểm tra Cookie', key: 'checkHealth' });
+          message.error({ content: res.data?.error || 'Error checking the Cookie', key: 'checkHealth' });
           return null;
         }
       } catch (err: any) {
         message.error({
-          content: err.response?.data?.error || err.message || 'Lỗi kiểm tra Cookie',
+          content: err.response?.data?.error || err.message || 'Cookie check error',
           key: 'checkHealth',
         });
         return null;
@@ -378,12 +380,12 @@ export const CookieAlertProvider: React.FC<{
   );
 };
 
-/** Banner cảnh báo ghim ở đầu trang */
+/** Warning banner pinned at the top of the page */
 export const CookieAlertBanner: React.FC = () => {
   const { totalDeadCount, deadVias, openModal } = useCookieAlert();
   const [dismissed, setDismissed] = useState(false);
 
-  // Tự động hiện lại banner nếu số lượng via chết tăng lên
+  // Show the banner again if the number of dead vias goes up
   const prevCountRef = useRef(totalDeadCount);
   useEffect(() => {
     if (totalDeadCount > prevCountRef.current) {
@@ -395,7 +397,7 @@ export const CookieAlertBanner: React.FC = () => {
   if (totalDeadCount === 0 || dismissed) return null;
 
   const firstFew = deadVias.slice(0, 3).map((v) => v.viaName || v.uid).join(', ');
-  const more = deadVias.length > 3 ? ` và ${deadVias.length - 3} Via khác` : '';
+  const more = deadVias.length > 3 ? ` and ${deadVias.length - 3} more Vias` : '';
 
   return (
     <div className="relative z-30 bg-gradient-to-r from-rose-950/90 via-red-900/80 to-amber-950/90 border-b border-rose-600/40 px-4 py-2.5 shadow-lg backdrop-blur-md animate-in fade-in duration-300">
@@ -408,10 +410,10 @@ export const CookieAlertBanner: React.FC = () => {
           <WarningFilled className="text-amber-400 text-base shrink-0" />
           <div className="truncate">
             <span className="font-bold text-white uppercase tracking-wide mr-1.5">
-              Cảnh báo Cookie hết hạn:
+              Cookie expiry warning:
             </span>
             <span className="text-rose-100">
-              Có <strong className="text-amber-300 font-bold">{totalDeadCount} Via</strong> bị gián đoạn ({firstFew}{more}). Vui lòng cập nhật Cookie mới để tiếp tục tương tác!
+              <strong className="text-amber-300 font-bold">{totalDeadCount} Vias</strong> are interrupted ({firstFew}{more}). Please update their Cookies to continue engaging!
             </span>
           </div>
         </div>
@@ -425,7 +427,7 @@ export const CookieAlertBanner: React.FC = () => {
             onClick={() => openModal()}
             className="!font-semibold shadow-md !bg-rose-600 hover:!bg-rose-500 !border-rose-400"
           >
-            Cập nhật Cookie ngay
+            Update Cookie now
           </Button>
           <Button
             size="small"
@@ -433,7 +435,7 @@ export const CookieAlertBanner: React.FC = () => {
             icon={<CloseOutlined />}
             onClick={() => setDismissed(true)}
             className="!text-rose-300 hover:!text-white hover:!bg-rose-900/50"
-            title="Tạm ẩn cảnh báo"
+            title="Hide warning for now"
           />
         </div>
       </div>
@@ -441,7 +443,7 @@ export const CookieAlertBanner: React.FC = () => {
   );
 };
 
-/** Modal Popup Cảnh báo & Cập nhật nhanh Cookie */
+/** Warning & quick Cookie update popup modal */
 export const CookieAlertModal: React.FC<{
   open: boolean;
   onClose: () => void;
@@ -469,7 +471,7 @@ export const CookieAlertModal: React.FC<{
   const [updating, setUpdating] = useState<boolean>(false);
   const [testingUid, setTestingUid] = useState<string>('');
 
-  // Tab 3: Kiểm tra Cookie bất kỳ
+  // Tab 3: check any Cookie
   const [testCookieInput, setTestCookieInput] = useState<string>('');
   const [testProxyInput, setTestProxyInput] = useState<string>('');
   const [testingStandalone, setTestingStandalone] = useState<boolean>(false);
@@ -480,7 +482,7 @@ export const CookieAlertModal: React.FC<{
   const deadViasRef = useRef<DeadViaItem[]>(deadVias);
   deadViasRef.current = deadVias;
 
-  // Chỉ khởi tạo form khi modal vừa mở (false → true), không reset mỗi lần poll 15s
+  // Only initialize the form when the modal just opened (false → true), not on every 15s poll
   useEffect(() => {
     const justOpened = open && !wasOpenRef.current;
     wasOpenRef.current = open;
@@ -495,7 +497,7 @@ export const CookieAlertModal: React.FC<{
     }
   }, [open, selectedUidForUpdate]);
 
-  // Khi đang mở mà có Via khác vừa chết (selectedUid đổi) → chuyển sang Via đó
+  // While open, if another Via just died (selectedUid changed) → switch to that Via
   const prevSelectedRef = useRef<string>(selectedUidForUpdate);
   useEffect(() => {
     if (open && selectedUidForUpdate && selectedUidForUpdate !== prevSelectedRef.current) {
@@ -505,7 +507,7 @@ export const CookieAlertModal: React.FC<{
     prevSelectedRef.current = selectedUidForUpdate;
   }, [open, selectedUidForUpdate]);
 
-  // Tự focus ô dán cookie khi vào tab cập nhật
+  // Auto-focus the cookie paste box when entering the update tab
   useEffect(() => {
     if (open && activeTab === 'update' && cookieInputMode === 'full') {
       const t = setTimeout(() => cookieTextAreaRef.current?.focus?.(), 150);
@@ -574,7 +576,7 @@ export const CookieAlertModal: React.FC<{
           <span className="p-1.5 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-400 inline-flex items-center justify-center">
             <WarningFilled />
           </span>
-          <span>CẢNH BÁO: COOKIE VIA HẾT HẠN / CHECKPOINT</span>
+          <span>WARNING: VIA COOKIE EXPIRED / CHECKPOINT</span>
         </div>
       }
     >
@@ -588,7 +590,7 @@ export const CookieAlertModal: React.FC<{
               label: (
                 <span className="flex items-center gap-1.5 font-medium">
                   <AlertOutlined />
-                  Danh sách Via lỗi
+                  Vias with errors
                   {totalDeadCount > 0 && (
                     <Badge count={totalDeadCount} className="ml-1" overflowCount={99} />
                   )}
@@ -598,7 +600,7 @@ export const CookieAlertModal: React.FC<{
                 <div className="space-y-4 pt-1">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
                     <span className="text-xs text-slate-300">
-                      Tự động kiểm tra phiên đăng nhập và bảo vệ tài khoản khi có sự cố.
+                      Automatically checks login sessions and protects accounts when something goes wrong.
                     </span>
                     <Button
                       size="small"
@@ -608,15 +610,15 @@ export const CookieAlertModal: React.FC<{
                       onClick={() => runHealthCheck()}
                       className="!bg-cyan-600 hover:!bg-cyan-500 font-medium text-xs shadow-md shrink-0"
                     >
-                      🩺 Quét kiểm tra tất cả Via
+                      🩺 Check all Vias
                     </Button>
                   </div>
 
                   <Alert
                     type="error"
                     showIcon
-                    message="Tương tác có thể bị gián đoạn"
-                    description="Khi Cookie của Via bị hết hạn hoặc Facebook yêu cầu xác minh danh tính (Checkpoint), các tiến trình Like/Comment qua Via này sẽ tự động dừng để tránh bị Facebook khóa vĩnh viễn. Vui lòng cấp Cookie mới để tiếp tục."
+                    message="Engagement may be interrupted"
+                    description="When a Via's Cookie expires or Facebook asks for identity verification (Checkpoint), Like/Comment runs through that Via stop automatically to avoid a permanent Facebook lock. Please provide a new Cookie to continue."
                     className="!bg-rose-950/40 !border-rose-900/60 !text-rose-200"
                   />
 
@@ -624,10 +626,10 @@ export const CookieAlertModal: React.FC<{
                     <div className="p-8 text-center bg-slate-900/40 rounded-xl border border-slate-800">
                       <CheckCircleOutlined className="text-4xl text-emerald-400 mb-2" />
                       <div className="text-base font-semibold text-slate-200">
-                        Tuyệt vời! Không có Via nào bị lỗi Cookie
+                        Great! No Vias have Cookie errors
                       </div>
                       <p className="text-xs text-slate-400 mt-1">
-                        Tất cả các tài khoản Via trong hệ thống đang ở trạng thái hoạt động tốt.
+                        Every Via account in the system is healthy.
                       </p>
                     </div>
                   ) : (
@@ -648,15 +650,15 @@ export const CookieAlertModal: React.FC<{
                                   {via.viaName || `Via ${via.uid}`}
                                 </span>
                                 <Tag color={isCheckpoint ? 'volcano' : 'red'} className="!m-0 font-mono text-[11px]">
-                                  {isCheckpoint ? 'CHECKPOINT' : 'COOKIE HẾT HẠN'}
+                                  {isCheckpoint ? 'CHECKPOINT' : 'COOKIE EXPIRED'}
                                 </Tag>
                                 <span className="text-xs font-mono text-slate-400">UID: {via.uid}</span>
                               </div>
                               <div className="text-xs text-rose-300/90 leading-relaxed">
                                 {matchingAlert?.reason ||
                                   (isCheckpoint
-                                    ? 'Facebook yêu cầu xác minh bảo mật (Checkpoint). Cần mở trình duyệt gỡ lỗi và lấy cookie mới.'
-                                    : 'Phiên đăng nhập đã kết thúc hoặc Cookie bị Facebook thu hồi.')}
+                                    ? 'Facebook requires a security check (Checkpoint). Open a debug browser and grab a new cookie.'
+                                    : 'The login session ended or Facebook revoked the Cookie.')}
                               </div>
                               {via.proxyUrl && (
                                 <div className="text-[11px] font-mono text-slate-500 truncate">
@@ -680,7 +682,7 @@ export const CookieAlertModal: React.FC<{
                                 }}
                                 className="!text-cyan-400 !border-cyan-800/80 hover:!border-cyan-500"
                               >
-                                Kiểm tra lại
+                                Recheck
                               </Button>
                               <Button
                                 type="primary"
@@ -690,7 +692,7 @@ export const CookieAlertModal: React.FC<{
                                 onClick={() => handleStartUpdate(via.uid)}
                                 className="font-medium"
                               >
-                                Cập nhật Cookie
+                                Update Cookie
                               </Button>
                             </div>
                           </div>
@@ -706,7 +708,7 @@ export const CookieAlertModal: React.FC<{
                       onClick={() => refreshAlerts()}
                       className="!text-slate-400"
                     >
-                      Làm mới danh sách
+                      Refresh list
                     </Button>
 
                     <Space>
@@ -719,7 +721,7 @@ export const CookieAlertModal: React.FC<{
                             onNavigateToViaManager();
                           }}
                         >
-                          Quản lý Dàn Via
+                          Manage Vias
                         </Button>
                       )}
                       <Button
@@ -729,7 +731,7 @@ export const CookieAlertModal: React.FC<{
                           onClose();
                         }}
                       >
-                        Đóng
+                        Close
                       </Button>
                     </Space>
                   </div>
@@ -741,7 +743,7 @@ export const CookieAlertModal: React.FC<{
               label: (
                 <span className="flex items-center gap-1.5 font-medium">
                   <KeyOutlined />
-                  Cập nhật Cookie mới
+                  Update Cookie
                 </span>
               ),
               children: (
@@ -755,7 +757,7 @@ export const CookieAlertModal: React.FC<{
                     return (
                       <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 space-y-2">
                         <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-                          Chọn Via cần cập nhật:
+                          Choose the Via to update:
                         </div>
                         <div className="flex gap-2 flex-wrap">
                           {chips.map((v) => (
@@ -779,19 +781,19 @@ export const CookieAlertModal: React.FC<{
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      UID Tài Khoản{selectedViaInfo?.viaName ? ` · ${selectedViaInfo.viaName}` : ''}:
+                      Account UID{selectedViaInfo?.viaName ? ` · ${selectedViaInfo.viaName}` : ''}:
                     </label>
                     <Input
                       value={targetUid}
                       onChange={(e) => setTargetUid(e.target.value.trim())}
-                      placeholder="Nhập UID tài khoản (ví dụ: 100089123456789)"
+                      placeholder="Enter the account UID (e.g. 100089123456789)"
                       className="font-mono text-sm"
                     />
                   </div>
 
-                  {/* CHỌN HÌNH THỨC NHẬP COOKIE */}
+                  {/* COOKIE INPUT METHOD */}
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2 gap-2 flex-wrap">
-                    <span className="text-xs font-semibold text-slate-300">Hình thức cập nhật:</span>
+                    <span className="text-xs font-semibold text-slate-300">Update method:</span>
                     <div className="flex gap-1.5">
                       <Button
                         size="small"
@@ -799,7 +801,7 @@ export const CookieAlertModal: React.FC<{
                         onClick={() => setCookieInputMode('full')}
                         className={cookieInputMode === 'full' ? '!bg-cyan-600 font-semibold text-xs' : 'text-xs text-slate-400'}
                       >
-                        📋 Dán JSON J2TEAM / Cookie (Khuyên dùng)
+                        📋 Paste J2TEAM JSON / Cookie (Recommended)
                       </Button>
                       <Button
                         size="small"
@@ -807,7 +809,7 @@ export const CookieAlertModal: React.FC<{
                         onClick={() => setCookieInputMode('xs_only')}
                         className={cookieInputMode === 'xs_only' ? '!bg-cyan-600 font-semibold text-xs' : 'text-xs text-slate-400'}
                       >
-                        ⚡ Chỉ nhập xs
+                        ⚡ xs only
                       </Button>
                     </div>
                   </div>
@@ -816,22 +818,22 @@ export const CookieAlertModal: React.FC<{
                     <div>
                       <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
                         <label className="text-xs font-semibold text-slate-200">
-                          Cookie Facebook mới: <span className="text-rose-400">*</span>
+                          New Facebook Cookie: <span className="text-rose-400">*</span>
                         </label>
                         <span className="text-[11px] text-slate-500">
-                          J2TEAM Cookies · Cookie-Editor · chuỗi c_user=…; xs=…
+                          J2TEAM Cookies · Cookie-Editor · c_user=…; xs=… string
                         </span>
                       </div>
                       <div className="mb-2 text-[11px] text-slate-400 leading-relaxed">
-                        <span className="text-amber-400 font-semibold">Cách lấy: </span>
-                        Đăng nhập nick trên trình duyệt → mở <b>facebook.com</b> → bấm extension <b>J2TEAM Cookies</b> → <b>Export</b> (copy) → dán nguyên khối vào ô dưới.
+                        <span className="text-amber-400 font-semibold">How to get it: </span>
+                        Log in to the account in a browser → open <b>facebook.com</b> → click the <b>J2TEAM Cookies</b> extension → <b>Export</b> (copy) → paste the whole block below.
                       </div>
                       <TextArea
                         ref={cookieTextAreaRef}
                         rows={6}
                         value={newCookie}
                         onChange={(e) => setNewCookie(e.target.value)}
-                        placeholder={'Ctrl+V nguyên khối JSON ở đây, ví dụ:\n{"url":"https://www.facebook.com","cookies":[{"name":"c_user","value":"…"},{"name":"xs","value":"…"}, …]}'}
+                        placeholder={'Ctrl+V the whole JSON block here, e.g.:\n{"url":"https://www.facebook.com","cookies":[{"name":"c_user","value":"…"},{"name":"xs","value":"…"}, …]}'}
                         className="font-mono text-xs bg-slate-950 border-slate-700 text-slate-100 rounded-xl hover:border-cyan-500 focus:border-cyan-500"
                       />
 
@@ -845,40 +847,40 @@ export const CookieAlertModal: React.FC<{
                         >
                           <div className="flex items-center gap-2 flex-wrap">
                             {fullReady && !uidMismatch ? (
-                              <Tag color="success" className="!m-0 font-semibold">✅ Cookie hợp lệ, sẵn sàng lưu</Tag>
+                              <Tag color="success" className="!m-0 font-semibold">✅ Valid cookie, ready to save</Tag>
                             ) : (
                               <Tag color="warning" className="!m-0 font-semibold">
                                 ⚠️{' '}
                                 {!parsedFull.c_user && !parsedFull.xs
-                                  ? 'Chưa đọc được cookie'
+                                  ? 'Cookie not readable yet'
                                   : !parsedFull.xs
-                                  ? 'Thiếu xs'
+                                  ? 'Missing xs'
                                   : !parsedFull.c_user
-                                  ? 'Thiếu c_user'
-                                  : 'UID không khớp'}
+                                  ? 'Missing c_user'
+                                  : 'UID mismatch'}
                               </Tag>
                             )}
                             <span className="text-slate-400">
-                              {parsedFull.isJson ? 'JSON' : 'Chuỗi cookie'} · {parsedFull.cookieCount} cookie
+                              {parsedFull.isJson ? 'JSON' : 'Cookie string'} · {parsedFull.cookieCount} cookies
                             </span>
                           </div>
                           <div className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-0.5 font-mono text-[11px]">
                             <span className="text-slate-500">c_user</span>
                             <span className={parsedFull.c_user ? 'text-slate-200' : 'text-rose-400'}>
-                              {parsedFull.c_user || 'không có'}
+                              {parsedFull.c_user || 'none'}
                             </span>
                             <span className="text-slate-500">xs</span>
                             <span className={`truncate ${parsedFull.xs ? 'text-slate-200' : 'text-rose-400'}`}>
-                              {parsedFull.xs ? `${parsedFull.xs.slice(0, 18)}…` : 'không có'}
+                              {parsedFull.xs ? `${parsedFull.xs.slice(0, 18)}…` : 'none'}
                             </span>
                           </div>
                           {uidMismatch && (
                             <div className="flex items-center justify-between gap-2 flex-wrap text-amber-200">
                               <span>
-                                Cookie này của UID <b className="font-mono">{parsedFull.c_user}</b>, không phải <b className="font-mono">{targetUid}</b>.
+                                This cookie belongs to UID <b className="font-mono">{parsedFull.c_user}</b>, not <b className="font-mono">{targetUid}</b>.
                               </span>
                               <Button size="small" onClick={() => setTargetUid(parsedFull.c_user)}>
-                                Dùng UID {parsedFull.c_user}
+                                Use UID {parsedFull.c_user}
                               </Button>
                             </div>
                           )}
@@ -889,9 +891,9 @@ export const CookieAlertModal: React.FC<{
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
                         <label className="text-xs font-semibold text-slate-200">
-                          Mã phiên <code className="text-cyan-300 font-bold">xs</code>: <span className="text-rose-400">*</span>
+                          Session token <code className="text-cyan-300 font-bold">xs</code>: <span className="text-rose-400">*</span>
                         </label>
-                        <span className="text-[11px] text-slate-500">Chỉ giữ c_user + xs, dễ dính checkpoint hơn</span>
+                        <span className="text-[11px] text-slate-500">Keeps only c_user + xs, more likely to hit a checkpoint</span>
                       </div>
                       <TextArea
                         rows={3}
@@ -900,43 +902,43 @@ export const CookieAlertModal: React.FC<{
                           const val = e.target.value.trim();
                           const parsed = parseFacebookCookie(val);
                           if (parsed.isJson) {
-                            // Dán JSON vào ô xs → chuyển sang chế độ đầy đủ để giữ toàn bộ cookie
+                            // JSON pasted into the xs box → switch to full mode to keep every cookie
                             setNewCookie(val);
                             setXsOnlyInput('');
                             setCookieInputMode('full');
-                            message.info('Phát hiện JSON Cookie, đã chuyển sang chế độ dán đầy đủ');
+                            message.info('JSON Cookie detected, switched to full paste mode');
                             return;
                           }
                           const xsMatch = val.match(/(?:^|;\s*)xs=([^;]+)/)?.[1];
                           setXsOnlyInput(xsMatch || val.replace(/^xs=/i, '').replace(/;$/, '').trim());
                         }}
-                        placeholder="Ví dụ: 2%3A0UeZEJylLU5ccA%3A2%3A1793101411%3A-1%3A-1..."
+                        placeholder="e.g. 2%3A0UeZEJylLU5ccA%3A2%3A1793101411%3A-1%3A-1..."
                         className="font-mono text-xs bg-slate-950 border-slate-700 text-slate-100 rounded-xl hover:border-cyan-500 focus:border-cyan-500"
                       />
                       <div className="mt-1.5 text-[11px] text-slate-400">
-                        Sẽ lưu thành <code>c_user={targetUid || 'UID'}; xs=…</code>
+                        Will be saved as <code>c_user={targetUid || 'UID'}; xs=…</code>
                       </div>
                     </div>
                   )}
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Proxy (tuỳ chọn - để trống nếu dùng chung Proxy cũ):
+                      Proxy (optional - leave empty to keep the current Proxy):
                     </label>
                     <Input
                       value={newProxy}
                       onChange={(e) => setNewProxy(e.target.value.trim())}
                       placeholder={
                         selectedViaInfo?.proxyUrl
-                          ? `Proxy hiện tại: ${selectedViaInfo.proxyUrl}`
-                          : 'http://username:password@ip:port (nếu có)'
+                          ? `Current proxy: ${selectedViaInfo.proxyUrl}`
+                          : 'http://username:password@ip:port (if any)'
                       }
                       className="font-mono text-xs"
                     />
                   </div>
 
                   <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-800">
-                    <Button onClick={() => setActiveTab('list')}>Quay lại danh sách</Button>
+                    <Button onClick={() => setActiveTab('list')}>Back to list</Button>
                     <Button
                       type="primary"
                       danger
@@ -946,7 +948,7 @@ export const CookieAlertModal: React.FC<{
                       onClick={handleDoUpdate}
                       className="font-semibold"
                     >
-                      Xác minh & Lưu Cookie ngay
+                      Verify & Save Cookie
                     </Button>
                   </div>
                 </div>
@@ -957,18 +959,18 @@ export const CookieAlertModal: React.FC<{
               label: (
                 <span className="flex items-center gap-1.5 font-medium">
                   <SafetyCertificateOutlined />
-                  Kiểm tra Cookie bất kỳ
+                  Check any Cookie
                 </span>
               ),
               children: (
                 <div className="space-y-4 pt-1">
                   <div className="text-xs text-slate-400 leading-relaxed bg-slate-900/60 p-3 rounded-xl border border-slate-800">
-                    💡 <strong>Kiểm tra tức thì:</strong> Dán chuỗi Cookie Facebook (hoặc nguyên khối JSON Cookie-Editor) vào khung bên dưới để hệ thống mở phiên ẩn danh test xem Cookie còn hạn hoạt động (LIVE), đã hết hạn (EXPIRED) hay bị Checkpoint mà không làm ảnh hưởng hay lưu vào database.
+                    💡 <strong>Instant check:</strong> Paste a Facebook Cookie string (or a whole Cookie-Editor JSON block) below and the system opens an incognito session to test whether the Cookie is still valid (LIVE), expired (EXPIRED) or checkpointed, without affecting or saving anything to the database.
                   </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Chuỗi Cookie cần kiểm tra:
+                      Cookie string to check:
                     </label>
                     <TextArea
                       rows={4}
@@ -978,24 +980,24 @@ export const CookieAlertModal: React.FC<{
                         const parsed = parseFacebookCookie(val);
                         if (parsed.isJson) {
                           setTestCookieInput(parsed.cookieString);
-                          message.success(`Đã nhận diện JSON Cookie (${parsed.cookieCount} cookies)`);
+                          message.success(`JSON Cookie detected (${parsed.cookieCount} cookies)`);
                         } else {
                           setTestCookieInput(val);
                         }
                       }}
-                      placeholder="Dán chuỗi Cookie Facebook hoặc JSON Cookie-Editor vào đây"
+                      placeholder="Paste a Facebook Cookie string or Cookie-Editor JSON here"
                       className="font-mono text-xs"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      Proxy kiểm tra (tuỳ chọn - nếu Cookie chạy qua Proxy riêng):
+                      Test proxy (optional - if the Cookie runs through its own Proxy):
                     </label>
                     <Input
                       value={testProxyInput}
                       onChange={(e) => setTestProxyInput(e.target.value.trim())}
-                      placeholder="http://username:password@ip:port (để trống nếu không dùng proxy)"
+                      placeholder="http://username:password@ip:port (leave empty if no proxy)"
                       className="font-mono text-xs"
                     />
                   </div>
@@ -1006,7 +1008,7 @@ export const CookieAlertModal: React.FC<{
                       loading={isCheckingHealth}
                       onClick={() => runHealthCheck()}
                     >
-                      🩺 Quét kiểm tra tất cả Via
+                      🩺 Check all Vias
                     </Button>
                     <Button
                       type="primary"
@@ -1027,7 +1029,7 @@ export const CookieAlertModal: React.FC<{
                       }}
                       className="!bg-cyan-600 hover:!bg-cyan-500 font-semibold shadow-md"
                     >
-                      Kiểm tra Cookie ngay
+                      Check Cookie now
                     </Button>
                   </div>
 
@@ -1042,11 +1044,11 @@ export const CookieAlertModal: React.FC<{
                       <div className="flex items-center gap-2 flex-wrap mb-1.5">
                         {standaloneResult.isLive ? (
                           <Tag color="success" className="font-bold text-xs py-0.5 px-2">
-                            ✅ COOKIE CÒN HẠN (LIVE)
+                            ✅ COOKIE IS VALID (LIVE)
                           </Tag>
                         ) : (
                           <Tag color="error" className="font-bold text-xs py-0.5 px-2">
-                            ❌ {standaloneResult.status === 'CHECKPOINT' ? 'BỊ CHECKPOINT' : 'COOKIE ĐÃ HẾT HẠN'}
+                            ❌ {standaloneResult.status === 'CHECKPOINT' ? 'CHECKPOINTED' : 'COOKIE EXPIRED'}
                           </Tag>
                         )}
                         {standaloneResult.name && (
@@ -1059,11 +1061,11 @@ export const CookieAlertModal: React.FC<{
 
                       {standaloneResult.error ? (
                         <div className="text-xs text-rose-300 mt-1 leading-relaxed">
-                          <strong>Chi tiết phản hồi Facebook:</strong> {standaloneResult.error}
+                          <strong>Facebook response details:</strong> {standaloneResult.error}
                         </div>
                       ) : (
                         <div className="text-xs text-emerald-300 mt-1">
-                          Phiên đăng nhập Facebook hoàn toàn hợp lệ, có thể tương tác bình thường!
+                          The Facebook login session is fully valid and can engage normally!
                         </div>
                       )}
                     </div>

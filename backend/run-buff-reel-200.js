@@ -1,7 +1,7 @@
 /**
  * run-buff-reel-200.js
- * Chiến dịch đẩy 200 Like cho Facebook Reel: https://www.facebook.com/reel/1194926649525979/
- * Phân bổ dàn Via & Fanpage chống checkpoint
+ * 200-Like push campaign for the Facebook Reel: https://www.facebook.com/reel/1194926649525979/
+ * Distributes Vias & Fanpages to avoid checkpoints
  */
 
 const db = require('./db');
@@ -12,7 +12,7 @@ const { notifyBuffStarted, notifyBuffCompleted } = require('./telegram-alert');
 
 async function main() {
   console.log('================================================================');
-  console.log('🚀 [VIPLIKE-RADIANT] KHỞI ĐỘNG CHIẾN DỊCH BUFF 200 LIKE REELS');
+  console.log('🚀 [VIPLIKE-RADIANT] STARTING THE 200-LIKE REELS BUFF CAMPAIGN');
   console.log('🎯 Target: https://www.facebook.com/reel/1194926649525979/');
   console.log('================================================================\n');
 
@@ -21,19 +21,19 @@ async function main() {
   const normalizedUrl = normalizeFbPostUrl(targetUrl);
   const pool = db.getPool();
 
-  // 1. Lấy danh sách các tài khoản Via chủ lực
+  // 1. Get the main Via accounts
   const [vias] = await pool.execute(
     'SELECT platform_account_id, page_name, access_token FROM social_accounts WHERE platform_account_id IN (?, ?, ?) AND access_token IS NOT NULL',
     ['100009194846268', '61568198025556', '100023403136194']
   );
 
   if (!vias.length) {
-    console.error('❌ Không tìm thấy tài khoản Via nào trong database!');
+    console.error('❌ No Via accounts found in the database!');
     process.exit(1);
   }
 
-  // 2. Kiểm tra phiên đăng nhập (Health-check) từng Via
-  console.log('🔍 Kiểm tra phiên đăng nhập dàn Via...');
+  // 2. Health-check each Via's login session
+  console.log('🔍 Checking the Vias\' login sessions...');
   const liveVias = [];
   for (const via of vias) {
     const check = await fbBuffTool.validateViaSession(via.access_token, { timeoutMs: 15000 });
@@ -41,17 +41,17 @@ async function main() {
       console.log(`   ✅ Via [${via.page_name}] (UID: ${via.platform_account_id}): LIVE`);
       liveVias.push(via);
     } else {
-      console.warn(`   ❌ Via [${via.page_name}] (UID: ${via.platform_account_id}): ${check.status} (${check.error || 'Cần cập nhật cookie'})`);
+      console.warn(`   ❌ Via [${via.page_name}] (UID: ${via.platform_account_id}): ${check.status} (${check.error || 'Cookie needs updating'})`);
     }
   }
 
   if (liveVias.length === 0) {
-    console.error('\n🛑 TOÀN BỘ CÁC TÀI KHOẢN VIA ĐÃ HẾT HẠN COOKIE HOẶC BỊ ĐĂNG XUẤT!');
-    console.error('👉 Vui lòng cập nhật Cookie mới cho ít nhất 1 Via (Huỳnh Thạnh Phú, Thành An, hoặc Huỳnh Hồng Phước) để tiến hành buff Like.');
+    console.error('\n🛑 EVERY VIA ACCOUNT HAS AN EXPIRED COOKIE OR IS LOGGED OUT!');
+    console.error('👉 Please update the Cookie of at least 1 Via (Huỳnh Thạnh Phú, Thành An, or Huỳnh Hồng Phước) to buff Likes.');
     process.exit(2);
   }
 
-  // 3. Thu thập Page của từng Via LIVE và lọc trùng
+  // 3. Collect each LIVE Via's Pages and dedupe
   const TARGET_TOTAL = 200;
   const viaBuckets = [];
 
@@ -61,7 +61,7 @@ async function main() {
       [via.platform_account_id]
     );
     const freshPages = filterAvailablePagesForPost(normalizedUrl, pages);
-    console.log(`📋 Via [${via.page_name}]: Tổng ${pages.length} Page, Chưa like Reel: ${freshPages.length}`);
+    console.log(`📋 Via [${via.page_name}]: ${pages.length} Pages total, not yet liked the Reel: ${freshPages.length}`);
     if (freshPages.length > 0) {
       viaBuckets.push({
         viaName: via.page_name,
@@ -73,11 +73,11 @@ async function main() {
   }
 
   if (!viaBuckets.length) {
-    console.error('❌ Toàn bộ Page của các Via đang LIVE đã Like Reel này trước đó!');
+    console.error('❌ Every Page of the LIVE Vias already liked this Reel!');
     process.exit(0);
   }
 
-  // 4. Phân bổ cân bằng 200 Page qua các Via
+  // 4. Balance 200 Pages across the Vias
   const selectedGroups = [];
   let remainingNeeded = TARGET_TOTAL;
 
@@ -100,7 +100,7 @@ async function main() {
   }
 
   const grandTotal = selectedGroups.reduce((acc, g) => acc + g.pages.length, 0);
-  console.log(`\n🎯 TỔNG SỐ LIKE SẼ BUFF: ${grandTotal} LIKE`);
+  console.log(`\n🎯 TOTAL LIKES TO BUFF: ${grandTotal} LIKES`);
   selectedGroups.forEach(g => console.log(`   👉 Via [${g.viaName}]: ${g.pages.length} Page`));
   console.log('----------------------------------------------------------------\n');
 
@@ -110,7 +110,7 @@ async function main() {
     reactionType: 'LIKE',
     speedMode: 'FAST',
     concurrency: 1,
-    accountName: `Dàn ${selectedGroups.length} Via (${grandTotal} Page)`,
+    accountName: `${selectedGroups.length}-Via fleet (${grandTotal} Pages)`,
   }).catch(() => {});
 
   const startTime = Date.now();
@@ -120,13 +120,13 @@ async function main() {
   let overallDone = 0;
   const allDetails = [];
 
-  console.log(`\n🚀 [MULTI-VIA ENGINE] Khởi chạy song song ${selectedGroups.length} nhóm Via...`);
+  console.log(`\n🚀 [MULTI-VIA ENGINE] Launching ${selectedGroups.length} Via groups in parallel...`);
 
   await Promise.all(
     selectedGroups.map(async (group, gIdx) => {
       if (group.pages.length === 0) return;
 
-      console.log(`⚡ [NHÓM ${gIdx + 1}/${selectedGroups.length}] Kích hoạt luồng Via: "${group.viaName}" (${group.pages.length} Page)...`);
+      console.log(`⚡ [GROUP ${gIdx + 1}/${selectedGroups.length}] Starting Via thread: "${group.viaName}" (${group.pages.length} Pages)...`);
 
       try {
         const res = await fbBuffTool.buffLikesWithPages(group.cookieString, targetUrl, {
@@ -139,7 +139,7 @@ async function main() {
           enableComment: false,
           enableShare: false,
           enableHumanBehavior: false,
-          fastSwitch: true, // Hỗ trợ Fast-Switch trực tiếp trên Reels
+          fastSwitch: true, // Fast-Switch support right on Reels
           concurrency: 2,
           cooldownEvery: 35,
           cooldownDurationMs: 8000,
@@ -151,7 +151,7 @@ async function main() {
               else overallFailed++;
 
               const pct = Math.round((overallDone / grandTotal) * 100);
-              console.log(`[${overallDone}/${grandTotal}] (${pct}%) [${group.viaName}] [${evt.pageName}] ➔ ${evt.status} (Thành công: ${overallSuccess}, Đã like: ${overallAlreadyLiked}, Lỗi: ${overallFailed})`);
+              console.log(`[${overallDone}/${grandTotal}] (${pct}%) [${group.viaName}] [${evt.pageName}] ➔ ${evt.status} (Success: ${overallSuccess}, Already liked: ${overallAlreadyLiked}, Errors: ${overallFailed})`);
             }
           },
         });
@@ -160,21 +160,21 @@ async function main() {
           allDetails.push(...res.details.map(d => ({ ...d, viaName: group.viaName })));
         }
       } catch (err) {
-        console.error(`⚠️ Lỗi khi chạy nhóm Via [${group.viaName}]:`, err.message);
+        console.error(`⚠️ Error running Via group [${group.viaName}]:`, err.message);
       }
     })
   );
 
   const durationSec = Math.round((Date.now() - startTime) / 1000);
   console.log(`\n================================================================`);
-  console.log(`🎉 HOÀN TẤT CHIẾN DỊCH PUSH LIKE REEL!`);
-  console.log(`⏱️ Thời gian: ${durationSec}s (~${Math.round(durationSec / 60)} phút)`);
-  console.log(`✅ Thành công thực tế: ${overallSuccess}/${grandTotal}`);
-  console.log(`ℹ️ Đã like từ trước: ${overallAlreadyLiked}`);
-  console.log(`❌ Lỗi / Bỏ qua: ${overallFailed}`);
+  console.log(`🎉 REEL LIKE PUSH CAMPAIGN COMPLETE!`);
+  console.log(`⏱️ Time: ${durationSec}s (~${Math.round(durationSec / 60)} min)`);
+  console.log(`✅ Actual successes: ${overallSuccess}/${grandTotal}`);
+  console.log(`ℹ️ Already liked: ${overallAlreadyLiked}`);
+  console.log(`❌ Errors / Skipped: ${overallFailed}`);
   console.log(`================================================================\n`);
 
-  // Lưu log vào MySQL
+  // Save the log to MySQL
   const logId = 'log_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
   await db.saveBuffLogs({
     id: logId,
@@ -188,11 +188,11 @@ async function main() {
     failedCount: overallFailed,
     engagementMode: 'LIKE_ONLY',
     commentCount: 0,
-    accountName: `Dàn Via (${grandTotal} Page)`,
+    accountName: `Via fleet (${grandTotal} Pages)`,
     details: allDetails,
   }).catch(() => {});
 
-  // Báo cáo Telegram
+  // Telegram report
   await notifyBuffCompleted({
     targetUrl,
     success: overallSuccess,

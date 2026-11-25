@@ -32,10 +32,10 @@ function getCuratedPortraitPool() {
 async function runBatch100Avatars() {
   const startTime = Date.now();
   console.log('================================================================');
-  console.log('🚀 BẮT ĐẦU TIẾN TRÌNH CẬP NHẬT AVATAR HÀNG LOẠT (MỤC TIÊU: 100 PAGE)');
+  console.log('🚀 STARTING THE BULK AVATAR UPDATE (TARGET: 100 PAGES)');
   console.log('================================================================');
 
-  // 1. Lấy Cookie của nick mẹ Thành An (UID: 100023403136194)
+  // 1. Get the Cookie of parent account Thành An (UID: 100023403136194)
   const conn = await mysql.createConnection({
     host: process.env.DB_HOST || 'localhost',
     port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
@@ -53,11 +53,11 @@ async function runBatch100Avatars() {
   const proxyUrl = rows[0]?.proxy_url || '';
 
   if (!cookieStr) {
-    console.error('❌ Không tìm thấy Cookie của nick mẹ Thành An!');
+    console.error('❌ Cookie of parent account Thành An not found!');
     process.exit(1);
   }
 
-  // 2. Tải danh sách Page và lọc ra 100 Page chưa có avatar
+  // 2. Load the Page list and pick 100 Pages without an avatar
   const pagesCache = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'pages_cache.json'), 'utf8'));
   const avatarCache = loadAvatarCache();
 
@@ -69,19 +69,19 @@ async function runBatch100Avatars() {
   });
 
   const targetPages = missingPages.slice(0, 100);
-  console.log(`📊 Tổng số Page chưa có Avatar: ${missingPages.length}`);
-  console.log(`🎯 Chọn ra ${targetPages.length} Page để tiến hành cập nhật Avatar...`);
+  console.log(`📊 Total Pages without an Avatar: ${missingPages.length}`);
+  console.log(`🎯 Picked ${targetPages.length} Pages to update the Avatar...`);
 
   if (targetPages.length === 0) {
-    console.log('🎉 Toàn bộ Page đã có Avatar, không cần cập nhật thêm!');
+    console.log('🎉 Every Page already has an Avatar, nothing to update!');
     return;
   }
 
-  // 3. Chuẩn bị kho ảnh chân dung Random Mix độc lập
+  // 3. Prepare an independent Random Mix portrait library
   const portraitPool = getCuratedPortraitPool();
-  console.log(`🖼️ Kho ảnh mẫu ngẫu nhiên: ${portraitPool.length} ảnh chân dung nam/nữ.`);
+  console.log(`🖼️ Random sample library: ${portraitPool.length} male/female portraits.`);
 
-  // Khởi tạo file theo dõi tiến độ
+  // Create the progress tracking file
   const progressFile = path.join(__dirname, 'data', 'batch_100_progress.json');
   const progressState = {
     startedAt: new Date().toISOString(),
@@ -94,7 +94,7 @@ async function runBatch100Avatars() {
   };
   fs.writeFileSync(progressFile, JSON.stringify(progressState, null, 2));
 
-  // 4. Khởi chạy trình duyệt Playwright với Cookie mẹ
+  // 4. Launch the Playwright browser with the parent Cookie
   const cookies = parseCookieString(cookieStr);
   const browser = await chromium.launch({
     headless: true,
@@ -115,7 +115,7 @@ async function runBatch100Avatars() {
   await context.addCookies(cookies);
   const tab = await context.newPage();
 
-  console.log('🌐 Trình duyệt tự động đã sẵn sàng. Bắt đầu vòng lặp cập nhật...\n');
+  console.log('🌐 The automated browser is ready. Starting the update loop...\n');
 
   for (let i = 0; i < targetPages.length; i++) {
     const pageItem = targetPages[i];
@@ -125,21 +125,21 @@ async function runBatch100Avatars() {
     let localTempImage = null;
 
     console.log(`----------------------------------------------------------------`);
-    console.log(`[${i + 1}/${targetPages.length}] ⏳ Đang xử lý: "${pageName}" (ID: ${pageId})`);
+    console.log(`[${i + 1}/${targetPages.length}] ⏳ Processing: "${pageName}" (ID: ${pageId})`);
 
     try {
-      // 1. Tải ảnh chân dung từ pool
+      // 1. Download a portrait from the pool
       const imageUrl = portraitPool[i % portraitPool.length];
       localTempImage = await downloadImageToTemp(imageUrl, `batch_${pageId}`);
 
-      // 2. Mở URL Profile Page
+      // 2. Open the Page Profile URL
       await tab.goto(`https://www.facebook.com/profile.php?id=${pageId}`, {
         waitUntil: 'domcontentloaded',
         timeout: 25000,
       }).catch(() => {});
       await tab.waitForTimeout(3000);
 
-      // 3. Kiểm tra và chuyển quyền danh tính (Switch Profile)
+      // 3. Check and switch identity (Switch Profile)
       const switchBtns = await tab.$$('div[role="button"]:has-text("Chuyển ngay"), div[role="button"]:has-text("Chuyển"), [aria-label*="Chuyển sang"]');
       if (switchBtns.length > 0) {
         await switchBtns[0].click().catch(() => {});
@@ -152,7 +152,7 @@ async function runBatch100Avatars() {
         await tab.waitForTimeout(3500);
       }
 
-      // 4. Đóng mọi popup Onboarding ("Chào mừng bạn đến với Trang mới!", "Dùng Trang", Escape)
+      // 4. Close any Onboarding popups ("Welcome to the new Pages experience!", "Use Page", Escape)
       const dungTrangBtn = await tab.$('div[role="button"]:has-text("Dùng Trang"), div[role="button"]:has-text("Use Page"), div[role="button"]:has-text("Bắt đầu khám phá"), div[aria-label="Đóng"], div[aria-label="Close"]');
       if (dungTrangBtn && await dungTrangBtn.isVisible()) {
         await dungTrangBtn.click().catch(() => {});
@@ -161,23 +161,23 @@ async function runBatch100Avatars() {
       await tab.keyboard.press('Escape').catch(() => {});
       await tab.waitForTimeout(1000);
 
-      // 5. Tìm nút Camera đại diện ("Hành động với ảnh đại diện")
+      // 5. Find the profile picture camera button ("Profile picture actions")
       const cameraLoc = tab.locator('div[aria-label*="ảnh đại diện"], div[aria-label*="Hành động với ảnh đại diện"], div[aria-label*="Cập nhật ảnh đại diện"], div[aria-label*="Profile picture" i]').first();
       if ((await cameraLoc.count()) === 0 || !(await cameraLoc.isVisible().catch(() => false))) {
-        throw new Error('Không tìm thấy nút Camera đại diện trên Fanpage');
+        throw new Error('Profile picture camera button not found on the Fanpage');
       }
 
       await cameraLoc.click({ force: true });
       await tab.waitForTimeout(2000);
 
-      // 6. Trong menu popup, chọn "Chọn ảnh đại diện"
+      // 6. In the popup menu, pick "Choose profile picture"
       const chooseAvatarMenuItem = tab.locator('div[role="menuitem"]:has-text("Chọn ảnh đại diện"), div[role="menuitem"]:has-text("Choose profile picture"), div[role="menuitem"]:has-text("Tải ảnh lên"), div[role="menuitem"]').first();
       if ((await chooseAvatarMenuItem.count()) > 0 && await chooseAvatarMenuItem.isVisible().catch(() => false)) {
         await chooseAvatarMenuItem.click({ force: true }).catch(() => {});
         await tab.waitForTimeout(2500);
       }
 
-      // 7. Trong modal "Chọn ảnh đại diện", bấm "+ Tải ảnh lên" và nạp file
+      // 7. In the "Choose profile picture" modal, click "+ Upload photo" and load the file
       let uploadSuccess = false;
       const uploadBtn = tab.locator('div[role="dialog"] div[role="button"]:has-text("Tải ảnh lên"), div[role="dialog"] div[role="button"]:has-text("Upload photo"), div[role="dialog"] button:has-text("Tải ảnh lên")').first();
 
@@ -194,7 +194,7 @@ async function runBatch100Avatars() {
       }
 
       if (!uploadSuccess) {
-        // Fallback input trực tiếp trong dialog
+        // Fallback: file input directly in the dialog
         const directInput = tab.locator('div[role="dialog"] input[type="file"]').first();
         if ((await directInput.count()) > 0) {
           await directInput.setInputFiles(localTempImage);
@@ -203,15 +203,15 @@ async function runBatch100Avatars() {
       }
 
       if (!uploadSuccess) {
-        throw new Error('Không thể mở hộp thoại chọn tệp ảnh của Facebook');
+        throw new Error('Could not open Facebook\'s image file picker dialog');
       }
 
-      // 8. Đợi modal xem trước & Bấm "Lưu" (Save)
+      // 8. Wait for the preview modal & click "Save"
       await tab.waitForTimeout(4000);
       const saveBtn = tab.locator('div[role="dialog"] div[role="button"]:has-text("Lưu"), div[role="dialog"] button:has-text("Lưu"), div[role="dialog"] div[role="button"]:has-text("Save")').first();
       if (await saveBtn.isVisible().catch(() => false)) {
         await saveBtn.click({ force: true });
-        // Chờ modal lưu hoàn thành và đóng lại
+        // Wait for the save modal to finish and close
         await tab.waitForSelector('div[role="dialog"] div[role="button"]:has-text("Lưu")', {
           state: 'hidden',
           timeout: 25000,
@@ -220,9 +220,9 @@ async function runBatch100Avatars() {
       }
 
       const elapsedSec = ((Date.now() - pageStartTime) / 1000).toFixed(1);
-      console.log(`[${i + 1}/${targetPages.length}] ✅ THÀNH CÔNG: Đã đổi Avatar cho "${pageName}" (${elapsedSec}s)`);
+      console.log(`[${i + 1}/${targetPages.length}] ✅ SUCCESS: changed the Avatar for "${pageName}" (${elapsedSec}s)`);
 
-      // Cập nhật Cache đĩa
+      // Update the disk cache
       avatarCache[pageId] = {
         pageId,
         pageName,
@@ -233,7 +233,7 @@ async function runBatch100Avatars() {
       };
       saveAvatarCache(avatarCache);
 
-      // Cập nhật file tiến độ
+      // Update the progress file
       progressState.completed++;
       progressState.successCount++;
       progressState.items.push({
@@ -249,7 +249,7 @@ async function runBatch100Avatars() {
 
     } catch (err) {
       const elapsedSec = ((Date.now() - pageStartTime) / 1000).toFixed(1);
-      console.warn(`[${i + 1}/${targetPages.length}] ⚠️ BỎ QUA DO LỖI: "${pageName}": ${err.message} (${elapsedSec}s)`);
+      console.warn(`[${i + 1}/${targetPages.length}] ⚠️ SKIPPED DUE TO ERROR: "${pageName}": ${err.message} (${elapsedSec}s)`);
 
       progressState.completed++;
       progressState.failCount++;
@@ -264,13 +264,13 @@ async function runBatch100Avatars() {
       });
       fs.writeFileSync(progressFile, JSON.stringify(progressState, null, 2));
     } finally {
-      // Xóa file ảnh tạm trên ổ cứng
+      // Delete the temp image file from disk
       if (localTempImage && fs.existsSync(localTempImage)) {
         fs.unlink(localTempImage, () => {});
       }
     }
 
-    // Nghỉ an toàn 3 giây giữa các Page để chống checkpoint
+    // Safe 3-second rest between Pages to avoid checkpoints
     if (i < targetPages.length - 1) {
       await new Promise((r) => setTimeout(r, 3500));
     }
@@ -280,14 +280,14 @@ async function runBatch100Avatars() {
 
   progressState.status = 'COMPLETED';
   progressState.finishedAt = new Date().toISOString();
-  progressState.totalDuration = `${((Date.now() - startTime) / 60000).toFixed(1)} phút`;
+  progressState.totalDuration = `${((Date.now() - startTime) / 60000).toFixed(1)} min`;
   fs.writeFileSync(progressFile, JSON.stringify(progressState, null, 2));
 
   console.log('\n================================================================');
-  console.log(`🏁 HOÀN THÀNH TIẾN TRÌNH CẬP NHẬT 100 PAGE!`);
-  console.log(`✅ Thành công: ${progressState.successCount}/${targetPages.length}`);
-  console.log(`⚠️ Lỗi / Bỏ qua: ${progressState.failCount}/${targetPages.length}`);
-  console.log(`⏱️ Tổng thời gian: ${progressState.totalDuration}`);
+  console.log(`🏁 FINISHED UPDATING 100 PAGES!`);
+  console.log(`✅ Success: ${progressState.successCount}/${targetPages.length}`);
+  console.log(`⚠️ Errors / Skipped: ${progressState.failCount}/${targetPages.length}`);
+  console.log(`⏱️ Total time: ${progressState.totalDuration}`);
   console.log('================================================================');
 }
 

@@ -1,6 +1,6 @@
 /**
  * migrate-json-to-mysql.js
- * Di chuyển toàn bộ dữ liệu từ các file JSON vào Database MySQL Workbench (viplike_radiant)
+ * Moves all data from the JSON files into the MySQL Workbench Database (viplike_radiant)
  */
 const fs = require('fs');
 const path = require('path');
@@ -9,16 +9,16 @@ const db = require('./db');
 const DATA_DIR = path.join(__dirname, 'data');
 
 async function migrateAll() {
-  console.log('🚀 Bắt đầu di chuyển toàn bộ dữ liệu JSON vào MySQL Workbench (viplike_radiant)...');
+  console.log('🚀 Starting to move all JSON data into MySQL Workbench (viplike_radiant)...');
   const pool = db.getPool();
 
-  // 1. DI CHUYỂN BUFF_QUEUE (82 bài trong hàng đợi)
+  // 1. MOVE BUFF_QUEUE (82 posts in the queue)
   const queueFile = path.join(DATA_DIR, 'buff_queue.json');
   if (fs.existsSync(queueFile)) {
     try {
       const qData = JSON.parse(fs.readFileSync(queueFile, 'utf8'));
       const items = qData.items || [];
-      console.log(`📦 Tìm thấy ${items.length} nhiệm vụ trong buff_queue.json...`);
+      console.log(`📦 Found ${items.length} tasks in buff_queue.json...`);
       let qCount = 0;
       for (const it of items) {
         const id = it.id || `task_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -68,19 +68,19 @@ async function migrateAll() {
         );
         qCount++;
       }
-      console.log(`✅ Đã nạp thành công ${qCount} dòng vào bảng MySQL 'buff_queue'!`);
+      console.log(`✅ Loaded ${qCount} rows into the MySQL 'buff_queue' table!`);
     } catch (err) {
-      console.error('❌ Lỗi di chuyển buff_queue:', err.message);
+      console.error('❌ Error moving buff_queue:', err.message);
     }
   }
 
-  // 2. DI CHUYỂN BUFF_HISTORY (79 bài trong lịch sử tương tác)
+  // 2. MOVE BUFF_HISTORY (79 posts in the engagement history)
   const historyFile = path.join(DATA_DIR, 'buff_history.json');
   if (fs.existsSync(historyFile)) {
     try {
       const hData = JSON.parse(fs.readFileSync(historyFile, 'utf8'));
       const entries = Object.entries(hData);
-      console.log(`📦 Tìm thấy ${entries.length} bản ghi trong buff_history.json...`);
+      console.log(`📦 Found ${entries.length} records in buff_history.json...`);
       let hCount = 0;
       for (const [url, item] of entries) {
         const targetUrl = item.url || item.normalizedUrl || url;
@@ -95,7 +95,7 @@ async function migrateAll() {
             1,
             targetUrl,
             'ALL_PAGES',
-            `Đã tương tác (${item.totalSuccess || 1} lượt)`,
+            `Engaged (${item.totalSuccess || 1} times)`,
             reaction,
             status,
             createdAt,
@@ -103,13 +103,13 @@ async function migrateAll() {
         );
         hCount++;
       }
-      console.log(`✅ Đã nạp thành công ${hCount} dòng vào bảng MySQL 'buff_history'!`);
+      console.log(`✅ Loaded ${hCount} rows into the MySQL 'buff_history' table!`);
     } catch (err) {
-      console.error('❌ Lỗi di chuyển buff_history:', err.message);
+      console.error('❌ Error moving buff_history:', err.message);
     }
   }
 
-  // 3. DI CHUYỂN CÁC FANPAGE CÒN THIẾU TỪ pages_cache.json VÀO facebook_page_accesses
+  // 3. MOVE MISSING FANPAGES FROM pages_cache.json INTO facebook_page_accesses
   const pagesFile = path.join(DATA_DIR, 'pages_cache.json');
   if (fs.existsSync(pagesFile)) {
     try {
@@ -121,7 +121,7 @@ async function migrateAll() {
         if (!val.pages || !Array.isArray(val.pages)) continue;
         const profileName = val.viaName || `Via ${viaUid}`;
 
-        // Lấy source_account_id từ social_accounts
+        // Get source_account_id from social_accounts
         const [saRows] = await pool.execute(
           'SELECT id FROM social_accounts WHERE platform_account_id = ? LIMIT 1',
           [viaUid]
@@ -137,7 +137,7 @@ async function migrateAll() {
             await pool.execute(
               `INSERT INTO facebook_page_accesses 
                (active, avatar_url, created_at, first_seen_at, last_scan_at, last_seen_at, last_verified_at, page_id, page_name, page_url, personal_profile_id, profile_name, updated_at, verification_message, verification_status, source_account_id, user_id)
-               VALUES (1, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Tự động đồng bộ từ hệ thống', 'VERIFIED', ?, 1)`,
+               VALUES (1, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Auto-synced from the system', 'VERIFIED', ?, 1)`,
               [
                 now,
                 now,
@@ -157,13 +157,13 @@ async function migrateAll() {
           }
         }
       }
-      console.log(`✅ Đã đồng bộ thêm ${insertedPages} Fanpage vào bảng MySQL 'facebook_page_accesses'!`);
+      console.log(`✅ Synced ${insertedPages} more Fanpages into the MySQL 'facebook_page_accesses' table!`);
     } catch (err) {
-      console.error('❌ Lỗi đồng bộ facebook_page_accesses:', err.message);
+      console.error('❌ Error syncing facebook_page_accesses:', err.message);
     }
   }
 
-  // 4. DI CHUYỂN USERS TỪ users.json VÀO users
+  // 4. MOVE USERS FROM users.json INTO users
   const usersFile = path.join(DATA_DIR, 'users.json');
   if (fs.existsSync(usersFile)) {
     try {
@@ -181,13 +181,13 @@ async function migrateAll() {
           uCount++;
         }
       }
-      console.log(`✅ Đã nạp ${uCount} tài khoản quản trị vào bảng MySQL 'users'!`);
+      console.log(`✅ Loaded ${uCount} admin accounts into the MySQL 'users' table!`);
     } catch (err) {
-      console.error('❌ Lỗi đồng bộ users:', err.message);
+      console.error('❌ Error syncing users:', err.message);
     }
   }
 
-  // 5. DI CHUYỂN SYSTEM_SETTINGS VÀO app_settings
+  // 5. MOVE SYSTEM_SETTINGS INTO app_settings
   const settingsFile = path.join(DATA_DIR, 'system_settings.json');
   if (fs.existsSync(settingsFile)) {
     try {
@@ -200,13 +200,13 @@ async function migrateAll() {
           [`system.${k}`, valStr]
         );
       }
-      console.log(`✅ Đã nạp toàn bộ cấu hình hệ thống vào bảng MySQL 'app_settings'!`);
+      console.log(`✅ Loaded all system settings into the MySQL 'app_settings' table!`);
     } catch (err) {
-      console.error('❌ Lỗi đồng bộ app_settings:', err.message);
+      console.error('❌ Error syncing app_settings:', err.message);
     }
   }
 
-  console.log('🎉 TOÀN BỘ DỮ LIỆU ĐÃ ĐƯỢC CHUYỂN VÀO MYSQL WORKBENCH THÀNH CÔNG 100%!');
+  console.log('🎉 ALL DATA WAS MOVED INTO MYSQL WORKBENCH 100% SUCCESSFULLY!');
   process.exit(0);
 }
 

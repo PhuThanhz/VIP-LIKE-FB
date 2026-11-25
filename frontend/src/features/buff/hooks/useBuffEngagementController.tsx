@@ -28,8 +28,8 @@ import { useBatchRunner } from './useBatchRunner';
 import { useAccountsAndPages } from './useAccountsAndPages';
 
 /**
- * Toàn bộ state, effect và handler của trang Like & Bình luận.
- * Trang `pages/BuffEngagement.tsx` chỉ còn lo phần giao diện; các tab con nhận `BuffController`.
+ * All state, effects and handlers of the Likes & Comments page.
+ * `pages/BuffEngagement.tsx` only handles the UI; child tabs receive a `BuffController`.
  */
 export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   const [searchParams] = useSearchParams();
@@ -51,6 +51,13 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   const [scannedPages, setScannedPages] = useState<FanpageItem[]>([]);
   const [actorMode, setActorMode] = useState<'VIAS' | 'FANPAGES'>('FANPAGES');
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
+  // Likes the user asked for vs Pages actually picked. When dead Vias leave fewer Pages than asked, the run's
+  // target used to shrink silently to the picked count, so history never showed the shortfall to top up later.
+  const [likeRequest, setLikeRequest] = useState<{ requested: number; picked: number } | null>(null);
+  const requestedLikes =
+    likeRequest && likeRequest.picked === selectedPageIds.length
+      ? Math.max(likeRequest.requested, selectedPageIds.length)
+      : selectedPageIds.length;
   const handleTogglePageId = useCallback((pageId: string) => {
     setSelectedPageIds((prev) =>
       prev.includes(pageId) ? prev.filter((id) => id !== pageId) : [...prev, pageId]
@@ -61,7 +68,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   const [likeFilter, setLikeFilter] = useState<'ALL' | 'UNLIKED' | 'LIKED'>('ALL');
   const [speedMode, setSpeedMode] = useState<SpeedModeKey>('FAST');
   const [delayMs, setDelayMs] = useState<number>(1800);
-  // "Tùy chỉnh" chỉ tồn tại ở giao diện: speedMode gửi backend giữ nguyên, người dùng tự chọn giãn cách
+  // "Custom" only exists in the UI: the speedMode sent to the backend is unchanged, the user picks the delay
   const [customSpeed, setCustomSpeed] = useState<boolean>(false);
   const [enableHumanBehavior, setEnableHumanBehavior] = useState<boolean>(true);
   const [fastSwitch, setFastSwitch] = useState<boolean>(true);
@@ -77,7 +84,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   const [aiCount, setAiCount] = useState<number>(10);
   const [avatarCacheMap, setAvatarCacheMap] = useState<Record<string, { pageId: string; name?: string; avatarUrl?: string; hasAvatar?: boolean }>>({});
 
-  // Tải trạng thái và URL Avatar của các Fanpage
+  // Load status and avatar URLs of the Fanpages
   useEffect(() => {
     api
       .get('/avatars/cached-status')
@@ -89,12 +96,12 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
       .catch(() => {});
   }, []);
 
-  // Nhận link bài viết tự động truyền từ Job Kinh Tế
+  // Receive a post link passed automatically from the Economy Job
   useEffect(() => {
     const urlParam = searchParams.get('url') || searchParams.get('targetUrl');
     if (urlParam) {
       setTargetPostUrl(urlParam);
-      message.info(`Đã nạp link bài viết từ Job Kinh Tế: ${urlParam}`);
+      message.info(`Loaded post link from the Economy Job: ${urlParam}`);
     }
   }, [searchParams]);
 
@@ -109,7 +116,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     details: [],
   });
 
-  // Thông tin bài viết và cấu hình đang chạy trực tiếp (giúp giải phóng form Tạo mới để nhập link khác)
+  // Post info and config of the live run (frees the New form so another link can be entered)
   const [runningTargetInfo, setRunningTargetInfo] = useState<{
     url: string;
     reaction: string;
@@ -131,7 +138,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     });
   }, []);
 
-  // Đồng hồ cho lượt chạy trực tiếp: thời điểm bắt đầu/kết thúc và nhịp cập nhật mỗi giây
+  // Clock for the live run: start/end times and a once-per-second tick
   const [runTiming, setRunTiming] = useState<{ start: number | null; end: number | null }>({ start: null, end: null });
   useEffect(() => {
     const status = autoBuffProgress.status;
@@ -149,7 +156,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   }, [autoBuffProgress.status, autoBuffProgress.details]);
 
 
-  // Khôi phục phiên Buff trực tiếp hoặc tác vụ Hàng đợi đang chạy ngầm nếu người dùng F5 hoặc mở trang
+  // Restore a live Buff session or a Queue task running in the background if the user reloads or opens the page
   useEffect(() => {
     let pollTimer: any = null;
     let idleCheckTimer: any = null;
@@ -180,7 +187,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
             alreadyLiked: session.alreadyLiked || 0,
             percent: session.percent || 0,
             status: 'RUNNING',
-            currentRunningPageName: session.currentRunningPageName || 'Đang thực thi...',
+            currentRunningPageName: session.currentRunningPageName || 'Running...',
             details: session.details || [],
             logs: session.logs || [],
             autoRefilled: session.autoRefilled,
@@ -231,19 +238,19 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
                   pollTimer = null;
                   if (live.status === 'DONE') {
                     message.success({
-                      content: `🎉 Tác vụ buff ngầm đã hoàn tất: ${live.success}/${live.total} thành công!`,
+                      content: `🎉 Background buff task finished: ${live.success}/${live.total} successful!`,
                       key: 'restore-buff-session',
                       duration: 5,
                     });
                   } else if (live.status === 'STOPPED') {
                     message.warning({
-                      content: 'Đã dừng tác vụ buff ngầm theo yêu cầu.',
+                      content: 'Background buff task stopped as requested.',
                       key: 'restore-buff-session',
                     });
                   }
                 }
               } catch (err) {
-                console.error('Lỗi kiểm tra tiến trình:', err);
+                console.error('Failed to check progress:', err);
               }
             }, 1200);
           }
@@ -280,12 +287,12 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
           });
         }
       } catch (e) {
-        // bỏ qua nếu backend không phản hồi
+        // ignore if the backend doesn't respond
       }
     };
 
     restoreActiveSession();
-    // Tự động kiểm tra mỗi 2.5 giây khi không có pollTimer để bắt kịp bất kỳ tác vụ Hàng đợi / Săn bài / Tiếp tục chạy
+    // Auto-check every 2.5 seconds when there's no pollTimer, to catch any Queue / Post Hunter / Resume task
     idleCheckTimer = setInterval(() => {
       if (!pollTimer) {
         restoreActiveSession();
@@ -309,10 +316,10 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     status: 'IDLE',
   });
 
-  // Chế độ Buff: 1 Link đơn lẻ hoặc Nhiều bài viết hàng loạt
+  // Buff mode: 1 single link or many posts in bulk
   const [buffMode, setBuffMode] = useState<'SINGLE' | 'BATCH'>('SINGLE');
 
-  // Chế độ tương tác: Thả Cảm xúc, Viết Bình luận, hoặc Cả Hai
+  // Engagement mode: React, Comment, or Both
   const [engagementMode, setEngagementMode] = useState<'LIKE_AND_COMMENT' | 'LIKE_ONLY' | 'COMMENT_ONLY'>('LIKE_AND_COMMENT');
   const [commentListText, setCommentListText] = useState<string>('');
   const [inlineCommentEditorOpen, setInlineCommentEditorOpen] = useState<boolean>(false);
@@ -321,7 +328,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     [commentListText]
   );
 
-  // Buff Share: Tự động chia sẻ bài viết lên tường Fanpage
+  // Buff Share: automatically share the post to the Fanpage wall
   const [enableShare, setEnableShare] = useState<boolean>(false);
   const [seedingPresets, setSeedingPresets] = useState<{ id: string; name: string; badge?: string; comments: string[] }[]>([]);
 
@@ -335,7 +342,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
       .catch(() => {});
   }, []);
 
-  // Danh sách ID các Fanpage đã từng like link bài viết này trong hệ thống backend (bao gồm link /share/ cùng bài)
+  // IDs of Fanpages that already liked this post link in the backend (including /share/ links to the same post)
   const [interactedPageIds, setInteractedPageIds] = useState<Set<string>>(new Set());
   const [interactedCanonicalUrl, setInteractedCanonicalUrl] = useState<string>('');
   const [interactedPagesLoading, setInteractedPagesLoading] = useState<boolean>(false);
@@ -391,7 +398,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   const [queueReaction, setQueueReaction] = useState<string>('RANDOM_POSITIVE');
   const [queueLoading, setQueueLoading] = useState<boolean>(false);
 
-  // Tab Tạo mới: chạy ngay hoặc đưa vào hàng đợi
+  // New tab: run now or add to the queue
   const [runMode, setRunMode] = useState<'NOW' | 'QUEUE'>('NOW');
   const [queueStartAfter, setQueueStartAfter] = useState<number | 'AT'>(0);
   const [queueStartAt, setQueueStartAt] = useState<string>('');
@@ -401,29 +408,29 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   const handleEnqueueFromForm = async () => {
     const urls = buffMode === 'BATCH' ? parsedBatchLinks : [targetPostUrl.trim()].filter(Boolean);
     if (urls.length === 0) {
-      message.warning('Vui lòng dán link bài viết!');
+      message.warning('Please paste a post link!');
       return;
     }
     if (selectedPageIds.length === 0) {
-      message.warning('Vui lòng chọn tài khoản thực hiện!');
+      message.warning('Please choose the acting account!');
       return;
     }
 
     let delayMinutes = typeof queueStartAfter === 'number' ? queueStartAfter : 0;
     if (queueStartAfter === 'AT') {
       if (!queueStartAt) {
-        message.warning('Vui lòng chọn giờ bắt đầu!');
+        message.warning('Please choose a start time!');
         return;
       }
       const [hh, mm] = queueStartAt.split(':').map(Number);
       const target = new Date();
       target.setHours(hh, mm, 0, 0);
-      if (target.getTime() <= Date.now()) target.setDate(target.getDate() + 1); // giờ đã qua → hẹn ngày mai
+      if (target.getTime() <= Date.now()) target.setDate(target.getDate() + 1); // time already passed → schedule for tomorrow
       delayMinutes = Math.max(0, Math.round((target.getTime() - Date.now()) / 60000));
     }
 
     const payload = {
-      targetLikes: selectedPageIds.length,
+      targetLikes: requestedLikes,
       reactionType: selectedReaction,
       enableLike: engagementMode !== 'COMMENT_ONLY',
       enableComment: engagementMode !== 'LIKE_ONLY',
@@ -445,29 +452,29 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
           source: 'MANUAL',
         });
         if (res.data?.skipped) {
-          message.info(res.data.message || 'Bài viết đã từng chạy trước đó.');
+          message.info(res.data.message || 'This post has already been run.');
           return;
         }
         if (res.data?.alreadyQueued) {
-          message.info(res.data.message || 'Bài viết đã có trong hàng đợi.');
+          message.info(res.data.message || 'This post is already in the queue.');
           return;
         }
-        message.success('Đã thêm vào hàng đợi');
+        message.success('Added to the queue');
       } else {
         const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/batch-add`, {
           ...payload,
           urls,
           staggerMinutes: queueStagger,
         });
-        message.success(`Đã thêm ${res.data?.addedCount ?? 0}/${res.data?.totalReceived ?? urls.length} bài vào hàng đợi`);
-        if (res.data?.skippedCount > 0) message.info(`Bỏ qua ${res.data.skippedCount} bài đã chạy trước đó.`);
+        message.success(`Added ${res.data?.addedCount ?? 0}/${res.data?.totalReceived ?? urls.length} posts to the queue`);
+        if (res.data?.skippedCount > 0) message.info(`Skipped ${res.data.skippedCount} posts that were already run.`);
       }
       if (buffMode === 'BATCH') setBatchLinksText('');
       else setTargetPostUrl('');
       fetchBuffQueue();
       setActiveTabKey('buff-queue');
     } catch (err: any) {
-      message.error(err.response?.data?.error || err.message || 'Không thể thêm vào hàng đợi');
+      message.error(err.response?.data?.error || err.message || 'Could not add to the queue');
     } finally {
       setIsEnqueueing(false);
     }
@@ -475,7 +482,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
 
   const handleAddQueueTask = async () => {
     if (!queueUrlInput.trim()) {
-      message.warning('Vui lòng nhập link bài viết Facebook!');
+      message.warning('Please enter a Facebook post link!');
       return;
     }
     setQueueLoading(true);
@@ -492,12 +499,12 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
         if (res.data.skipped) {
           message.warning(res.data.message);
         } else {
-          message.success('Đã nạp bài viết vào hàng đợi tự động thành công!');
+          message.success('Post added to the auto queue!');
           setQueueUrlInput('');
           fetchBuffQueue();
         }
       } else {
-        message.error(res.data?.error || 'Lỗi thêm vào hàng đợi');
+        message.error(res.data?.error || 'Error adding to the queue');
       }
     } catch (err: any) {
       message.error(err.response?.data?.error || err.message);
@@ -510,7 +517,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     try {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/run-now/${id}`);
       if (res.data?.success) {
-        message.success('Đã kích hoạt task chạy ngay!');
+        message.success('Task triggered to run now!');
         fetchBuffQueue();
       }
     } catch (err: any) {
@@ -520,16 +527,16 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
 
   const handleStopQueueTask = (id: string) => {
     modal.confirm({
-      title: 'Dừng riêng bài này?',
-      content: 'Worker sẽ dừng chạy tiếp bài này sau lượt Page hiện tại (các bài khác trong hàng đợi vẫn chạy bình thường).',
-      okText: 'Dừng bài này',
-      cancelText: 'Huỷ',
+      title: 'Stop just this post?',
+      content: 'The worker will stop running this post after the current Page (other posts in the queue keep running normally).',
+      okText: 'Stop this post',
+      cancelText: 'Cancel',
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/stop/${id}`);
           if (res.data?.success) {
-            message.success(res.data.message || 'Đã gửi lệnh dừng bài.');
+            message.success(res.data.message || 'Stop command sent for this post.');
             fetchBuffQueue();
           }
         } catch (err: any) {
@@ -541,15 +548,15 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
 
   const handleRemoveQueueTask = (id: string) => {
     modal.confirm({
-      title: 'Xoá task này khỏi hàng đợi?',
-      okText: 'Xoá',
-      cancelText: 'Huỷ',
+      title: 'Remove this task from the queue?',
+      okText: 'Delete',
+      cancelText: 'Cancel',
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           const res = await axios.delete(`${WORKER_BASE_URL}/api/buff-queue/remove/${id}`);
           if (res.data?.success) {
-            message.success('Đã xoá task khỏi hàng đợi.');
+            message.success('Task removed from the queue.');
             fetchBuffQueue();
           }
         } catch (err: any) {
@@ -563,7 +570,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     try {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/clear-completed`);
       if (res.data?.success) {
-        message.success(`Đã dọn dẹp ${res.data.cleared} bài viết hoàn tất!`);
+        message.success(`Cleaned up ${res.data.cleared} completed posts!`);
         fetchBuffQueue();
       }
     } catch (err: any) {
@@ -573,16 +580,16 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
 
   const handleClearAllQueue = () => {
     modal.confirm({
-      title: 'Xoá toàn bộ hàng đợi?',
-      content: 'Thao tác này sẽ xoá sạch tất cả các bài viết trong hàng đợi.',
-      okText: 'Xoá tất cả',
-      cancelText: 'Huỷ',
+      title: 'Clear the entire queue?',
+      content: 'This will remove every post in the queue.',
+      okText: 'Delete all',
+      cancelText: 'Cancel',
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/clear-all`);
           if (res.data?.success) {
-            message.success('Đã xoá sạch toàn bộ hàng đợi!');
+            message.success('The entire queue was cleared!');
             fetchBuffQueue();
           }
         } catch (err: any) {
@@ -596,7 +603,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     try {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/retry/${id}`);
       if (res.data?.success) {
-        message.success('Đã đưa bài viết vào hàng đợi chạy lại!');
+        message.success('Post re-queued to run again!');
         fetchBuffQueue();
       }
     } catch (err: any) {
@@ -623,7 +630,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   const [savingSettings, setSavingSettings] = useState<boolean>(false);
   const [testingTelegram, setTestingTelegram] = useState<boolean>(false);
 
-  // Via có cookie hết hạn hoặc bị checkpoint (lấy từ dữ liệu tổng quan, tự làm mới mỗi 15 giây)
+  // Vias with expired cookies or a checkpoint (from the overview data, auto-refreshed every 15 seconds)
   const deadViaList = useMemo<{ uid: string; viaName?: string; tokenStatus: string }[]>(
     () =>
       (bmOverview?.vias || []).filter(
@@ -635,18 +642,18 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   useEffect(() => {
     if (!bmOverview) return;
     const current = new Set(deadViaList.map((v) => v.uid));
-    // Lần tải đầu chỉ ghi nhận, không bật thông báo; sau đó báo khi có Via mới chuyển sang lỗi
+    // The first load only records the state without notifying; afterwards notify when a Via newly turns bad
     if (notifiedDeadViaRef.current) {
       const newlyDead = deadViaList.filter((v) => !notifiedDeadViaRef.current!.has(v.uid));
       if (newlyDead.length > 0) {
         notification.warning({
           key: 'via-dead',
-          message: newlyDead.length === 1 ? 'Via cần cập nhật Cookie' : `${newlyDead.length} Via cần cập nhật Cookie`,
+          message: newlyDead.length === 1 ? 'A Via needs a Cookie update' : `${newlyDead.length} Vias need a Cookie update`,
           description: (
             <div className="space-y-0.5">
               {newlyDead.map((v) => (
                 <div key={v.uid}>
-                  {v.viaName || v.uid} · {v.tokenStatus === 'CHECKPOINT' ? 'bị checkpoint' : 'cookie hết hạn'}
+                  {v.viaName || v.uid} · {v.tokenStatus === 'CHECKPOINT' ? 'checkpointed' : 'cookie expired'}
                 </div>
               ))}
             </div>
@@ -664,12 +671,12 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     try {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-settings`, systemSettings);
       if (res.data?.success) {
-        message.success('Đã lưu cấu hình Hệ thống & Telegram Ops Bot thành công!');
+        message.success('System & Telegram Ops Bot settings saved!');
         setIsSettingsModalOpen(false);
         fetchBmOverview();
         fetchSettings();
       } else {
-        message.error(res.data?.error || 'Lỗi lưu cấu hình');
+        message.error(res.data?.error || 'Failed to save settings');
       }
     } catch (e: any) {
       message.error(e.message);
@@ -680,16 +687,16 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
 
   const handleTestTelegram = async () => {
     setTestingTelegram(true);
-    message.loading({ content: 'Đang gửi tin nhắn thử nghiệm tới Telegram...', key: 'testTele' });
+    message.loading({ content: 'Sending a test message to Telegram...', key: 'testTele' });
     try {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-settings/test-telegram`, {
         botToken: systemSettings.telegramBotToken || undefined,
         chatId: systemSettings.telegramChatId || undefined,
       });
       if (res.data?.success) {
-        message.success({ content: 'Gửi tin nhắn Telegram thành công! Hãy kiểm tra điện thoại của bạn.', key: 'testTele', duration: 4 });
+        message.success({ content: 'Telegram message sent! Check your phone.', key: 'testTele', duration: 4 });
       } else {
-        message.error({ content: res.data?.error || 'Gửi thất bại', key: 'testTele' });
+        message.error({ content: res.data?.error || 'Send failed', key: 'testTele' });
       }
     } catch (e: any) {
       message.error({ content: e.response?.data?.error || e.message, key: 'testTele' });
@@ -701,13 +708,13 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   const handleEmergencyStop = async () => {
     try {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/emergency-stop`, {
-        reason: 'Quản trị viên kích hoạt Dừng Khẩn Cấp từ Command Bar',
+        reason: 'Administrator triggered Emergency Stop from the Command Bar',
       });
       if (res.data?.success) {
         message.warning(
           res.data.jobStillFinishing
-            ? 'Đã bật dừng khẩn cấp. Job đang chạy sẽ dừng sau Page hiện tại.'
-            : 'Đã bật dừng khẩn cấp. Hàng đợi và Săn bài tạm ngưng.'
+            ? 'Emergency stop enabled. The running job will stop after the current Page.'
+            : 'Emergency stop enabled. Queue and Post Hunter are paused.'
         );
         fetchBmOverview();
       }
@@ -720,7 +727,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     try {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-queue/resume`);
       if (res.data?.success) {
-        message.success('Đã khôi phục hoạt động bình thường của hệ thống!');
+        message.success('System restored to normal operation!');
         fetchBmOverview();
       }
     } catch (e: any) {
@@ -730,21 +737,21 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
 
   const handleRunViaHealthCheck = async () => {
     setCheckingViaHealth(true);
-    message.loading({ content: 'Đang kiểm tra kết nối và tình trạng từng Via trên Facebook...', key: 'viaHealth' });
+    message.loading({ content: 'Checking the connection and status of each Via on Facebook...', key: 'viaHealth' });
     try {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-vias/health-check`);
       if (res.data?.success) {
         setViaHealthResults(res.data.vias || []);
         setIsHealthModalOpen(true);
         message.success({
-          content: `Kiểm tra hoàn tất: ${res.data.liveCount}/${res.data.total} Via đang HOẠT ĐỘNG TỐT (LIVE)!`,
+          content: `Check complete: ${res.data.liveCount}/${res.data.total} Vias are HEALTHY (LIVE)!`,
           key: 'viaHealth',
           duration: 4,
         });
         fetchBmOverview();
         refetchAccounts();
       } else {
-        message.error({ content: res.data?.error || 'Lỗi kiểm tra Via', key: 'viaHealth' });
+        message.error({ content: res.data?.error || 'Via check failed', key: 'viaHealth' });
       }
     } catch (err: any) {
       message.error({ content: err.message, key: 'viaHealth' });
@@ -760,16 +767,16 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
 
   const handleDeleteMonitor = (id: string) => {
     modal.confirm({
-      title: 'Xoá mục tiêu theo dõi này?',
-      content: 'Hệ thống sẽ ngừng tự quét bài mới từ mục tiêu này.',
-      okText: 'Xoá',
-      cancelText: 'Huỷ',
+      title: 'Delete this monitor?',
+      content: 'The system will stop scanning this target for new posts.',
+      okText: 'Delete',
+      cancelText: 'Cancel',
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
           const res = await axios.delete(`${WORKER_BASE_URL}/api/buff-monitors/${id}`);
           if (res.data?.success) {
-            message.success('Đã xoá mục tiêu theo dõi.');
+            message.success('Monitor deleted.');
             fetchBuffMonitors();
           }
         } catch (err: any) {
@@ -788,17 +795,17 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
           const cancelled = Number(res.data.cancelledTasks || 0);
           message.success(
             cancelled > 0
-              ? `Đã tạm dừng Săn bài tự động và hủy ${cancelled} tác vụ Post Hunter!`
-              : 'Đã tạm dừng tính năng Săn bài tự động!'
+              ? `Post Hunter paused and ${cancelled} Post Hunter tasks cancelled!`
+              : 'Post Hunter paused!'
           );
         } else {
-          message.success('Đã bật lại tính năng Săn bài tự động!');
+          message.success('Post Hunter re-enabled!');
         }
         fetchBuffMonitors();
         fetchBuffQueue();
         fetchBmOverview();
       } else {
-        message.error(res.data?.error || 'Không cập nhật được trạng thái Săn bài tự động');
+        message.error(res.data?.error || 'Could not update the Post Hunter status');
       }
     } catch (err: any) {
       message.error(err.response?.data?.error || err.message);
@@ -809,7 +816,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     try {
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-monitors/${id}/toggle`);
       if (res.data?.success) {
-        message.success(res.data.monitor?.status === 'ACTIVE' ? 'Đã bật theo dõi định kỳ!' : 'Đã tạm dừng theo dõi!');
+        message.success(res.data.monitor?.status === 'ACTIVE' ? 'Periodic monitoring enabled!' : 'Monitoring paused!');
         fetchBuffMonitors();
       }
     } catch (err: any) {
@@ -819,20 +826,20 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
 
   const handleScanNowMonitor = async (id: string) => {
     try {
-      message.loading({ content: 'Đang quét bài viết mới từ mục tiêu...', key: 'scanMon' });
+      message.loading({ content: 'Scanning the target for new posts...', key: 'scanMon' });
       const res = await axios.post(`${WORKER_BASE_URL}/api/buff-monitors/${id}/scan-now`);
       if (res.data?.success) {
         message.success({
           content: res.data.baseline
-            ? `Lần quét đầu: đã ghi nhận ${res.data.postsFound} bài hiện có làm mốc. Từ giờ chỉ buff bài đăng sau thời điểm này.`
-            : `Quét hoàn tất: Phát hiện ${res.data.postsFound} bài viết, đã nạp ${res.data.newPostsEnqueued} bài mới vào hàng đợi!`,
+            ? `First scan: recorded ${res.data.postsFound} existing posts as the baseline. From now on only posts published after this point are buffed.`
+            : `Scan complete: found ${res.data.postsFound} posts, queued ${res.data.newPostsEnqueued} new ones!`,
           key: 'scanMon',
           duration: 4,
         });
         fetchBuffMonitors();
         fetchBuffQueue();
       } else {
-        message.error({ content: res.data?.error || 'Lỗi quét mục tiêu', key: 'scanMon' });
+        message.error({ content: res.data?.error || 'Target scan failed', key: 'scanMon' });
       }
     } catch (err: any) {
       message.error({ content: err.response?.data?.error || err.message, key: 'scanMon' });
@@ -844,10 +851,10 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   const [aiStudioModalOpen, setAiStudioModalOpen] = useState(false);
   const [selectedNiche, setSelectedNiche] = useState<string>('GENERAL');
 
-  // Gọi Gemini AI tạo bình luận tự nhiên theo bài viết
+  // Call Gemini AI to generate natural comments for the post
   const handleGenerateAiComments = async () => {
     if (!targetPostUrl.trim() && !aiPostPrompt.trim()) {
-      message.warning('Vui lòng dán link bài viết hoặc nhập chủ đề bài viết để AI phân tích tạo bình luận!');
+      message.warning('Please paste a post link or enter the post topic so the AI can generate comments!');
       return;
     }
     setIsAiGeneratingComments(true);
@@ -864,18 +871,18 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
         if (engagementMode === 'LIKE_ONLY') {
           setEngagementMode('LIKE_AND_COMMENT');
         }
-        message.success(`Gemini AI đã sinh ${res.data.comments.length} bình luận tự nhiên theo ngữ cảnh bài viết!`);
+        message.success(`Gemini AI generated ${res.data.comments.length} natural comments for the post!`);
       } else {
-        message.warning('Không nhận được bình luận từ AI, vui lòng thử lại.');
+        message.warning('No comments received from the AI, please try again.');
       }
     } catch (err: any) {
-      message.error(`Lỗi tạo bình luận AI: ${err.response?.data?.error || err.message}`);
+      message.error(`AI comment generation error: ${err.response?.data?.error || err.message}`);
     } finally {
       setIsAiGeneratingComments(false);
     }
   };
 
-  // Cảnh báo từ khóa dễ bị bắt spam trong Group (test, bot, tool, tự động...)
+  // Warn about keywords likely to be flagged as spam in Groups (test, bot, tool, "tự động"...)
   const detectedSpamKeywords = useMemo(() => {
     if (engagementMode === 'LIKE_ONLY' || !commentListText.trim()) return [];
     const lower = commentListText.toLowerCase();
@@ -883,11 +890,11 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     return badWords.filter((w) => lower.includes(w));
   }, [engagementMode, commentListText]);
 
-  // Tự động chuyển giãn cách an toàn khi bật bình luận
+  // Automatically switch to a safe delay when comments are on
   useEffect(() => {
     if (engagementMode !== 'LIKE_ONLY') {
       if (delayMs < 12000) {
-        setDelayMs(12000); // 12 giây an toàn khi có bình luận
+        setDelayMs(12000); // 12 seconds is safe with comments
       }
     } else if (delayMs >= 12000) {
       setDelayMs(SPEED_PRESETS.find((p) => p.key === speedMode)?.delayMs ?? 2200);
@@ -926,12 +933,12 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     async (silent = false) => {
       try {
         if (!silent) setBuffLogsLoading(true);
-        // Tối ưu hóa siêu tốc: chỉ nạp summary không nạp mảng JSON details nặng nề
+        // Speed optimization: load only the summary, not the heavy JSON details array
         const res = await api.get('/buff-logs', { params: { limit: 500, summary: 'true' } });
         const fetched: BuffLogEntry[] = Array.isArray(res.data?.logs) ? res.data.logs : [];
         setBuffLogs((prev) => mergeBuffLogs(fetched, prev));
       } catch (err: any) {
-        if (!silent) message.error(`Không tải được lịch sử: ${err.response?.data?.error || err.message}`);
+        if (!silent) message.error(`Could not load history: ${err.response?.data?.error || err.message}`);
       } finally {
         if (!silent) setBuffLogsLoading(false);
       }
@@ -943,19 +950,19 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     let cancelled = false;
     (async () => {
       try {
-        // Chuyển lịch sử cũ trong localStorage lên MySQL (ghi đè theo id nên chạy lại không bị trùng)
+        // Move old localStorage history to MySQL (upsert by id, so re-running doesn't duplicate)
         const legacy = readLegacyBuffLogs();
         if (legacy.length > 0) {
           await api.post('/buff-logs', { logs: legacy });
           localStorage.removeItem(LEGACY_BUFF_LOGS_STORAGE_KEY);
-          if (!cancelled) message.success(`Đã đồng bộ ${legacy.length} lượt lịch sử cũ lên hệ thống`);
+          if (!cancelled) message.success(`Synced ${legacy.length} old history entries to the system`);
         }
         const res = await api.get('/buff-logs', { params: { limit: 500, summary: 'true' } });
         const fetched: BuffLogEntry[] = Array.isArray(res.data?.logs) ? res.data.logs : [];
-        // Giữ log vừa chạy xong trong lúc đang tải
+        // Keep the just-finished log while loading
         if (!cancelled) setBuffLogs((prev) => mergeBuffLogs(fetched, prev));
       } catch (err: any) {
-        if (!cancelled) message.error(`Không tải được lịch sử: ${err.response?.data?.error || err.message}`);
+        if (!cancelled) message.error(`Could not load history: ${err.response?.data?.error || err.message}`);
       } finally {
         if (!cancelled) setBuffLogsLoading(false);
       }
@@ -965,7 +972,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     };
   }, [message]);
 
-  // Tự động làm mới khi người dùng mở tab Lịch sử
+  // Auto-refresh when the user opens the History tab
   useEffect(() => {
     if (activeTabKey === 'buff-history') {
       reloadBuffLogs(true);
@@ -976,7 +983,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     (log: BuffLogEntry) => {
       setBuffLogs((prev) => [log, ...prev]);
       api.post('/buff-logs', { log }).catch((err) => {
-        message.warning(`Chưa lưu được lịch sử lên máy chủ: ${err.response?.data?.error || err.message}`);
+        message.warning(`History not saved to the server yet: ${err.response?.data?.error || err.message}`);
       });
     },
     [message]
@@ -984,7 +991,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
 
 
 
-  // Đồng bộ mở modal Cài đặt từ Sidebar
+  // Open the Settings modal from the Sidebar
   useEffect(() => {
     if (props.isExternalSettingsOpen) {
       fetchSettings();
@@ -997,7 +1004,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
 
   const [selectedLogDetail, setSelectedLogDetail] = useState<BuffLogEntry | null>(null);
 
-  // Tính toán các Fanpage đã từng like link bài viết này trong lịch sử (chuẩn hoá URL để khớp cả link có / cuối hoặc tracking params)
+  // Fanpages that already liked this post link in history (URL normalized to match trailing / or tracking params)
   const alreadyLikedPagesForUrl = useMemo(() => {
     if (!targetPostUrl.trim()) return [];
     const normalizedTarget = normalizeFbPostUrlClient(targetPostUrl);
@@ -1024,7 +1031,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     return Array.from(pageMap.values());
   }, [targetPostUrl, interactedCanonicalUrl, buffLogs]);
 
-  // Batch Buff State (Chạy like hàng loạt nhiều bài viết)
+  // Batch Buff State (bulk likes across many posts)
   const [batchLinksText, setBatchLinksText] = useState<string>(() => {
     return [
       'https://www.facebook.com/vietnameconomynews/posts/pfbid0CKLsordAmys5a5ewKRjKZgutBg9rJkoX5pnw4yzRMqtCq4PEVEV8HFfN2fQHQkg5l',
@@ -1035,7 +1042,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     ].join('\n');
   });
   const [batchLikesPerOrder, setBatchLikesPerOrder] = useState<number>(100);
-  const [batchLinkConcurrency, setBatchLinkConcurrency] = useState<number>(2); // 1: Tuần tự, 2: Song song 2 link cùng lúc
+  const [batchLinkConcurrency, setBatchLinkConcurrency] = useState<number>(2); // 1: sequential, 2: 2 links in parallel
   const batchWaitSeconds = 2;
   const [batchOrders, setBatchOrders] = useState<BatchOrder[]>([]);
   const [pageDisplayLimit, setPageDisplayLimit] = useState<number>(60);
@@ -1047,7 +1054,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   const batchStreamAbortControllersRef = useRef<Set<AbortController>>(new Set());
 
 
-  // Rời trang thì huỷ mọi stream đang chạy (worker sẽ dừng sau page hiện tại)
+  // Leaving the page cancels every running stream (the worker stops after the current page)
   useEffect(() => {
     return () => {
       batchAbortRef.current = true;
@@ -1084,6 +1091,8 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     alreadyLikedPageIdsSet,
     combinedAlreadyLikedIds,
     unlikedScannedPages,
+    deadViaSummary,
+    usableUnlikedCount,
     filteredPages,
     expiredPagesSelectedCount,
     handleReplaceExpiredPagesWithLiveOnes,
@@ -1117,6 +1126,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     pageSearchQuery,
     autoSkipAlreadyLiked,
     autoFailoverLiveVia,
+    setLikeRequest,
   });
   const {
     autoBuffMutation,
@@ -1161,6 +1171,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     currentViaAccount,
     buffAbortRef,
     autoFailoverLiveVia,
+    requestedLikes,
     alreadyLikedPagesForUrl,
     delayMs,
     enableShare,
@@ -1254,7 +1265,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     setActorMode('FANPAGES');
     setSelectedAccountId('ALL_VIAS');
     setSelectedPageIds(scannedPages.map((p) => p.id));
-    message.success(`Đã áp dụng: 1 link · Chỉ like 👍 · Chọn tất cả ${scannedPages.length} Page của mọi Via`);
+    message.success(`Applied: 1 link · Like only 👍 · All ${scannedPages.length} Pages of every Via selected`);
   };
 
   const handleQuickPresetAiSeeding = async () => {
@@ -1264,12 +1275,12 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     setActorMode('FANPAGES');
     setSelectedAccountId('ALL_VIAS');
     setSelectedPageIds(scannedPages.map((p) => p.id));
-    const applied = `Đã áp dụng: 1 link · Like + bình luận · Trộn cảm xúc tự nhiên · ${scannedPages.length} Page`;
+    const applied = `Applied: 1 link · Like + comment · Natural reaction mix · ${scannedPages.length} Pages`;
     if (targetPostUrl.trim()) {
-      message.success(`${applied}. AI đang viết bình luận theo nội dung bài...`);
+      message.success(`${applied}. AI is writing comments based on the post...`);
       handleGenerateAiComments();
     } else {
-      message.info(`${applied}. Dán link bài viết để AI đọc nội dung và viết bình luận.`);
+      message.info(`${applied}. Paste a post link so the AI can read it and write comments.`);
     }
   };
 
@@ -1277,10 +1288,10 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     setBuffMode('SINGLE');
     setActorMode('VIAS');
     setSelectedAccountId('ALL_VIAS');
-    message.success(`Đã áp dụng: 1 link · Dùng ${fbAccounts.length} nick cá nhân thay cho Page (giữ nguyên hình thức và cảm xúc)`);
+    message.success(`Applied: 1 link · Using ${fbAccounts.length} personal accounts instead of Pages (same mode and reactions)`);
   };
 
-  // Kiểm tra xem hiện tại có bất kỳ tác vụ buff nào đang chạy không (0 bài thì làm mờ nút)
+  // Check whether any buff task is currently running (dim the button when there are 0)
   const isAnyBuffRunning = Boolean(
     autoBuffMutation.isPending ||
     autoBuffProgress?.status === 'RUNNING' ||
@@ -1292,7 +1303,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
   const isBuffTab = ['buff-like', 'buff-running', 'buff-queue', 'buff-history', 'buff-hunter'].includes(activeTabKey);
 
   const emergencyStopButton = (
-    <Tooltip title="Ngắt ngay mọi tiến trình đang chạy để bảo vệ tài khoản">
+    <Tooltip title="Immediately stop every running process to protect your accounts">
       <Button
         danger
         type="primary"
@@ -1300,7 +1311,7 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
         onClick={handleEmergencyStop}
         className="bg-rose-600 hover:bg-rose-500 text-white font-bold animate-pulse shadow-lg shadow-rose-600/40"
       >
-        Dừng khẩn cấp
+        Emergency stop
       </Button>
     </Tooltip>
   );
@@ -1475,6 +1486,8 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
     selectedPageIdsSet,
     combinedAlreadyLikedIds,
     unlikedScannedPages,
+    deadViaSummary,
+    usableUnlikedCount,
     filteredPages,
     expiredPagesSelectedCount,
     handleReplaceExpiredPagesWithLiveOnes,

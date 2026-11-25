@@ -39,8 +39,8 @@ export const clearSession = () => {
 };
 
 /**
- * Chuẩn hoá phản hồi /auth/login của backend.
- * Backend trả cả `{ token, user }` lẫn `{ data: { token, ...user } }` nên đọc cả hai dạng.
+ * Normalizes the backend's /auth/login response.
+ * The backend returns both `{ token, user }` and `{ data: { token, ...user } }`, so read both shapes.
  */
 export const parseAuthResponse = (body: any): { token: string; user: CurrentUser } | null => {
   const data = body?.data || body;

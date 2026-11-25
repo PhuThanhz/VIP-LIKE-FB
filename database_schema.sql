@@ -1,12 +1,12 @@
 -- =============================================================================
 -- VIPLIKE RADIANT v2.0 - DATABASE SCHEMA CHO MYSQL WORKBENCH
--- Khởi tạo Database và Bảng lưu trữ Dàn Via, Fanpage, Lịch sử, Hàng Đợi & Users
+-- Create the Database and tables storing Vias, Fanpages, History, Queue & Users
 -- =============================================================================
 
 CREATE DATABASE IF NOT EXISTS `autopost_saas` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE `autopost_saas`;
 
--- 1. BẢNG USERS (HỆ THỐNG ĐĂNG NHẬP / TÀI KHOẢN QUẢN TRỊ)
+-- 1. USERS TABLE (LOGIN SYSTEM / ADMIN ACCOUNTS)
 CREATE TABLE IF NOT EXISTS `users` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `username` VARCHAR(64) NOT NULL UNIQUE,
@@ -19,12 +19,12 @@ CREATE TABLE IF NOT EXISTS `users` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Tạo tài khoản Admin mặc định (mật khẩu: admin123)
+-- Create the default Admin account (password: admin123)
 INSERT INTO `users` (`id`, `username`, `email`, `password_hash`, `full_name`, `role`)
-VALUES (1, 'admin', 'admin@viplike.local', '$2a$10$wE99qF/0m0c3jO2V3vL7u.GZt.m6qF/0m0c3jO2V3vL7u.GZt.m6q', 'Quản Trị Viên VIPLIKE', 'ADMIN')
+VALUES (1, 'admin', 'admin@viplike.local', '$2a$10$wE99qF/0m0c3jO2V3vL7u.GZt.m6qF/0m0c3jO2V3vL7u.GZt.m6q', 'VIPLIKE Administrator', 'ADMIN')
 ON DUPLICATE KEY UPDATE `username` = `username`;
 
--- 2. BẢNG SOCIAL_ACCOUNTS (LƯU TRỮ DÀN VIA & COOKIE & PROXY)
+-- 2. SOCIAL_ACCOUNTS TABLE (STORES VIAS & COOKIES & PROXIES)
 CREATE TABLE IF NOT EXISTS `social_accounts` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `user_id` INT DEFAULT 1,
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS `social_accounts` (
   INDEX `idx_platform_account_id` (`platform_account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 3. BẢNG BUFF_MONITORS (POST HUNTER - THEO DÕI SĂN BÀI MỚI TỰ ĐỘNG)
+-- 3. BUFF_MONITORS TABLE (POST HUNTER - AUTO-MONITOR FOR NEW POSTS)
 CREATE TABLE IF NOT EXISTS `buff_monitors` (
   `id` VARCHAR(64) PRIMARY KEY,
   `user_id` INT DEFAULT 1,
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS `buff_monitors` (
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 4. BẢNG BUFF_QUEUE (HÀNG ĐỢI TỰ ĐỘNG BUFFER WORKER)
+-- 4. BUFF_QUEUE TABLE (AUTO QUEUE FOR THE BUFFER WORKER)
 CREATE TABLE IF NOT EXISTS `buff_queue` (
   `id` VARCHAR(64) PRIMARY KEY,
   `target_url` TEXT NOT NULL,
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS `buff_queue` (
   `completed_at` TIMESTAMP NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 5. BẢNG BUFF_HISTORY (SỔ CHỐNG TRÙNG LẶP & LỊCH SỬ TƯƠNG TÁC)
+-- 5. BUFF_HISTORY TABLE (DEDUPE REGISTRY & ENGAGEMENT HISTORY)
 CREATE TABLE IF NOT EXISTS `buff_history` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `user_id` INT DEFAULT 1,
@@ -93,8 +93,8 @@ CREATE TABLE IF NOT EXISTS `buff_history` (
   INDEX `idx_history_url_page` (`target_url`(191), `page_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 5b. BẢNG BUFF_LOGS (LỊCH SỬ TỪNG LƯỢT CHẠY - HIỂN THỊ Ở TRANG NHẬT KÝ & LỊCH SỬ)
--- Backend cũng tự tạo bảng này khi khởi chạy (db.js > ensureBuffLogsTable)
+-- 5b. BUFF_LOGS TABLE (PER-RUN HISTORY - SHOWN ON THE LOGS & HISTORY PAGE)
+-- The backend also creates this table on startup (db.js > ensureBuffLogsTable)
 CREATE TABLE IF NOT EXISTS `buff_logs` (
   `id` VARCHAR(64) PRIMARY KEY,
   `user_id` INT DEFAULT 1,
@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS `buff_logs` (
   INDEX `idx_buff_logs_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 6. BẢNG SOFTWARE_LICENSES (HỆ THỐNG QUẢN LÝ CHO THUÊ TOOL & KHÓA BẢN QUYỀN MÁY)
+-- 6. SOFTWARE_LICENSES TABLE (TOOL RENTAL & MACHINE LICENSE LOCK SYSTEM)
 CREATE TABLE IF NOT EXISTS `software_licenses` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `license_key` VARCHAR(64) NOT NULL UNIQUE,
@@ -132,10 +132,10 @@ CREATE TABLE IF NOT EXISTS `software_licenses` (
   INDEX `idx_hardware_hwid` (`hardware_hwid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Tạo sẵn 1 Key bản quyền mẫu để bạn dùng thử hoặc demo cho khách:
+-- Create 1 sample license key for trying it out or demoing to customers:
 INSERT INTO `software_licenses` (`id`, `license_key`, `customer_name`, `customer_contact`, `package_type`, `max_vias`, `status`, `expires_at`, `notes`)
-VALUES (1, 'VIP-PRO-2026-TRIAL-8888', 'Đối Tác Thuê VIPLIKE (Bản quyền mẫu)', '0988888888', '1_MONTH', 100, 'ACTIVE', DATE_ADD(NOW(), INTERVAL 30 DAY), 'Gói thuê 30 ngày kích hoạt mẫu cho máy khách')
+VALUES (1, 'VIP-PRO-2026-TRIAL-8888', 'VIPLIKE Rental Partner (Sample license)', '0988888888', '1_MONTH', 100, 'ACTIVE', DATE_ADD(NOW(), INTERVAL 30 DAY), 'Sample 30-day rental plan for a client machine')
 ON DUPLICATE KEY UPDATE `license_key` = `license_key`;
 
-SELECT 'Khởi tạo Database autopost_saas & Bảng Cho Thuê Bản Quyền thành công!' AS result;
+SELECT 'Database autopost_saas & License Rental tables created successfully!' AS result;
 

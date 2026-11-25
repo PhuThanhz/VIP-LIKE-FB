@@ -101,7 +101,7 @@ export default function MonitorFormModal({
 
   const handleSaveMonitor = async () => {
     if (!monTargetUrl.trim()) {
-      message.warning('Vui lòng nhập Link trang Fanpage / Group / Profile cần theo dõi!');
+      message.warning('Please enter the Fanpage / Group / Profile link to monitor!');
       return;
     }
     setLoadingMonitors(true);
@@ -132,11 +132,11 @@ export default function MonitorFormModal({
       };
       const res = await axios.post(`${workerBaseUrl}/api/buff-monitors`, payload);
       if (res.data?.success) {
-        message.success(editingMonitorId ? 'Đã cập nhật mục tiêu theo dõi!' : 'Đã thêm mục tiêu theo dõi tự động mới!');
+        message.success(editingMonitorId ? 'Monitor updated!' : 'New auto-monitor added!');
         onClose();
         onSaved();
       } else {
-        message.error(res.data?.error || 'Lỗi lưu mục tiêu theo dõi');
+        message.error(res.data?.error || 'Failed to save monitor');
       }
     } catch (err: any) {
       message.error(err.response?.data?.error || err.message);
@@ -148,7 +148,7 @@ export default function MonitorFormModal({
   const handleTestSpintaxInForm = () => {
     const lines = monCommentText.split('\n').map((s) => s.trim()).filter(Boolean);
     if (lines.length === 0) {
-      message.warning('Vui lòng nhập ít nhất 1 dòng bình luận hoặc Spintax!');
+      message.warning('Please enter at least 1 comment line or Spintax!');
       return;
     }
     const samples: string[] = [];
@@ -157,32 +157,32 @@ export default function MonitorFormModal({
       samples.push(resolveSpintax(picked));
     }
     setSpintaxSampleOutputs(samples);
-    message.info('Đã tạo 4 mẫu bình luận ngẫu nhiên từ cấu trúc Spintax!');
+    message.info('Generated 4 random comment samples from the Spintax!');
   };
 
   return (
     <Modal
       open={open}
       onCancel={onClose}
-      title={editingMonitorId ? 'Sửa mục tiêu theo dõi' : 'Thêm mục tiêu theo dõi'}
+      title={editingMonitorId ? 'Edit monitor' : 'Add monitor'}
       footer={[
         <Button key="cancel" onClick={onClose}>
-          Huỷ
+          Cancel
         </Button>,
         <Button key="submit" type="primary" loading={loadingMonitors} onClick={handleSaveMonitor}>
-          {editingMonitorId ? 'Lưu thay đổi' : 'Bắt đầu theo dõi'}
+          {editingMonitorId ? 'Save changes' : 'Start monitoring'}
         </Button>,
       ]}
       width={560}
       className="dark-modal"
     >
       <div className="space-y-5 py-1 text-slate-200">
-        {/* MỤC TIÊU */}
+        {/* TARGET */}
         <section className="space-y-3">
           <Input
             autoFocus
             size="large"
-            placeholder="Dán link Fanpage hoặc Group"
+            placeholder="Paste a Fanpage or Group link"
             value={monTargetUrl}
             onChange={(e) => {
               const url = e.target.value;
@@ -193,7 +193,7 @@ export default function MonitorFormModal({
           />
           <div className="flex gap-2">
             <Input
-              placeholder="Tên gợi nhớ (tuỳ chọn)"
+              placeholder="Nickname (optional)"
               value={monTargetName}
               onChange={(e) => setMonTargetName(e.target.value)}
               className="flex-1"
@@ -205,26 +205,26 @@ export default function MonitorFormModal({
               options={[
                 { value: 'PAGE', label: 'Fanpage' },
                 { value: 'GROUP', label: 'Group' },
-                { value: 'PROFILE', label: 'Trang cá nhân' },
+                { value: 'PROFILE', label: 'Profile' },
               ]}
             />
           </div>
           {monTargetType === 'GROUP' && (
-            <div className="text-[11px] text-slate-500">Group riêng tư: cần ít nhất một via là thành viên.</div>
+            <div className="text-[11px] text-slate-500">Private group: at least one via must be a member.</div>
           )}
         </section>
 
-        {/* GÓI VIP */}
+        {/* VIP PLAN */}
         <section className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-4">
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="text-xs text-slate-400 mb-1 block">Like mỗi bài</label>
+              <label className="text-xs text-slate-400 mb-1 block">Likes per post</label>
               <InputNumber
                 min={5}
                 max={500}
                 value={monTargetLikes === 'ALL' ? null : monTargetLikes}
                 onChange={(v) => setMonTargetLikes(v ? Number(v) : 'ALL')}
-                placeholder={`Tối đa ${maxPagesPerPost || 150}`}
+                placeholder={`Max ${maxPagesPerPost || 150}`}
                 className="!w-full"
               />
               <button
@@ -232,11 +232,11 @@ export default function MonitorFormModal({
                 className={`mt-1 text-[11px] ${monTargetLikes === 'ALL' ? 'text-cyan-400' : 'text-slate-500 hover:text-cyan-400'}`}
                 onClick={() => setMonTargetLikes('ALL')}
               >
-                {monTargetLikes === 'ALL' ? `✓ Đang dùng tối đa ${maxPagesPerPost || 150} page` : 'Dùng tối đa'}
+                {monTargetLikes === 'ALL' ? `✓ Using max ${maxPagesPerPost || 150} pages` : 'Use max'}
               </button>
             </div>
             <div>
-              <label className="text-xs text-slate-400 mb-1 block">Bài mỗi ngày</label>
+              <label className="text-xs text-slate-400 mb-1 block">Posts per day</label>
               <InputNumber
                 min={1}
                 max={50}
@@ -246,19 +246,19 @@ export default function MonitorFormModal({
               />
             </div>
             <div>
-              <label className="text-xs text-slate-400 mb-1 block">Thời hạn</label>
+              <label className="text-xs text-slate-400 mb-1 block">Duration</label>
               <Select
                 value={monExpiryDays}
                 onChange={(v) => setMonExpiryDays(v)}
                 className="w-full"
                 options={[
-                  ...([7, 15, 30, 60, 90, 0].includes(monExpiryDays) ? [] : [{ value: monExpiryDays, label: `Còn ${monExpiryDays} ngày` }]),
-                  { value: 7, label: '7 ngày' },
-                  { value: 15, label: '15 ngày' },
-                  { value: 30, label: '30 ngày' },
-                  { value: 60, label: '60 ngày' },
-                  { value: 90, label: '90 ngày' },
-                  { value: 0, label: 'Không hạn' },
+                  ...([7, 15, 30, 60, 90, 0].includes(monExpiryDays) ? [] : [{ value: monExpiryDays, label: `${monExpiryDays} days left` }]),
+                  { value: 7, label: '7 days' },
+                  { value: 15, label: '15 days' },
+                  { value: 30, label: '30 days' },
+                  { value: 60, label: '60 days' },
+                  { value: 90, label: '90 days' },
+                  { value: 0, label: 'No limit' },
                 ]}
               />
             </div>
@@ -266,7 +266,7 @@ export default function MonitorFormModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-slate-400 mb-1 block">Cảm xúc</label>
+              <label className="text-xs text-slate-400 mb-1 block">Reaction</label>
               <Select
                 value={monReaction}
                 onChange={(val) => setMonReaction(val)}
@@ -280,28 +280,28 @@ export default function MonitorFormModal({
               />
             </div>
             <div>
-              <label className="text-xs text-slate-400 mb-1 block">Bắt đầu buff</label>
+              <label className="text-xs text-slate-400 mb-1 block">Start buffing</label>
               <Select
                 value={monDelayMinutes}
                 onChange={(val) => setMonDelayMinutes(val)}
                 className="w-full"
                 options={[
-                  { value: 0, label: 'Ngay khi thấy bài' },
-                  { value: 3, label: 'Sau 3 phút' },
-                  { value: 5, label: 'Sau 5 phút' },
-                  { value: 10, label: 'Sau 10 phút' },
+                  { value: 0, label: 'As soon as a post is found' },
+                  { value: 3, label: 'After 3 min' },
+                  { value: 5, label: 'After 5 min' },
+                  { value: 10, label: 'After 10 min' },
                 ]}
               />
             </div>
           </div>
         </section>
 
-        {/* TUỲ CHỌN BẬT/TẮT */}
+        {/* ON/OFF OPTIONS */}
         <section className="divide-y divide-slate-800 border-y border-slate-800">
           <div className="flex items-center justify-between gap-3 py-3">
             <div>
-              <div className="text-sm text-slate-200">Rải đều like</div>
-              <div className="text-[11px] text-slate-500">Like vào từ từ như người thật</div>
+              <div className="text-sm text-slate-200">Drip-feed likes</div>
+              <div className="text-[11px] text-slate-500">Likes trickle in like real people</div>
             </div>
             <div className="flex items-center gap-2">
               {monEnableDripFeed && (
@@ -311,7 +311,7 @@ export default function MonitorFormModal({
                   max={120}
                   value={monDripDurationMinutes}
                   onChange={(v) => setMonDripDurationMinutes(v || 20)}
-                  addonAfter="phút"
+                  addonAfter="min"
                   className="w-28"
                 />
               )}
@@ -322,8 +322,8 @@ export default function MonitorFormModal({
           <div className="py-3 space-y-2">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-sm text-slate-200">Bình luận</div>
-                <div className="text-[11px] text-slate-500">Mỗi page một bình luận ngẫu nhiên (Spintax)</div>
+                <div className="text-sm text-slate-200">Comments</div>
+                <div className="text-[11px] text-slate-500">One random comment per page (Spintax)</div>
               </div>
               <Switch checked={monEnableComment} onChange={setMonEnableComment} />
             </div>
@@ -334,7 +334,7 @@ export default function MonitorFormModal({
                   rows={4}
                   value={monCommentText}
                   onChange={(e) => setMonCommentText(e.target.value)}
-                  placeholder="Mỗi dòng một mẫu, VD: {Đẹp quá|Xịn quá} {shop|bạn} ơi"
+                  placeholder="One template per line, e.g. {Đẹp quá|Xịn quá} {shop|bạn} ơi"
                   className="font-mono text-xs"
                 />
                 <div className="flex items-center justify-end gap-3">
@@ -347,10 +347,10 @@ export default function MonitorFormModal({
                       setMonCommentText(sampleTmpls.join('\n'));
                     }}
                   >
-                    Dùng mẫu bán hàng
+                    Use sales template
                   </Button>
                   <Button size="small" onClick={handleTestSpintaxInForm}>
-                    Xem thử
+                    Preview
                   </Button>
                 </div>
 
@@ -368,7 +368,7 @@ export default function MonitorFormModal({
           </div>
         </section>
 
-        {/* NÂNG CAO */}
+        {/* ADVANCED */}
         <section>
           <button
             type="button"
@@ -376,32 +376,32 @@ export default function MonitorFormModal({
             className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200"
           >
             <CaretRightOutlined className={`text-[10px] transition-transform ${monShowAdvanced ? 'rotate-90' : ''}`} />
-            Nâng cao
+            Advanced
             {!monShowAdvanced && (
               <span className="text-slate-600">
-                · quét {monInterval}p · ±{monVariancePercent}% · {monViaMode === 'ALL_VIAS' ? 'tất cả via' : 'via đầu tiên'}
+                · scan {monInterval}m · ±{monVariancePercent}% · {monViaMode === 'ALL_VIAS' ? 'all vias' : 'first via'}
               </span>
             )}
           </button>
           {monShowAdvanced && (
             <div className="grid grid-cols-3 gap-3 mt-3">
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Quét mỗi</label>
+                <label className="text-xs text-slate-400 mb-1 block">Scan every</label>
                 <Select
                   value={monInterval}
                   onChange={(val) => setMonInterval(val)}
                   className="w-full"
-                  options={[5, 10, 15, 30, 60].map((m) => ({ value: m, label: `${m} phút` }))}
+                  options={[5, 10, 15, 30, 60].map((m) => ({ value: m, label: `${m} min` }))}
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Dao động số like</label>
+                <label className="text-xs text-slate-400 mb-1 block">Like count variance</label>
                 <Select
                   value={monVariancePercent}
                   onChange={(v) => setMonVariancePercent(v)}
                   className="w-full"
                   options={[
-                    { value: 0, label: 'Không' },
+                    { value: 0, label: 'None' },
                     { value: 5, label: '±5%' },
                     { value: 10, label: '±10%' },
                     { value: 15, label: '±15%' },
@@ -410,14 +410,14 @@ export default function MonitorFormModal({
                 />
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Via thực hiện</label>
+                <label className="text-xs text-slate-400 mb-1 block">Acting Via</label>
                 <Select
                   value={monViaMode}
                   onChange={(val) => setMonViaMode(val)}
                   className="w-full"
                   options={[
-                    { value: 'ALL_VIAS', label: 'Tất cả via sống' },
-                    { value: 'CUSTOM', label: 'Via đầu tiên' },
+                    { value: 'ALL_VIAS', label: 'All live vias' },
+                    { value: 'CUSTOM', label: 'First via' },
                   ]}
                 />
               </div>

@@ -1,3 +1,5 @@
+mod backend;
+
 #[tauri::command]
 fn get_machine_hwid() -> String {
     let hostname = std::env::var("HOSTNAME")
@@ -33,7 +35,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(backend::BackendState::default())
         .setup(|app| {
+            backend::start(app.handle());
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -43,7 +47,18 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_machine_hwid, get_system_info])
-        .run(tauri::generate_context!())
-        .expect("error while building tauri application");
+        .invoke_handler(tauri::generate_handler![
+            get_machine_hwid,
+            get_system_info,
+            backend::backend_status,
+            backend::start_backend,
+            backend::stop_backend
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                backend::stop(app);
+            }
+        });
 }

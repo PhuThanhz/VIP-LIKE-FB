@@ -33,7 +33,7 @@ spring:
 
 jwt:
   secret: ViplikeRadiantSecretKeyForJwtAuthentication2026SuperSecureKeyWithMin256Bits
-  expirationMs: 864000000 # 10 ngày
+  expirationMs: 864000000 # 10 days
 
 logging:
   level:

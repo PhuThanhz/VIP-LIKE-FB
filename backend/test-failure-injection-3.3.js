@@ -1,6 +1,6 @@
 /**
  * BUFF LIKE 3.3 — FAILURE INJECTION & DISTRIBUTED CONCURRENCY TEST SUITE
- * Kiểm thử 10 kịch bản lỗi nghiêm ngặt: Crash recovery, Fencing preemption, Idempotency, Deep Abort
+ * Tests 10 strict failure scenarios: Crash recovery, Fencing preemption, Idempotency, Deep Abort
  */
 
 const http = require('http');
@@ -89,7 +89,7 @@ async function sleep(ms) {
 
 async function runAllTests() {
   console.log('================================================================');
-  console.log('🧪 BẮT ĐẦU BUFF LIKE 3.3 FAILURE INJECTION & HARDENING SUITE');
+  console.log('🧪 STARTING THE BUFF LIKE 3.3 FAILURE INJECTION & HARDENING SUITE');
   console.log('================================================================\n');
 
   const results = [];
@@ -102,7 +102,7 @@ async function runAllTests() {
   };
 
   // -------------------------------------------------------------
-  // Test 1: Idempotency Key Deduplication (Kịch bản 10)
+  // Test 1: Idempotency Key Deduplication (Scenario 10)
   // -------------------------------------------------------------
   try {
     const idemKey = 'idem_test_' + Date.now();
@@ -121,21 +121,21 @@ async function runAllTests() {
 
     const isSameId = Boolean(res1.body.task?.id) && res1.body.task?.id === res2.body.task?.id;
     const isDeduped = res2.body.alreadyQueued === true;
-    record(1, 'Idempotency Key Deduplication (Chống trùng task gửi lặp)', isSameId && isDeduped, `Task ID: ${res1.body.task?.id}, Deduped: ${isDeduped}`);
+    record(1, 'Idempotency Key Deduplication (no duplicate tasks on repeated sends)', isSameId && isDeduped, `Task ID: ${res1.body.task?.id}, Deduped: ${isDeduped}`);
   } catch (err) {
     record(1, 'Idempotency Key Deduplication', false, err.message);
   }
 
   // -------------------------------------------------------------
-  // Test 2: Crash recovery TRƯỚC KHI task bắt đầu (Kịch bản 1 & 2)
-  // Task ở trạng thái RUNNING, executionStage = 'PREPARING', 0 like
-  // -> Phải tự động phục hồi về QUEUED an toàn
+  // Test 2: Crash recovery BEFORE the task starts (Scenarios 1 & 2)
+  // Task in RUNNING, executionStage = 'PREPARING', 0 likes
+  // -> Must be safely restored to QUEUED automatically
   // -------------------------------------------------------------
   try {
     const db = require('./db');
     const store = require('./state-store');
     
-    // Nạp queue, tạo 1 task giả lập crash ở PREPARING
+    // Load the queue, create 1 task simulating a crash in PREPARING
     const qd = (await store.read('buff_queue')) || { items: [] };
     const taskCrashPre = {
       id: 'task_crash_pre_' + Date.now(),
@@ -152,7 +152,7 @@ async function runAllTests() {
     store.write('buff_queue', qd);
     await store.flush();
 
-    // Giả lập phục hồi sau restart
+    // Simulate recovery after a restart
     const serverModule = require('./server_recovery_test_helper.js');
     serverModule.triggerCrashRecovery();
 
@@ -161,15 +161,15 @@ async function runAllTests() {
 
     const isQueued = recovered && recovered.status === 'QUEUED';
     const hasInitStage = recovered && recovered.executionStage === 'INITIALIZED';
-    record(2, 'Crash Recovery trước khi dispatch thao tác ngoài (An toàn về QUEUED)', isQueued && hasInitStage, `Status: ${recovered?.status}, Stage: ${recovered?.executionStage}`);
+    record(2, 'Crash Recovery before dispatching external actions (safely back to QUEUED)', isQueued && hasInitStage, `Status: ${recovered?.status}, Stage: ${recovered?.executionStage}`);
   } catch (err) {
-    record(2, 'Crash Recovery trước khi dispatch thao tác ngoài', false, err.message);
+    record(2, 'Crash Recovery before dispatching external actions', false, err.message);
   }
 
   // -------------------------------------------------------------
-  // Test 3: Crash recovery SAU KHI ĐÃ TƯƠNG TÁC BÊN NGOÀI (Kịch bản 3)
-  // Task ở trạng thái RUNNING, executionStage = 'INTERACTING', đã có 8 likes
-  // -> KHÔNG được về QUEUED! Phải chuyển sang NEEDS_REVIEW để chống duplicate!
+  // Test 3: Crash recovery AFTER EXTERNAL ENGAGEMENT (Scenario 3)
+  // Task in RUNNING, executionStage = 'INTERACTING', 8 likes already done
+  // -> Must NOT go back to QUEUED! Must move to NEEDS_REVIEW to prevent duplicates!
   // -------------------------------------------------------------
   try {
     const store = require('./state-store');
@@ -198,14 +198,14 @@ async function runAllTests() {
     const isNeedsReview = recovered && recovered.status === 'NEEDS_REVIEW';
     const hasReviewReason = recovered && recovered.reviewReason === 'CRASH_DURING_EXTERNAL_INTERACTION';
     const preservedLikes = recovered && recovered.progress.success === 8;
-    record(3, 'Crash Recovery sau khi đã có side-effect (Chuyển NEEDS_REVIEW chống duplicate)', isNeedsReview && hasReviewReason && preservedLikes, `Status: ${recovered?.status}, Preserved Success: ${recovered?.progress?.success}`);
+    record(3, 'Crash Recovery after side effects (moved to NEEDS_REVIEW to prevent duplicates)', isNeedsReview && hasReviewReason && preservedLikes, `Status: ${recovered?.status}, Preserved Success: ${recovered?.progress?.success}`);
   } catch (err) {
-    record(3, 'Crash Recovery sau khi đã có side-effect', false, err.message);
+    record(3, 'Crash Recovery after side effects', false, err.message);
   }
 
   // -------------------------------------------------------------
-  // Test 4: Crash recovery khi task đã hoàn thành nhưng đang chờ sync (Kịch bản 4)
-  // executionStage = 'SYNCING' -> An toàn finalize sang COMPLETED
+  // Test 4: Crash recovery when the task finished but was waiting to sync (Scenario 4)
+  // executionStage = 'SYNCING' -> safely finalize to COMPLETED
   // -------------------------------------------------------------
   try {
     const store = require('./state-store');
@@ -231,35 +231,35 @@ async function runAllTests() {
     const recovered = qdAfter.items.find((it) => it.id === taskCrashSync.id);
 
     const isCompleted = recovered && recovered.status === 'COMPLETED';
-    record(4, 'Crash Recovery khi task đang SYNCING (Finalize sang COMPLETED)', isCompleted, `Status: ${recovered?.status}`);
+    record(4, 'Crash Recovery while the task is SYNCING (finalize to COMPLETED)', isCompleted, `Status: ${recovered?.status}`);
   } catch (err) {
-    record(4, 'Crash Recovery khi task đang SYNCING', false, err.message);
+    record(4, 'Crash Recovery while the task is SYNCING', false, err.message);
   }
 
   // -------------------------------------------------------------
   // Test 5: API Review Resolution Endpoint (/api/buff-queue/review-resolve/:id)
-  // Đối soát thủ công: RESUME nốt số like còn thiếu (50 - 8 = 42 like)
+  // Manual reconciliation: RESUME the missing likes (50 - 8 = 42 likes)
   // -------------------------------------------------------------
   try {
     const store = require('./state-store');
     const qd = store.read('buff_queue') || { items: [] };
     const reviewTask = qd.items.find((it) => it.status === 'NEEDS_REVIEW');
-    assert(reviewTask, 'Cần có task NEEDS_REVIEW từ Test 3');
+    assert(reviewTask, 'A NEEDS_REVIEW task from Test 3 is required');
 
     const serverModule = require('./server_recovery_test_helper.js');
     const res = serverModule.resolveReviewTask(reviewTask, 'RESUME');
 
     const isOk = res.success === true;
     const isQueued = res.task?.status === 'QUEUED';
-    const adjustedTarget = res.task?.targetLikes === 42; // 50 - 8 = 42 like còn thiếu!
-    record(5, 'Review Resolution: Đối soát RESUME bù số like còn thiếu (50 - 8 = 42 like)', isOk && isQueued && adjustedTarget, `Status: ${res.task?.status}, New Target: ${res.task?.targetLikes}`);
+    const adjustedTarget = res.task?.targetLikes === 42; // 50 - 8 = 42 missing likes!
+    record(5, 'Review Resolution: RESUME reconciliation tops up the missing likes (50 - 8 = 42 likes)', isOk && isQueued && adjustedTarget, `Status: ${res.task?.status}, New Target: ${res.task?.targetLikes}`);
   } catch (err) {
     record(5, 'Review Resolution Endpoint', false, err.message);
   }
 
   // -------------------------------------------------------------
-  // Test 6: Monotonic Fencing Tokens qua MySQL (Kịch bản 7 & Phase 2)
-  // Tokens phải luôn tăng dần đơn điệu và không bao giờ trùng lặp
+  // Test 6: Monotonic Fencing Tokens via MySQL (Scenario 7 & Phase 2)
+  // Tokens must always increase monotonically and never repeat
   // -------------------------------------------------------------
   try {
     const db = require('./db');
@@ -268,26 +268,26 @@ async function runAllTests() {
     const token3 = await db.allocateFencingToken();
 
     const isMonotonic = token1 < token2 && token2 < token3;
-    record(6, 'Monotonic Distributed Fencing Tokens (Đơn điệu & Độc nhất qua MySQL)', isMonotonic, `T1: ${token1}, T2: ${token2}, T3: ${token3}`);
+    record(6, 'Monotonic Distributed Fencing Tokens (monotonic & unique via MySQL)', isMonotonic, `T1: ${token1}, T2: ${token2}, T3: ${token3}`);
   } catch (err) {
     record(6, 'Monotonic Distributed Fencing Tokens', false, err.message);
   }
 
   // -------------------------------------------------------------
-  // Test 7: Fencing Preemption & Stale Token Write Rejection (Kịch bản 6)
-  // Khi task bị thu hồi lease (preempted), token cũ trở thành stale -> cấm ghi
+  // Test 7: Fencing Preemption & Stale Token Write Rejection (Scenario 6)
+  // When a task's lease is revoked (preempted), the old token becomes stale -> writes are forbidden
   // -------------------------------------------------------------
   try {
     const serverModule = require('./server_recovery_test_helper.js');
     const { isPreempted, writeRejected } = await serverModule.testFencingPreemption();
-    record(7, 'Fencing Preemption: Lease hết hạn/bị thu hồi thì cấm ghi đè trạng thái', isPreempted && writeRejected, `Preempted: ${isPreempted}, Write Rejected: ${writeRejected}`);
+    record(7, 'Fencing Preemption: an expired/revoked lease may not overwrite state', isPreempted && writeRejected, `Preempted: ${isPreempted}, Write Rejected: ${writeRejected}`);
   } catch (err) {
     record(7, 'Fencing Preemption & Stale Write Rejection', false, err.message);
   }
 
   // -------------------------------------------------------------
   // Test 8: Playwright Deep Abort: cancellableSleep & Immediate Context Close (Phase 3)
-  // AbortSignal kích hoạt phải dừng chờ ngay lập tức (< 10ms thay vì đợi 2000ms)
+  // A fired AbortSignal must stop waiting immediately (< 10ms instead of waiting 2000ms)
   // -------------------------------------------------------------
   try {
     const serverModule = require('./server_recovery_test_helper.js');
@@ -295,14 +295,14 @@ async function runAllTests() {
     const abortResult = await serverModule.testDeepAbortSpeed();
     const durationMs = Date.now() - startMs;
 
-    const isInstant = durationMs < 50; // Dự kiến ngủ 2000ms nhưng bị abort lập tức trong < 50ms!
-    record(8, 'Playwright Deep Cancellation (Hủy ngay lập tức không chờ Timeout)', isInstant && abortResult.aborted, `Thời gian hủy: ${durationMs}ms (thay vì 2000ms timeout)`);
+    const isInstant = durationMs < 50; // Expected to sleep 2000ms but aborted instantly in < 50ms!
+    record(8, 'Playwright Deep Cancellation (cancels instantly without waiting for a Timeout)', isInstant && abortResult.aborted, `Cancel time: ${durationMs}ms (instead of a 2000ms timeout)`);
   } catch (err) {
     record(8, 'Playwright Deep Cancellation', false, err.message);
   }
 
   // -------------------------------------------------------------
-  // Test 9: Worker Disconnect (Client ngắt kết nối SSE không làm crash server) (Kịch bản 5)
+  // Test 9: Worker Disconnect (a client dropping SSE doesn't crash the server) (Scenario 5)
   // -------------------------------------------------------------
   try {
     const sseReq = http.request(
@@ -312,7 +312,7 @@ async function runAllTests() {
         headers: { 'Content-Type': 'application/json' },
       },
       (res) => {
-        // Ngắt kết nối ngay lập tức sau khi nhận header
+        // Disconnect right after receiving the headers
         sseReq.destroy();
       }
     );
@@ -322,27 +322,27 @@ async function runAllTests() {
 
     const health = await getJson('/api/health');
     const isServerAlive = health.body?.status === 'UP';
-    record(9, 'Worker/Client SSE Disconnect (Server không crash, background xử lý an toàn)', isServerAlive, `Server status: ${health.body?.status}`);
+    record(9, 'Worker/Client SSE Disconnect (server doesn\'t crash, background keeps processing safely)', isServerAlive, `Server status: ${health.body?.status}`);
   } catch (err) {
     record(9, 'Worker/Client SSE Disconnect', false, err.message);
   }
 
   // -------------------------------------------------------------
-  // Test 10: Database Connection Resiliency & Memory Store Fallback (Kịch bản 9)
+  // Test 10: Database Connection Resiliency & Memory Store Fallback (Scenario 9)
   // -------------------------------------------------------------
   try {
     const store = require('./state-store');
     const qd = (await store.read('buff_queue')) || { items: [] };
-    // Dữ liệu vẫn nạp và ghi được qua store bền vững ngay cả khi I/O có độ trễ
+    // Data still loads and writes through the durable store even with I/O latency
     const isStoreOperational = Array.isArray(qd.items);
-    record(10, 'Database & StateStore Resiliency (Dữ liệu không mất qua flush/cache fallback)', isStoreOperational, `Queue items: ${qd.items.length}`);
+    record(10, 'Database & StateStore Resiliency (no data lost via flush/cache fallback)', isStoreOperational, `Queue items: ${qd.items.length}`);
   } catch (err) {
     record(10, 'Database & StateStore Resiliency', false, err.message);
   }
 
   console.log('\n================================================================');
   const allPassed = results.every((r) => r.passed);
-  console.log(`KẾT QUẢ: ${results.filter((r) => r.passed).length}/${results.length} KỊCH BẢN THỬ NGHIỆM ĐẠT CHUẨN`);
+  console.log(`RESULT: ${results.filter((r) => r.passed).length}/${results.length} TEST SCENARIOS PASSED`);
   console.log('================================================================\n');
 
   if (!allPassed) {
@@ -351,6 +351,6 @@ async function runAllTests() {
 }
 
 runAllTests().catch((e) => {
-  console.error('LỖI CHẠY TEST SUITE:', e);
+  console.error('TEST SUITE RUN ERROR:', e);
   process.exit(1);
 });

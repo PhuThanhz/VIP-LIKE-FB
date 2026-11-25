@@ -1,9 +1,9 @@
 /**
- * AVATAR TOOL - QUẢN LÝ & CẬP NHẬT ẢNH ĐẠI DIỆN HÀNG LOẠT CHO DÀN FANPAGE
- * Hỗ trợ:
- * 1. Quét trạng thái Avatar (Phát hiện Page chưa có Avatar / Silhouette qua Facebook Graph API).
- * 2. Cung cấp kho Avatar chân dung AI HD đa dạng (Nữ, Nam, Phong cảnh, Thú cưng, Tùy chỉnh).
- * 3. Tự động chuyển danh tính và tải ảnh đại diện lên Facebook bằng Playwright Automation.
+ * AVATAR TOOL - BULK MANAGE & UPDATE PROFILE PICTURES FOR YOUR FANPAGES
+ * Supports:
+ * 1. Scanning Avatar status (detects Pages without an Avatar / Silhouette via the Facebook Graph API).
+ * 2. A diverse HD AI portrait Avatar library (Female, Male, Scenery, Pets, Custom).
+ * 3. Automatically switching identity and uploading the profile picture to Facebook with Playwright Automation.
  */
 
 const { chromium } = require('playwright');
@@ -13,14 +13,14 @@ const fs = require('fs');
 const { getDeviceForUid, applyFingerprintToContext } = require('./device-fingerprints');
 const { parseCookieString, parseProxy } = require('./fb-buff-tool');
 
-const DATA_DIR = path.join(__dirname, 'data');
+const { DATA_DIR, PROFILES_DIR } = require('./paths');
 const TEMP_AVATARS_DIR = path.join(DATA_DIR, 'temp_avatars');
 const CUSTOM_AVATARS_DIR = path.join(DATA_DIR, 'custom_avatars');
 
 if (!fs.existsSync(TEMP_AVATARS_DIR)) fs.mkdirSync(TEMP_AVATARS_DIR, { recursive: true });
 if (!fs.existsSync(CUSTOM_AVATARS_DIR)) fs.mkdirSync(CUSTOM_AVATARS_DIR, { recursive: true });
 
-// Danh sách các cờ tối ưu hóa tốc độ cho Chromium
+// Speed optimization flags for Chromium
 const BROWSER_ARGS = [
   '--disable-blink-features=AutomationControlled',
   '--no-sandbox',
@@ -56,7 +56,7 @@ function loadAvatarCache() {
       return memoryAvatarCache;
     }
   } catch (e) {
-    console.warn('[AvatarTool] ⚠️ Lỗi đọc avatar_status_cache.json:', e.message);
+    console.warn('[AvatarTool] ⚠️ Error reading avatar_status_cache.json:', e.message);
   }
   return memoryAvatarCache || {};
 }
@@ -69,7 +69,7 @@ function saveAvatarCache(cacheObj) {
     fs.writeFileSync(tmp, JSON.stringify(cacheObj, null, 2), 'utf8');
     fs.renameSync(tmp, AVATAR_STATUS_CACHE_FILE);
   } catch (e) {
-    console.warn('[AvatarTool] ⚠️ Lỗi lưu avatar_status_cache.json:', e.message);
+    console.warn('[AvatarTool] ⚠️ Error saving avatar_status_cache.json:', e.message);
   }
 }
 
@@ -79,7 +79,7 @@ function loadCoverCache() {
       return JSON.parse(fs.readFileSync(COVER_STATUS_CACHE_FILE, 'utf8'));
     }
   } catch (e) {
-    console.warn('[CoverTool] ⚠️ Lỗi đọc cover_status_cache.json:', e.message);
+    console.warn('[CoverTool] ⚠️ Error reading cover_status_cache.json:', e.message);
   }
   return {};
 }
@@ -90,17 +90,17 @@ function saveCoverCache(cacheObj) {
     fs.writeFileSync(tmp, JSON.stringify(cacheObj, null, 2), 'utf8');
     fs.renameSync(tmp, COVER_STATUS_CACHE_FILE);
   } catch (e) {
-    console.warn('[CoverTool] ⚠️ Lỗi lưu cover_status_cache.json:', e.message);
+    console.warn('[CoverTool] ⚠️ Error saving cover_status_cache.json:', e.message);
   }
 }
 
 // =============================================================================
-// 1. KIỂM TRA TRẠNG THÁI AVATAR HÀNG LOẠT (CHÍNH XÁC CACHE + GRAPH API)
+// 1. BULK AVATAR STATUS CHECK (ACCURATE CACHE + GRAPH API)
 // =============================================================================
 
 /**
- * Quét trạng thái Avatar cho danh sách Fanpage:
- * Ưu tiên tra cứu từ Avatar Cache (được trích xuất 100% chính xác từ Facebook UI & GraphQL).
+ * Scans the Avatar status of a Fanpage list:
+ * Looks up the Avatar Cache first (extracted 100% accurately from the Facebook UI & GraphQL).
  * @param {Array<string|{id: string, name?: string}>} pages
  */
 async function checkPagesAvatarStatus(pages = []) {
@@ -124,7 +124,7 @@ async function checkPagesAvatarStatus(pages = []) {
     }
   }
 
-  // Với các page chưa có trong cache, thử truy vấn
+  // For pages not in the cache yet, try querying
   if (uncached.length > 0) {
     const CHUNK_SIZE = 30;
     for (let i = 0; i < uncached.length; i += CHUNK_SIZE) {
@@ -178,13 +178,13 @@ async function checkPagesAvatarStatus(pages = []) {
 }
 
 /**
- * Quét sâu trực tiếp từ Facebook Switcher & your_pages bằng Playwright
- * Trích xuất 100% chuẩn xác ảnh đại diện thật của toàn bộ dàn Fanpage
+ * Deep-scans directly from the Facebook Switcher & your_pages with Playwright
+ * Extracts the real profile pictures of every Fanpage with 100% accuracy
  */
 async function scanLiveFanpageAvatars(cookieStr, options = {}) {
   const { maxRounds = 40, proxyUrl = '' } = options;
   const cookies = parseCookieString(cookieStr);
-  if (!cookies.length) throw new Error('Cookie rỗng hoặc không đúng định dạng');
+  if (!cookies.length) throw new Error('Cookie is empty or in the wrong format');
 
   const proxy = parseProxy(proxyUrl);
   const browser = await chromium.launch({
@@ -233,7 +233,7 @@ async function scanLiveFanpageAvatars(cookieStr, options = {}) {
       } catch (e) {}
     });
 
-    console.log('[AvatarTool] 🔄 Mở Facebook Home để quét switcher profiles...');
+    console.log('[AvatarTool] 🔄 Opening Facebook Home to scan switcher profiles...');
     await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 35000 });
     await page.waitForTimeout(3000);
 
@@ -264,7 +264,7 @@ async function scanLiveFanpageAvatars(cookieStr, options = {}) {
     }
 
     saveAvatarCache(avatarMap);
-    console.log(`[AvatarTool] 💾 Đã lưu cache trạng thái Avatar cho ${Object.keys(avatarMap).length} Fanpage.`);
+    console.log(`[AvatarTool] 💾 Saved the Avatar status cache for ${Object.keys(avatarMap).length} Fanpages.`);
 
     const items = Object.values(avatarMap);
     return {
@@ -282,7 +282,7 @@ async function scanLiveFanpageAvatars(cookieStr, options = {}) {
 }
 
 // =============================================================================
-// 2. KHO AVATAR MẪU (PRESET CURATED COLLECTIONS)
+// 2. SAMPLE AVATAR LIBRARY (PRESET CURATED COLLECTIONS)
 // =============================================================================
 
 function getAvatarPresets() {
@@ -318,36 +318,36 @@ function getAvatarPresets() {
     categories: [
       {
         id: 'WOMEN_PORTRAIT',
-        name: 'Chân dung Nữ (Hot Girl & Nữ Doanh Nhân)',
-        desc: 'Ảnh chân dung nữ sắc nét, tự nhiên chuẩn tỷ lệ 1:1',
+        name: 'Female portraits (Hot Girl & Businesswoman)',
+        desc: 'Sharp, natural female portraits in a 1:1 ratio',
         icon: '👩',
         items: women,
       },
       {
         id: 'MEN_PORTRAIT',
-        name: 'Chân dung Nam (Mỹ Nam & Lịch Lãm)',
-        desc: 'Ảnh chân dung nam đa dạng phong cách, chuẩn Facebook',
+        name: 'Male portraits (Handsome & Elegant)',
+        desc: 'Male portraits in diverse styles, Facebook-ready',
         icon: '👨',
         items: men,
       },
       {
         id: 'NATURE_AESTHETIC',
-        name: 'Phong Cảnh & Đời Sống HD',
-        desc: 'Ảnh thiên nhiên, phong cảnh nghệ thuật chất lượng cao',
+        name: 'Scenery & Lifestyle HD',
+        desc: 'High-quality nature and artistic scenery photos',
         icon: '🌿',
         items: nature,
       },
       {
         id: 'CUTE_PETS',
-        name: 'Thú Cưng & Chó Mèo Cute',
-        desc: 'Hình ảnh cún và mèo cưng dễ thương thu hút tương tác',
+        name: 'Pets & Cute Cats/Dogs',
+        desc: 'Adorable puppy and kitten photos that attract engagement',
         icon: '🐱',
         items: cutePets,
       },
       {
         id: 'RANDOM_MIX',
-        name: 'Ngẫu Nhiên Toàn Bộ (Khuyên Dùng)',
-        desc: 'Tự động phân phối luân phiên ngẫu nhiên mỗi page một ảnh khác nhau',
+        name: 'Random All (Recommended)',
+        desc: 'Automatically rotates randomly so every page gets a different photo',
         icon: '🎲',
         items: [...women, ...men, ...cutePets],
       },
@@ -356,7 +356,7 @@ function getAvatarPresets() {
 }
 
 /**
- * Tải file ảnh từ URL về thư mục tạm trên ổ cứng để Playwright upload
+ * Downloads an image from a URL to a temp folder on disk for Playwright to upload
  */
 async function downloadImageToTemp(url, prefix = 'avatar') {
   const filename = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`;
@@ -382,12 +382,12 @@ async function downloadImageToTemp(url, prefix = 'avatar') {
 }
 
 // =============================================================================
-// 3. THỰC THI CẬP NHẬT AVATAR TỰ ĐỘNG BẰNG PLAYWRIGHT
+// 3. AUTOMATIC AVATAR UPDATE WITH PLAYWRIGHT
 // =============================================================================
 
 /**
- * Đổi Avatar cho danh sách Fanpage đã chọn
- * @param {string} cookieString Cookie nick Mẹ
+ * Changes the Avatar for the selected Fanpages
+ * @param {string} cookieString Parent account Cookie
  * @param {Array<{id: string, name: string, imageUrl?: string}>} pagesToUpdate
  * @param {object} options
  * @param {function} onProgress
@@ -395,13 +395,13 @@ async function downloadImageToTemp(url, prefix = 'avatar') {
 async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], options = {}, onProgress = null) {
   const {
     presetCategory = 'RANDOM_MIX',
-    customImages = [], // Danh sách đường dẫn ảnh local hoặc base64
+    customImages = [], // List of local image paths or base64
     delaySeconds = 4,
     proxyUrl = '',
   } = options;
 
   if (!cookieString) {
-    throw new Error('Thiếu Cookie nick Mẹ sở hữu Fanpage');
+    throw new Error('Missing the Cookie of the parent account that owns the Fanpages');
   }
 
   if (pagesToUpdate.length === 0) {
@@ -418,10 +418,10 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
   const device = getDeviceForUid(uid);
   const proxy = parseProxy(proxyUrl);
 
-  const profileDir = path.join(__dirname, 'browser_profiles', `via_${uid || 'avatar_worker'}`);
+  const profileDir = path.join(PROFILES_DIR, `via_${uid || 'avatar_worker'}`);
   fs.mkdirSync(profileDir, { recursive: true });
 
-  console.log(`[AvatarStudio] 🎨 Bắt đầu cập nhật Avatar cho ${pagesToUpdate.length} Fanpage (UID Via: ${uid || 'N/A'})...`);
+  console.log(`[AvatarStudio] 🎨 Starting Avatar update for ${pagesToUpdate.length} Fanpages (Via UID: ${uid || 'N/A'})...`);
 
   let context = null;
   const details = [];
@@ -456,7 +456,7 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
       let localTempFile = null;
 
       if (typeof options.shouldStop === 'function' && options.shouldStop()) {
-        console.log('[AvatarStudio] 🛑 Đã nhận tín hiệu dừng từ người dùng.');
+        console.log('[AvatarStudio] 🛑 Received a stop signal from the user.');
         break;
       }
 
@@ -468,12 +468,12 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
           pageId,
           pageName,
           status: 'RUNNING',
-          message: `[${i + 1}/${pagesToUpdate.length}] Đang xử lý tải ảnh & đổi Avatar...`,
+          message: `[${i + 1}/${pagesToUpdate.length}] Downloading the image & changing the Avatar...`,
         });
       }
 
       try {
-        // 1. Chuẩn bị file ảnh cho Page này
+        // 1. Prepare the image file for this Page
         if (customImages.length > 0) {
           const chosenCustom = customImages[i % customImages.length];
           if (typeof chosenCustom === 'string' && chosenCustom.startsWith('data:image')) {
@@ -490,20 +490,20 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
         }
 
         if (!localTempFile) {
-          // Lấy từ kho ảnh mẫu hoặc URL chỉ định
+          // Take it from the sample library or the given URL
           const chosenUrl = pageItem.imageUrl || presetPool[i % presetPool.length];
           localTempFile = await downloadImageToTemp(chosenUrl, `p_${pageId}`);
         }
 
-        // 2. Chuyển sang danh tính Page (Switch Profile)
-        console.log(`[AvatarStudio] 🔄 [${i + 1}/${pagesToUpdate.length}] Chuyển sang danh tính Page: "${pageName}" (${pageId})...`);
+        // 2. Switch to the Page identity (Switch Profile)
+        console.log(`[AvatarStudio] 🔄 [${i + 1}/${pagesToUpdate.length}] Switching to Page identity: "${pageName}" (${pageId})...`);
         await tab.goto(`https://www.facebook.com/profile.php?id=${pageId}`, {
           waitUntil: 'domcontentloaded',
           timeout: 25000,
         }).catch(() => {});
         await tab.waitForTimeout(2500);
 
-        // Bấm nút "Chuyển ngay" / "Switch now" nếu có
+        // Click the "Switch now" button if present
         const switchBtn = tab.locator('div[role="button"]:has-text("Chuyển ngay"), div[role="button"]:has-text("Chuyển"), [aria-label="Chuyển ngay"], [aria-label="Chuyển"], div[role="button"]:has-text("Switch now"), div[role="button"]:has-text("Switch")').first();
         if (await switchBtn.isVisible().catch(() => false)) {
           await switchBtn.click({ force: true }).catch(() => {});
@@ -526,7 +526,7 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
           }
         }
 
-        // Cập nhật cookie i_user sang ID của Page
+        // Update the i_user cookie to the Page's ID
         await context.addCookies([
           {
             name: 'i_user',
@@ -539,7 +539,7 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
         ]);
         await tab.waitForTimeout(1000);
 
-        // 3. Đóng mọi popup chào mừng ("Chào mừng bạn đến với Trang mới!", "Dùng Trang", v.v.)
+        // 3. Close any welcome popups ("Welcome to the new Pages experience!", "Use Page", etc.)
         const dungTrangBtn = tab.locator('div[role="button"]:has-text("Dùng Trang"), div[role="button"]:has-text("Use Page"), div[role="button"]:has-text("Bắt đầu khám phá"), div[aria-label="Đóng"], div[aria-label="Close"]').first();
         if ((await dungTrangBtn.count().catch(() => 0)) > 0 && (await dungTrangBtn.isVisible().catch(() => false))) {
           await dungTrangBtn.click({ force: true }).catch(() => {});
@@ -548,24 +548,24 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
         await tab.keyboard.press('Escape').catch(() => {});
         await tab.waitForTimeout(1000);
 
-        // 4. Tìm và kích hoạt nút Đổi ảnh đại diện (Camera button / Hành động với ảnh đại diện)
+        // 4. Find and trigger the change-profile-picture button (Camera button / Profile picture actions)
         const cameraLoc = tab.locator('div[aria-label*="ảnh đại diện"], div[aria-label*="Hành động với ảnh đại diện"], div[aria-label*="Cập nhật ảnh đại diện"], div[aria-label*="Profile picture" i]').first();
         if ((await cameraLoc.count().catch(() => 0)) === 0 || !(await cameraLoc.isVisible().catch(() => false))) {
-          throw new Error('Không tìm thấy nút Camera đại diện trên Fanpage');
+          throw new Error('Profile picture camera button not found on the Fanpage');
         }
 
-        console.log(`[AvatarStudio] 📸 Đã tìm thấy nút đại diện, kích hoạt menu cho Page "${pageName}"...`);
+        console.log(`[AvatarStudio] 📸 Found the profile picture button, opening the menu for Page "${pageName}"...`);
         await cameraLoc.click({ force: true });
         await tab.waitForTimeout(2000);
 
-        // 5. Trong popup menu, chọn "Chọn ảnh đại diện"
+        // 5. In the popup menu, pick "Choose profile picture"
         const chooseAvatarMenuItem = tab.locator('div[role="menuitem"]:has-text("Chọn ảnh đại diện"), div[role="menuitem"]:has-text("Choose profile picture"), div[role="menuitem"]:has-text("Tải ảnh lên"), div[role="menuitem"]').first();
         if ((await chooseAvatarMenuItem.count().catch(() => 0)) > 0 && (await chooseAvatarMenuItem.isVisible().catch(() => false))) {
           await chooseAvatarMenuItem.click({ force: true }).catch(() => {});
           await tab.waitForTimeout(2500);
         }
 
-        // 6. Trong hộp thoại "Chọn ảnh đại diện", bấm "+ Tải ảnh lên" và nạp file qua filechooser
+        // 6. In the "Choose profile picture" dialog, click "+ Upload photo" and load the file via filechooser
         let uploadSuccess = false;
         const uploadBtn = tab.locator('div[role="dialog"] div[role="button"]:has-text("Tải ảnh lên"), div[role="dialog"] div[role="button"]:has-text("Upload photo"), div[role="dialog"] button:has-text("Tải ảnh lên")').first();
 
@@ -578,12 +578,12 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
           if (fileChooser) {
             await fileChooser.setFiles(localTempFile);
             uploadSuccess = true;
-            console.log(`[AvatarStudio] 📤 Đã nạp file ảnh thành công cho Page "${pageName}"`);
+            console.log(`[AvatarStudio] 📤 Loaded the image file for Page "${pageName}"`);
           }
         }
 
         if (!uploadSuccess) {
-          // Thử input file trực tiếp trong dialog
+          // Try the file input directly in the dialog
           const dialogFileInput = tab.locator('div[role="dialog"] input[type="file"]').first();
           if ((await dialogFileInput.count().catch(() => 0)) > 0) {
             await dialogFileInput.setInputFiles(localTempFile);
@@ -592,10 +592,10 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
         }
 
         if (!uploadSuccess) {
-          throw new Error('Không thể mở hộp thoại chọn tệp của Facebook');
+          throw new Error('Could not open Facebook\'s file picker dialog');
         }
 
-        // 7. Đợi Facebook tải ảnh và bấm nút "Lưu" (Save) bắt buộc
+        // 7. Wait for Facebook to upload the image and click the required "Save" button
         let saveClicked = false;
         const saveSelectors = [
           'div[role="dialog"] div[role="button"]:has-text("Lưu")',
@@ -612,7 +612,7 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
             if ((await btn.count().catch(() => 0)) > 0 && (await btn.isVisible().catch(() => false))) {
               await btn.click({ force: true }).catch(() => {});
               saveClicked = true;
-              console.log(`[AvatarStudio] 💾 Đã bấm "Lưu" ảnh đại diện cho Page "${pageName}"...`);
+              console.log(`[AvatarStudio] 💾 Clicked "Save" on the profile picture for Page "${pageName}"...`);
               break;
             }
           }
@@ -620,20 +620,20 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
         }
 
         if (!saveClicked) {
-          throw new Error('Nút "Lưu" ảnh đại diện không xuất hiện trên Facebook (ảnh chưa tải lên xong hoặc mạng chậm)');
+          throw new Error('The profile picture "Save" button did not appear on Facebook (upload unfinished or slow network)');
         }
 
-        // Đợi modal lưu đóng lại xác nhận Facebook đã hoàn tất lưu
+        // Wait for the save modal to close, confirming Facebook finished saving
         await tab.waitForSelector('div[role="dialog"] div[role="button"]:has-text("Lưu")', {
           state: 'hidden',
           timeout: 25000,
         }).catch(() => {});
         await tab.waitForTimeout(3000);
 
-        console.log(`[AvatarStudio] ✅ Cập nhật Avatar THÀNH CÔNG cho Page: "${pageName}" (ID: ${pageId})`);
+        console.log(`[AvatarStudio] ✅ Avatar update SUCCEEDED for Page: "${pageName}" (ID: ${pageId})`);
         updatedCount++;
 
-        // Cập nhật lại cache trạng thái avatar ngay lập tức
+        // Refresh the avatar status cache right away
         if (avatarCacheMap[pageId]) {
           avatarCacheMap[pageId].hasAvatar = true;
           avatarCacheMap[pageId].isSilhouette = false;
@@ -653,7 +653,7 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
           pageId,
           pageName,
           status: 'SUCCESS',
-          message: 'Cập nhật ảnh đại diện thành công',
+          message: 'Profile picture updated successfully',
           updatedAt: new Date().toISOString(),
         };
         details.push(detail);
@@ -667,13 +667,13 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
           });
         }
       } catch (pageErr) {
-        console.warn(`[AvatarStudio] ⚠️ Lỗi cập nhật Page "${pageName}":`, pageErr.message);
+        console.warn(`[AvatarStudio] ⚠️ Error updating Page "${pageName}":`, pageErr.message);
         const detail = {
           pageId,
           pageName,
           status: 'ERROR',
           error: pageErr.message,
-          message: `Lỗi: ${pageErr.message}`,
+          message: `Error: ${pageErr.message}`,
         };
         details.push(detail);
 
@@ -686,13 +686,13 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
           });
         }
       } finally {
-        // Dọn dẹp file ảnh tạm nếu tạo từ URL
+        // Clean up the temp image file if it came from a URL
         if (localTempFile && localTempFile.includes(TEMP_AVATARS_DIR)) {
           fs.unlink(localTempFile, () => {});
         }
       }
 
-      // Giãn cách nghỉ an toàn giữa các Page để chống checkpoint
+      // Safe rest between Pages to avoid checkpoints
       if (i < pagesToUpdate.length - 1) {
         const sleepMs = Math.max(1000, Number(delaySeconds) * 1000);
         await new Promise((r) => setTimeout(r, sleepMs));
@@ -704,7 +704,7 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
     }
   }
 
-  console.log(`[AvatarStudio] 🏁 Hoàn thành cập nhật Avatar: ${updatedCount}/${pagesToUpdate.length} Page thành công.`);
+  console.log(`[AvatarStudio] 🏁 Avatar update finished: ${updatedCount}/${pagesToUpdate.length} Pages successful.`);
   return {
     success: true,
     total: pagesToUpdate.length,
@@ -714,7 +714,7 @@ async function bulkUpdateFanpageAvatars(cookieString, pagesToUpdate = [], option
 }
 
 /**
- * Kho Ảnh Bìa mẫu độ phân giải cao tỉ lệ 16:9
+ * High-resolution 16:9 sample Cover Photo library
  */
 function getCoverPresets() {
   const nature = [
@@ -747,17 +747,17 @@ function getCoverPresets() {
   ];
   return {
     categories: [
-      { id: 'NATURE_COVER', name: 'Thiên Nhiên & Phong Cảnh HD (16:9)', desc: 'Ảnh thiên nhiên, núi rừng, biển xanh nghệ thuật', icon: '🌿', items: nature },
-      { id: 'MINIMAL_ARCH', name: 'Kiến Trúc & Tối Giản', desc: 'Không gian kiến trúc hiện đại, sang trọng', icon: '🏛️', items: architecture },
-      { id: 'TECH_CYBER', name: 'Công Nghệ & Cyber', desc: 'Đồ họa công nghệ số, ánh sáng hiện đại', icon: '💻', items: tech },
-      { id: 'BUSINESS_OFFICE', name: 'Văn Phòng & Doanh Nghiệp', desc: 'Không gian làm việc chuyên nghiệp chuẩn doanh nghiệp', icon: '🏢', items: business },
-      { id: 'RANDOM_COVER', name: 'Ngẫu Nhiên Toàn Bộ (Khuyên Dùng)', desc: 'Tự động luân phiên ngẫu nhiên mỗi page một ảnh bìa độc bản', icon: '🎲', items: [...nature, ...architecture, ...tech, ...business] },
+      { id: 'NATURE_COVER', name: 'Nature & Scenery HD (16:9)', desc: 'Artistic nature, mountain, forest and sea photos', icon: '🌿', items: nature },
+      { id: 'MINIMAL_ARCH', name: 'Architecture & Minimal', desc: 'Modern, luxurious architectural spaces', icon: '🏛️', items: architecture },
+      { id: 'TECH_CYBER', name: 'Tech & Cyber', desc: 'Digital tech graphics with modern lighting', icon: '💻', items: tech },
+      { id: 'BUSINESS_OFFICE', name: 'Office & Business', desc: 'Professional, business-grade workspaces', icon: '🏢', items: business },
+      { id: 'RANDOM_COVER', name: 'Random All (Recommended)', desc: 'Automatically rotates randomly so every page gets a unique cover photo', icon: '🎲', items: [...nature, ...architecture, ...tech, ...business] },
     ],
   };
 }
 
 /**
- * Cập nhật Ảnh Bìa (Cover Photo) hàng loạt cho dàn Fanpage
+ * Bulk-updates the Cover Photo for your Fanpages
  */
 async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}, onProgress) {
   const {
@@ -769,7 +769,7 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
   } = options;
 
   const cookies = parseCookieString(cookieString);
-  if (!cookies.length) throw new Error('Cookie rỗng hoặc không đúng định dạng');
+  if (!cookies.length) throw new Error('Cookie is empty or in the wrong format');
 
   const proxy = parseProxy(proxyUrl);
   const presets = getCoverPresets();
@@ -777,7 +777,7 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
   const presetPool = selectedCat.items;
 
   const uid = getUserIdFromCookie(cookieString);
-  const profileDir = uid ? path.join(__dirname, 'browser_profiles', `via_${uid}`) : null;
+  const profileDir = uid ? path.join(PROFILES_DIR, `via_${uid}`) : null;
   if (profileDir) fs.mkdirSync(profileDir, { recursive: true });
 
   const browserOptions = {
@@ -808,7 +808,7 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
   try {
     for (let i = 0; i < pagesToUpdate.length; i++) {
       if (typeof shouldStop === 'function' && shouldStop()) {
-        console.warn(`[CoverStudio] 🛑 Dừng theo yêu cầu người dùng tại page ${i + 1}/${pagesToUpdate.length}`);
+        console.warn(`[CoverStudio] 🛑 Stopped at the user's request at page ${i + 1}/${pagesToUpdate.length}`);
         break;
       }
 
@@ -827,7 +827,7 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
           pageId,
           pageName,
           status: 'RUNNING',
-          message: `[${i + 1}/${pagesToUpdate.length}] Đang tải ảnh bìa cho "${pageName}"...`,
+          message: `[${i + 1}/${pagesToUpdate.length}] Uploading the cover photo for "${pageName}"...`,
         });
       }
 
@@ -851,14 +851,14 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
           localTempFile = await downloadImageToTemp(chosenUrl, `cov_${pageId}`);
         }
 
-        console.log(`[CoverStudio] 🔄 [${i + 1}/${pagesToUpdate.length}] Đổi Ảnh Bìa cho Page "${pageName}" (${pageId})...`);
+        console.log(`[CoverStudio] 🔄 [${i + 1}/${pagesToUpdate.length}] Changing the Cover Photo for Page "${pageName}" (${pageId})...`);
         await tab.goto(`https://www.facebook.com/profile.php?id=${pageId}`, {
           waitUntil: 'domcontentloaded',
           timeout: 25000,
         }).catch(() => {});
         await tab.waitForTimeout(2000);
 
-        // Chuyển sang danh tính Page nếu cần
+        // Switch to the Page identity if needed
         const switchBtn = tab.locator('div[role="button"]:has-text("Chuyển ngay"), div[role="button"]:has-text("Chuyển"), [aria-label="Chuyển ngay"], [aria-label="Chuyển"]').first();
         if (await switchBtn.isVisible().catch(() => false)) {
           await switchBtn.click({ force: true }).catch(() => {});
@@ -874,19 +874,19 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
         await tab.waitForTimeout(1000);
         await tab.keyboard.press('Escape').catch(() => {});
 
-        // Tìm nút Đổi ảnh bìa (Cover Button)
+        // Find the change-cover button (Cover Button)
         const coverBtn = tab.locator(
           'div[aria-label*="ảnh bìa" i], div[aria-label*="cover photo" i], div[role="button"]:has-text("Chỉnh sửa ảnh bìa"), div[role="button"]:has-text("Edit cover photo"), div[role="button"]:has-text("Thêm ảnh bìa"), div[role="button"]:has-text("Add cover photo")'
         ).first();
 
         if ((await coverBtn.count().catch(() => 0)) === 0 || !(await coverBtn.isVisible().catch(() => false))) {
-          throw new Error('Không tìm thấy nút chỉnh sửa Ảnh Bìa trên Fanpage');
+          throw new Error('Cover Photo edit button not found on the Fanpage');
         }
 
         await coverBtn.click({ force: true });
         await tab.waitForTimeout(1500);
 
-        // Trong popup menu, chọn "Tải ảnh lên"
+        // In the popup menu, pick "Upload photo"
         let uploadSuccess = false;
         const uploadMenuItem = tab.locator('div[role="menuitem"]:has-text("Tải ảnh lên"), div[role="menuitem"]:has-text("Upload photo"), div[role="button"]:has-text("Tải ảnh lên")').first();
         if ((await uploadMenuItem.count().catch(() => 0)) > 0 && (await uploadMenuItem.isVisible().catch(() => false))) {
@@ -909,10 +909,10 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
         }
 
         if (!uploadSuccess) {
-          throw new Error('Không thể kích hoạt hộp thoại chọn tệp Ảnh Bìa');
+          throw new Error('Could not open the Cover Photo file picker dialog');
         }
 
-        // Bấm "Lưu thay đổi" (Save changes) bắt buộc
+        // Click the required "Save changes" button
         let coverSaved = false;
         const coverSaveSelectors = [
           'div[role="button"]:has-text("Lưu thay đổi")',
@@ -928,7 +928,7 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
             if ((await btn.count().catch(() => 0)) > 0 && (await btn.isVisible().catch(() => false))) {
               await btn.click({ force: true }).catch(() => {});
               coverSaved = true;
-              console.log(`[CoverStudio] 💾 Đã bấm "Lưu thay đổi" Ảnh Bìa cho Page "${pageName}"`);
+              console.log(`[CoverStudio] 💾 Clicked "Save changes" on the Cover Photo for Page "${pageName}"`);
               break;
             }
           }
@@ -936,7 +936,7 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
         }
 
         if (!coverSaved) {
-          throw new Error('Nút "Lưu thay đổi" ảnh bìa không xuất hiện trên Facebook');
+          throw new Error('The cover photo "Save changes" button did not appear on Facebook');
         }
 
         await tab.waitForTimeout(3000);
@@ -956,7 +956,7 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
           pageName,
           status: 'SUCCESS',
           duration,
-          message: `Đổi ảnh bìa thành công (${duration})`,
+          message: `Cover photo changed successfully (${duration})`,
         };
         details.push(detail);
 
@@ -970,7 +970,7 @@ async function bulkUpdateFanpageCovers(cookieString, pagesToUpdate, options = {}
           });
         }
       } catch (err) {
-        console.warn(`[CoverStudio] ⚠️ Lỗi khi đổi ảnh bìa "${pageName}": ${err.message}`);
+        console.warn(`[CoverStudio] ⚠️ Error changing the cover photo for "${pageName}": ${err.message}`);
         const duration = `${((Date.now() - startTime) / 1000).toFixed(1)}s`;
         const detail = {
           pageId,

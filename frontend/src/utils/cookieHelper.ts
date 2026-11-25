@@ -1,12 +1,12 @@
 /**
- * cookieHelper.ts - Tiện ích phân tích và chuẩn hoá Cookie Facebook
- * Hỗ trợ các định dạng:
- * 1. JSON từ Cookie-Editor ({"url": "...", "cookies": [...]})
- * 2. Mảng JSON Cookie ([{ name: "...", value: "..." }])
- * 3. JSON Object ({ "cookies": [...] } hoặc { c_user: "...", xs: "..." })
- * 4. Chuỗi chuẩn: "c_user=...; xs=...; sb=...; fr=...; datr=..."
- * 5. Định dạng VIA gộp: UID|PASS|2FA|COOKIE...
- * 6. Chỉ mã phiên xs: "8%3A..."
+ * cookieHelper.ts - Parses and normalizes Facebook cookies
+ * Supported formats:
+ * 1. JSON from Cookie-Editor ({"url": "...", "cookies": [...]})
+ * 2. JSON cookie array ([{ name: "...", value: "..." }])
+ * 3. JSON object ({ "cookies": [...] } or { c_user: "...", xs: "..." })
+ * 4. Standard string: "c_user=...; xs=...; sb=...; fr=...; datr=..."
+ * 5. Combined VIA format: UID|PASS|2FA|COOKIE...
+ * 6. Session token xs only: "8%3A..."
  */
 
 export interface CookieItem {
@@ -61,10 +61,10 @@ export function parseFacebookCookie(input?: string): ParsedFacebookCookie {
   }
 
   let str = String(input).trim();
-  // Loại bỏ markdown code block nếu copy từ chat
+  // Strip markdown code fences if copied from a chat
   str = str.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
 
-  // 1. Kiểm tra nếu là dạng JSON (Object hoặc Array)
+  // 1. Check for JSON (object or array)
   if ((str.startsWith('{') && str.endsWith('}')) || (str.startsWith('[') && str.endsWith(']'))) {
     try {
       const parsed = JSON.parse(str);
@@ -105,7 +105,7 @@ export function parseFacebookCookie(input?: string): ParsedFacebookCookie {
           pairs.push(`${name}=${val}`);
         }
 
-        // Nếu không có c_user trực tiếp, thử tìm trong trường pas
+        // No direct c_user: try the pas field
         if (!cUser && extra.pas) {
           const pasMatch = extra.pas.match(/([0-9]{6,})/);
           if (pasMatch) cUser = pasMatch[1];
@@ -125,11 +125,11 @@ export function parseFacebookCookie(input?: string): ParsedFacebookCookie {
         };
       }
     } catch (_) {
-      // JSON không hợp lệ, tiếp tục xử lý các dạng khác
+      // Invalid JSON, fall through to the other formats
     }
   }
 
-  // 2. Kiểm tra nếu có dấu gạch đứng pipe | (UID|PASS|2FA|COOKIE)
+  // 2. Check for pipe separators | (UID|PASS|2FA|COOKIE)
   if (str.includes('|')) {
     const parts = str.split('|').map((p) => p.trim());
     const cookiePart = parts.find(
@@ -154,13 +154,13 @@ export function parseFacebookCookie(input?: string): ParsedFacebookCookie {
     }
   }
 
-  // 3. Chuỗi chuẩn c_user=...; xs=...
+  // 3. Standard string c_user=...; xs=...
   const cUserMatch = str.match(/(?:^|;\s*)c_user=([^;\s]+)/i);
   const xsMatch = str.match(/(?:^|;\s*)xs=([^;\s]+)/i);
   const c_user = cUserMatch ? cUserMatch[1].trim() : '';
   const xs = xsMatch ? xsMatch[1].trim() : '';
 
-  // 4. Nếu chỉ có mã phiên xs (vd: 8%3APksdsIDht4Xb8Q%3A2%3A1795319272...)
+  // 4. Session token xs only (e.g. 8%3APksdsIDht4Xb8Q%3A2%3A1795319272...)
   if (!c_user && !xs && (str.includes('%3A') || str.length > 20) && !str.includes(';') && !str.includes('=')) {
     return {
       valid: false,

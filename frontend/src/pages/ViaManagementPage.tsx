@@ -1,3 +1,4 @@
+import { offerTopUpAfterCookieUpdate } from '../utils/topUp';
 import React, { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
 import {
   Table,
@@ -194,7 +195,7 @@ const DRAWER_PAGE_STEP = 50;
 const EMPTY_PAGES: FanpageItem[] = [];
 const EMPTY_CHILDREN: ChildAccountItem[] = [];
 
-// Render danh sách dài theo từng lô để Drawer mở nhanh với Via có hàng trăm Page
+// Render long lists in batches so the Drawer opens fast for Vias with hundreds of Pages
 function useIncrementalList<T>(items: T[], resetKey: string, step = DRAWER_PAGE_STEP) {
   const [limit, setLimit] = useState(step);
   useEffect(() => {
@@ -208,7 +209,7 @@ function useIncrementalList<T>(items: T[], resetKey: string, step = DRAWER_PAGE_
   };
 }
 
-// Ảnh đại diện Facebook tải lười: trình duyệt chỉ tải khi cuộn tới
+// Lazy-loaded Facebook avatar: the browser only loads it when scrolled into view
 function fbAvatarSrc(id?: string) {
   if (!id || !/^[0-9]+$/.test(id)) return undefined;
   return (
@@ -232,16 +233,16 @@ const ShowMoreButton: React.FC<{ remaining: number; onClick: () => void }> = ({ 
       onClick={onClick}
       className="bg-slate-900 border-slate-700 hover:border-cyan-500 text-cyan-300 text-xs rounded-lg"
     >
-      Xem thêm ({remaining} còn lại)
+      Show more ({remaining} left)
     </Button>
   ) : null;
 
-/** Các trường Cookie Facebook nhập riêng (c_user và xs là bắt buộc) */
+/** Facebook Cookie fields entered separately (c_user and xs are required) */
 const COOKIE_FIELDS: { key: string; label: string; required?: boolean; hint: string }[] = [
-  { key: 'c_user', label: 'c_user', required: true, hint: 'UID, dãy số' },
-  { key: 'xs', label: 'xs', required: true, hint: 'Chuỗi dài, có dấu %3A' },
-  { key: 'datr', label: 'datr', hint: 'Tuỳ chọn' },
-  { key: 'sb', label: 'sb', hint: 'Tuỳ chọn' },
+  { key: 'c_user', label: 'c_user', required: true, hint: 'UID, digits' },
+  { key: 'xs', label: 'xs', required: true, hint: 'Long string with %3A' },
+  { key: 'datr', label: 'datr', hint: 'Optional' },
+  { key: 'sb', label: 'sb', hint: 'Optional' },
 ];
 
 const parseCookieParts = (cookie: string): Record<string, string> => {
@@ -265,7 +266,7 @@ const composeCookie = (parts: Record<string, string>) =>
     .map((f) => `${f.key}=${parts[f.key].trim()}`)
     .join('; ');
 
-/** Ô nhập Cookie dùng được trong Form.Item: dán cả chuỗi hoặc nhập từng ô */
+/** Cookie input usable in a Form.Item: paste the whole string or fill each box */
 const CookieInput: React.FC<{
   value?: string;
   onChange?: (v: string) => void;
@@ -281,12 +282,12 @@ const CookieInput: React.FC<{
           const parsed = parseFacebookCookie(val);
           if (parsed.isJson) {
             onChange?.(parsed.cookieString);
-            message.success(`Đã nhận diện JSON Cookie (${parsed.cookieCount} cookies): UID ${parsed.c_user || 'N/A'}`);
+            message.success(`JSON Cookie detected (${parsed.cookieCount} cookies): UID ${parsed.c_user || 'N/A'}`);
           } else {
             onChange?.(val);
           }
         }}
-        placeholder="Dán Cookie vào đây (hỗ trợ chuỗi c_user=...; xs=... hoặc dán nguyên khối JSON Cookie-Editor)"
+        placeholder="Paste the Cookie here (supports c_user=...; xs=... strings or a whole Cookie-Editor JSON block)"
         className="font-mono text-xs"
       />
     );
@@ -310,7 +311,7 @@ const CookieInput: React.FC<{
               const parsed = parseFacebookCookie(val);
               if (parsed.isJson) {
                 onChange?.(parsed.cookieString);
-                message.success(`Đã nhận diện JSON Cookie: UID ${parsed.c_user || 'N/A'}`);
+                message.success(`JSON Cookie detected: UID ${parsed.c_user || 'N/A'}`);
               } else {
                 onChange?.(composeCookie({ ...parts, [f.key]: val }));
               }
@@ -361,7 +362,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   const [cookieMode, setCookieMode] = useState<'paste' | 'fields'>('paste');
   const [bulkInputText, setBulkInputText] = useState('');
 
-  // Quản lý Fanpage của Via
+  // Via Fanpage management
   const [cachedPagesMap, setCachedPagesMap] = useState<Record<string, FanpageItem[]>>({});
   const [scanningUids, setScanningUids] = useState<Set<string>>(new Set());
   const [testingCookieIds, setTestingCookieIds] = useState<Set<number>>(new Set());
@@ -370,7 +371,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   const [pageSearchQuery, setPageSearchQuery] = useState('');
   const [drawerActiveTab, setDrawerActiveTab] = useState<'scanned' | 'db' | 'export'>('scanned');
 
-  // Modal Thêm thủ công Fanpage cho một Via trong Drawer
+  // Modal to manually add Fanpages for a Via in the Drawer
   const [manualAddText, setManualAddText] = useState('');
   const [manualAddMode, setManualAddMode] = useState<'fields' | 'bulk'>('fields');
   const [manualRows, setManualRows] = useState<Array<{ id: string; name: string }>>([
@@ -378,11 +379,11 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   ]);
   const [isAddingManualToDrawer, setIsAddingManualToDrawer] = useState(false);
 
-  // Quản lý kiểm tra sức khỏe Fanpage
+  // Fanpage health check state
   const [pageHealthMap, setPageHealthMap] = useState<Record<string, 'LIVE' | 'RESTRICTED' | 'NOT_FOUND'>>({});
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
 
-  // Quản lý kiểm tra sức khỏe Proxy
+  // Proxy health check state
   const [testingProxyVias, setTestingProxyVias] = useState<Set<number>>(new Set());
   const [viaProxyHealthMap, setViaProxyHealthMap] = useState<
     Record<number, { success: boolean; latencyMs?: number; ip?: string; country?: string; error?: string }>
@@ -396,7 +397,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     error?: string;
   } | null>(null);
 
-  // Modal Cập nhật / Đổi Cookie cho Via (Tách 2 dòng: c_user và xs)
+  // Update / change Cookie modal for a Via (2 lines: c_user and xs)
   const [updateCookieModalVia, setUpdateCookieModalVia] = useState<MotherViaAccount | null>(null);
   const [cookieCUser, setCookieCUser] = useState('');
   const [cookieXs, setCookieXs] = useState('');
@@ -411,7 +412,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   // Search filter
   const [searchText, setSearchText] = useState('');
 
-  // Giá trị trễ cho các ô tìm kiếm/nhập liệu: ô input vẫn nhạy, phần lọc nặng chạy ưu tiên thấp
+  // Deferred values for search/input boxes: the input stays responsive, heavy filtering runs at low priority
   const deferredSearchText = useDeferredValue(searchText);
   const deferredPageQuery = useDeferredValue(pageSearchQuery);
   const deferredBulkText = useDeferredValue(bulkInputText);
@@ -420,20 +421,20 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     [deferredBulkText]
   );
 
-  // Tự động nhận diện UID từ Link hoặc Cookie đang nhập
+  // Auto-detect the UID from the Link or Cookie being typed
   const recognizedUid = useMemo(() => {
     const fromLink = extractUidFromLink(linkOrUidInput);
     if (fromLink) return fromLink;
     return extractUidFromCookie(cookieInputVal);
   }, [linkOrUidInput, cookieInputVal]);
 
-  // Tải danh sách Page đã cache từ Backend và LocalStorage
+  // Load cached Pages from the Backend and LocalStorage
   const loadCachedPages = async () => {
     seedLocalStorageIfEmpty();
     const seedPages = getInitialSeedPages();
     const pageMap: Record<string, FanpageItem[]> = { ...(seedPages as any) };
 
-    // 1. Đọc từ Backend Cache
+    // 1. Read from the Backend cache
     try {
       const res = await api.get('/buff-cached-pages');
       if (res.data?.success && res.data.cache) {
@@ -445,7 +446,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       }
     } catch (e) {}
 
-    // 2. Đọc bổ sung từ LocalStorage
+    // 2. Supplement from LocalStorage
     try {
       const raw = localStorage.getItem(VIA_PAGES_STORAGE_KEY);
       if (raw) {
@@ -468,7 +469,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     loadCachedPages();
   }, []);
 
-  // Lưu Pages cho một Via vào cả Backend và LocalStorage
+  // Save a Via's Pages to both the Backend and LocalStorage
   const persistPagesForVia = async (uid: string, pages: FanpageItem[], viaName: string = '') => {
     setCachedPagesMap((prev) => ({ ...prev, [uid]: pages }));
 
@@ -489,9 +490,9 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
   };
 
   // =============================================================================
-  // GỘP TÀI KHOẢN THEO TỪNG VIA MẸ CHÍNH (MOTHER ACCOUNT / PROFILE)
-  // Mỗi Via Mẹ chỉ xuất hiện 1 DÒNG DUY NHẤT trên bảng quản lý!
-  // Toàn bộ Fanpage và Group trực thuộc sẽ được phân cấp con bên trong Via đó.
+  // GROUP ACCOUNTS BY MAIN PARENT VIA (MOTHER ACCOUNT / PROFILE)
+  // Each parent Via appears on exactly ONE ROW in the management table!
+  // All of its Fanpages and Groups are nested as children inside that Via.
   // =============================================================================
   const motherVias = useMemo<MotherViaAccount[]>(() => {
     const map = new Map<
@@ -503,14 +504,14 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     >();
 
     for (const acc of accounts) {
-      // Bỏ qua các nền tảng khác như Threads hoặc Group đơn lẻ không có cookie
+      // Skip other platforms like Threads or standalone Groups without a cookie
       if (acc.platform === 'THREADS') continue;
       if (acc.platform === 'FACEBOOK_GROUP' && !(acc.cookieString || acc.accessToken)?.includes('c_user=')) {
         continue;
       }
 
       const uidFromCookie = extractUidFromCookie(acc.cookieString || acc.accessToken);
-      // Phải có UID từ cookie c_user hoặc là tài khoản FACEBOOK_PROFILE
+      // Must have a UID from the c_user cookie or be a FACEBOOK_PROFILE account
       if (!uidFromCookie && acc.platform !== 'FACEBOOK_PROFILE' && acc.accountType !== 'PERSONAL_PROFILE_COOKIE') {
         continue;
       }
@@ -534,10 +535,10 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     const result: MotherViaAccount[] = [];
 
     for (const [uid, { profileRow, allRows }] of map.entries()) {
-      // Đại diện: ưu tiên row profile, hoặc row có trạng thái OK, hoặc row đầu tiên
+      // Representative: prefer the profile row, then a row with OK status, then the first row
       const rep = profileRow || allRows.find((r) => r.tokenStatus === 'OK') || allRows[0];
 
-      // Tên hiển thị chuẩn: ưu tiên tên profile thật (ví dụ "Thành An", "Huỳnh Thạnh Phú")
+      // Display name: prefer the real profile name (e.g. "Thành An", "Huỳnh Thạnh Phú")
       let name = profileRow?.pageName;
       if (!name) {
         const namedRow = allRows.find(
@@ -546,7 +547,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         name = namedRow?.pageName || `Via ${uid}`;
       }
 
-      // Chuỗi Cookie chuẩn: ưu tiên cookie có c_user và xs
+      // Cookie string: prefer one with c_user and xs
       let cookie = profileRow?.cookieString || profileRow?.accessToken || '';
       if (!cookie || !cookie.includes('c_user=')) {
         const withCuser = allRows.find((r) =>
@@ -558,17 +559,17 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       // Proxy
       const proxy = profileRow?.proxyUrl || allRows.find((r) => r.proxyUrl)?.proxyUrl || '';
 
-      // Trạng thái: nếu có bất kỳ row nào OK thì là OK
+      // Status: OK if any row is OK
       const hasOk = allRows.some((r) => r.tokenStatus === 'OK');
       const hasCheckpoint = allRows.some((r) => r.tokenStatus === 'CHECKPOINT');
       const tokenStatus = hasOk ? 'OK' : hasCheckpoint ? 'CHECKPOINT' : rep.tokenStatus || 'OK';
 
-      // Phân loại các tài khoản con trong MySQL Database:
+      // Classify child accounts in the MySQL database:
       const dbPages: ChildAccountItem[] = [];
       const dbGroups: ChildAccountItem[] = [];
 
       for (const row of allRows) {
-        // Nếu là chính profile mẹ thì không liệt kê vào danh sách trang con
+        // The parent profile itself isn't listed as a child page
         if (profileRow && row.id === profileRow.id) continue;
         if (row.platform === 'FACEBOOK_PROFILE') continue;
 
@@ -589,10 +590,10 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         }
       }
 
-      // Fanpage quét được từ trình duyệt Playwright
+      // Fanpages scanned by the Playwright browser
       const scannedPages = cachedPagesMap[uid] || [];
 
-      // Tổng số Fanpage duy nhất (gộp Scanned Pages + DB Pages, loại trùng ID)
+      // Total unique Fanpages (Scanned Pages + DB Pages merged, duplicate IDs removed)
       const pageIdSet = new Set<string>();
       for (const p of scannedPages) {
         if (p.id) pageIdSet.add(p.id);
@@ -620,7 +621,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       });
     }
 
-    // Sắp xếp: Ưu tiên Nick có Profile thật, có nhiều Page lên trước
+    // Sort: accounts with a real Profile and more Pages first
     return result.sort((a, b) => {
       if (a.isProfileRow && !b.isProfileRow) return -1;
       if (!a.isProfileRow && b.isProfileRow) return 1;
@@ -628,16 +629,16 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     });
   }, [accounts, cachedPagesMap]);
 
-  // Kiểm tra sức khỏe hàng loạt Fanpage con (Live / Restricted / Lỗi)
+  // Bulk health check of child Fanpages (Live / Restricted / Error)
   const handleCheckPagesHealth = async (pages: FanpageItem[]) => {
     if (!pages || pages.length === 0) {
-      message.warning('Chưa có Fanpage nào để kiểm tra sức khỏe!');
+      message.warning('No Fanpages to health-check yet!');
       return;
     }
     const pageIds = pages.map((p) => p.id);
     setIsCheckingHealth(true);
     message.loading({
-      content: `Đang kiểm tra kết nối & sức khỏe ${pageIds.length} Fanpage...`,
+      content: `Checking connection & health of ${pageIds.length} Fanpages...`,
       key: 'healthCheck',
       duration: 25,
     });
@@ -647,13 +648,13 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         setPageHealthMap((prev) => ({ ...prev, ...res.data.results }));
         const liveCount = Object.values(res.data.results).filter((v) => v === 'LIVE').length;
         message.success({
-          content: `Kiểm tra xong! ${liveCount}/${pageIds.length} Fanpage đang Hoạt Động Tốt (LIVE)!`,
+          content: `Check done! ${liveCount}/${pageIds.length} Fanpages are healthy (LIVE)!`,
           key: 'healthCheck',
           duration: 4,
         });
       }
     } catch (e: any) {
-      message.error({ content: 'Lỗi kiểm tra sức khỏe Fanpage: ' + e.message, key: 'healthCheck' });
+      message.error({ content: 'Fanpage health check error: ' + e.message, key: 'healthCheck' });
     } finally {
       setIsCheckingHealth(false);
     }
@@ -661,11 +662,11 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
   const [isCheckingAllVias, setIsCheckingAllVias] = useState(false);
 
-  // Kiểm tra hạn Cookie của toàn bộ dàn Via trên Facebook
+  // Check Cookie expiry for every Via on Facebook
   const handleCheckAllViasLive = async () => {
     setIsCheckingAllVias(true);
     message.loading({
-      content: 'Đang kiểm tra tính hợp lệ và hạn của Cookie trên Facebook cho toàn bộ dàn Via...',
+      content: 'Checking Cookie validity and expiry on Facebook for every Via...',
       key: 'checkAllViaHealth',
       duration: 30,
     });
@@ -673,27 +674,27 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       const res = await api.post('/buff-vias/health-check');
       if (res.data?.success) {
         message.success({
-          content: `Kiểm tra hoàn tất: ${res.data.liveCount}/${res.data.total} Via CÒN HẠN (LIVE)!`,
+          content: `Check complete: ${res.data.liveCount}/${res.data.total} Vias are VALID (LIVE)!`,
           key: 'checkAllViaHealth',
           duration: 4,
         });
         onRefresh();
         loadCachedPages();
       } else {
-        message.error({ content: res.data?.error || 'Lỗi kiểm tra Via', key: 'checkAllViaHealth' });
+        message.error({ content: res.data?.error || 'Via check error', key: 'checkAllViaHealth' });
       }
     } catch (e: any) {
-      message.error({ content: 'Lỗi kiểm tra sức khỏe Cookie: ' + e.message, key: 'checkAllViaHealth' });
+      message.error({ content: 'Cookie health check error: ' + e.message, key: 'checkAllViaHealth' });
     } finally {
       setIsCheckingAllVias(false);
     }
   };
 
-  // Test proxy trong modal thêm / sửa Via
+  // Test the proxy in the add / edit Via modal
   const handleTestModalProxy = async () => {
     const rawProxy = form.getFieldValue('proxyUrl');
     if (!rawProxy || !rawProxy.trim()) {
-      message.warning('Vui lòng nhập chuỗi Proxy trước khi kiểm tra!');
+      message.warning('Please enter a Proxy string before checking!');
       return;
     }
     setIsTestingModalProxy(true);
@@ -704,20 +705,20 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       if (res.data.success) {
         message.success(`Proxy LIVE! Ping: ${res.data.latencyMs}ms (IP: ${res.data.ip})`);
       } else {
-        message.error(res.data.error || 'Proxy không hoạt động');
+        message.error(res.data.error || 'Proxy is not working');
       }
     } catch (e: any) {
       setModalProxyTestResult({ success: false, error: e.response?.data?.error || e.message });
-      message.error('Không thể kiểm tra Proxy: ' + (e.response?.data?.error || e.message));
+      message.error('Could not check the Proxy: ' + (e.response?.data?.error || e.message));
     } finally {
       setIsTestingModalProxy(false);
     }
   };
 
-  // Test proxy của một dòng Via trên bảng
+  // Test the proxy of one Via row in the table
   const handleTestViaProxy = async (record: MotherViaAccount) => {
     if (!record.proxyUrl) {
-      message.info(`Via "${record.pageName}" đang dùng Direct IP mạng máy, không có Proxy riêng.`);
+      message.info(`Via "${record.pageName}" uses this machine's direct IP, no dedicated Proxy.`);
       return;
     }
     setTestingProxyVias((prev) => new Set(prev).add(record.id));
@@ -727,14 +728,14 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       if (res.data.success) {
         message.success(`[${record.pageName}] Proxy LIVE! Ping: ${res.data.latencyMs}ms (${res.data.country || 'Global'} - IP: ${res.data.ip})`);
       } else {
-        message.error(`[${record.pageName}] ${res.data.error || 'Proxy không kết nối được'}`);
+        message.error(`[${record.pageName}] ${res.data.error || 'Could not connect to the Proxy'}`);
       }
     } catch (e: any) {
       setViaProxyHealthMap((prev) => ({
         ...prev,
         [record.id]: { success: false, error: e.response?.data?.error || e.message },
       }));
-      message.error(`[${record.pageName}] Lỗi test: ${e.response?.data?.error || e.message}`);
+      message.error(`[${record.pageName}] Test error: ${e.response?.data?.error || e.message}`);
     } finally {
       setTestingProxyVias((prev) => {
         const next = new Set(prev);
@@ -744,17 +745,17 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     }
   };
 
-  // Quét toàn bộ Fanpage từ Cookie của Via bằng Playwright
+  // Scan every Fanpage from a Via's Cookie with Playwright
   const handleScanPagesForVia = async (via: MotherViaAccount) => {
     const uid = via.uid;
     if (!via.cookieString) {
-      message.error('Tài khoản này không có Cookie Facebook để quét!');
+      message.error('This account has no Facebook Cookie to scan with!');
       return;
     }
 
     setScanningUids((prev) => new Set(prev).add(uid));
     message.loading({
-      content: `Đang mở trình duyệt quét toàn bộ Fanpage từ Cookie nick [${via.pageName || uid}]...`,
+      content: `Opening a browser to scan every Fanpage from account [${via.pageName || uid}]'s Cookie...`,
       key: `scan_${uid}`,
       duration: 25,
     });
@@ -787,19 +788,19 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
         await persistPagesForVia(uid, merged, via.pageName || `Via ${uid}`);
         message.success({
-          content: `Quét xong! Tìm thấy ${scanned.length} Fanpage cho Via [${via.pageName || uid}] (Tổng hiện có: ${merged.length} Page)`,
+          content: `Scan done! Found ${scanned.length} Fanpages for Via [${via.pageName || uid}] (now ${merged.length} Pages in total)`,
           key: `scan_${uid}`,
           duration: 4,
         });
       } else {
         message.warning({
-          content: 'Không tìm thấy Fanpage nào hoặc Cookie cần xác minh.',
+          content: 'No Fanpages found or the Cookie needs verification.',
           key: `scan_${uid}`,
         });
       }
     } catch (err: any) {
       message.error({
-        content: `Lỗi quét Fanpage: ${err.response?.data?.error || err.message}`,
+        content: `Fanpage scan error: ${err.response?.data?.error || err.message}`,
         key: `scan_${uid}`,
       });
     } finally {
@@ -811,25 +812,25 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     }
   };
 
-  // 1. THÊM 1 VIA MẸ MỚI (NHẬP TỪNG Ô RÕ RÀNG)
+  // 1. ADD 1 NEW PARENT VIA (CLEAR FIELD-BY-FIELD INPUT)
   const handleAddSingleVia = async (values: any) => {
     try {
       setSubmitting(true);
       const rawCookieStr = (values.cookieString || '').trim();
       if (!rawCookieStr) {
-        message.error('Vui lòng dán chuỗi Cookie Facebook của Via!');
+        message.error('Please paste the Via\'s Facebook Cookie string!');
         return;
       }
 
       const parsed = parseFacebookCookie(rawCookieStr);
       const finalCookieStr = parsed.cookieString || rawCookieStr;
 
-      // Trích xuất UID từ Link/UID input hoặc từ Cookie
+      // Extract the UID from the Link/UID input or the Cookie
       const uidFromLink = extractUidFromLink(values.profileUrl);
       const uidFromCookie = parsed.c_user || extractUidFromCookie(rawCookieStr);
       const finalUid = uidFromLink || uidFromCookie || `via_${Date.now()}`;
 
-      // Tên Via Mẹ
+      // Parent Via name
       const finalPageName = values.pageName?.trim() || `Via ${finalUid}`;
 
       const addRes = await api.post('/connections', {
@@ -841,7 +842,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         accountType: 'PERSONAL_PROFILE_COOKIE',
       });
 
-      message.success(`Đã thêm Via ${finalPageName} (UID: ${finalUid})`);
+      message.success(`Added Via ${finalPageName} (UID: ${finalUid})`);
       if (addRes.data?.warning) message.warning({ content: addRes.data.warning, duration: 8 });
       form.resetFields();
       setLinkOrUidInput('');
@@ -855,20 +856,20 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     }
   };
 
-  // 2. THÊM HÀNG LOẠT NHIỀU VIA MẸ (BULK IMPORT)
+  // 2. BULK-ADD MANY PARENT VIAS (BULK IMPORT)
   const handleAddBulkVias = async () => {
     const rawAll = bulkInputText.trim();
     if (!rawAll) {
-      message.warning('Vui lòng dán danh sách Via vào ô bên dưới!');
+      message.warning('Please paste the Via list into the box below!');
       return;
     }
 
-    // Kiểm tra nếu người dùng dán nguyên một khối JSON (Cookie-Editor / J2TEAM)
+    // Check whether the user pasted a whole JSON block (Cookie-Editor / J2TEAM)
     const wholeParsed = parseFacebookCookie(rawAll);
     if (wholeParsed.valid && wholeParsed.isJson) {
       try {
         setSubmitting(true);
-        message.loading({ content: 'Đang xử lý nạp Via từ JSON Cookie...', key: 'bulkAdd' });
+        message.loading({ content: 'Importing Via from JSON Cookie...', key: 'bulkAdd' });
         const uid = wholeParsed.c_user;
         const name = `Via ${uid}`;
         const bulkRes = await api.post('/connections', {
@@ -884,13 +885,13 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         setIsAddViaModalOpen(false);
         onRefresh();
         message.success({
-          content: `Đã nạp thành công Via [${name}] từ JSON Cookie (${wholeParsed.cookieCount} cookies)!`,
+          content: `Imported Via [${name}] from JSON Cookie (${wholeParsed.cookieCount} cookies)!`,
           key: 'bulkAdd',
           duration: 4,
         });
         if (bulkRes.data?.warning) {
           message.warning({
-            content: 'Chưa lưu được vào MySQL, dữ liệu mới chỉ lưu tạm trên máy này.',
+            content: 'Could not save to MySQL; the new data is only stored temporarily on this machine.',
             duration: 8,
           });
         }
@@ -898,9 +899,9 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       } catch (e: any) {
         setSubmitting(false);
         if (e?.response?.status === 409) {
-          message.info({ content: 'Via này đã có sẵn trong hệ thống, không thêm mới.', key: 'bulkAdd' });
+          message.info({ content: 'This Via already exists in the system; nothing added.', key: 'bulkAdd' });
         } else {
-          message.error({ content: e?.response?.data?.error || e.message || 'Lỗi thêm Via', key: 'bulkAdd' });
+          message.error({ content: e?.response?.data?.error || e.message || 'Error adding Via', key: 'bulkAdd' });
         }
         return;
       }
@@ -908,12 +909,12 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
     const lines = bulkInputText.split('\n').map((l) => l.trim()).filter(Boolean);
     if (lines.length === 0) {
-      message.warning('Không có dòng dữ liệu Via hợp lệ!');
+      message.warning('No valid Via rows!');
       return;
     }
 
     setSubmitting(true);
-    message.loading({ content: `Đang xử lý nạp ${lines.length} Via vào hệ thống...`, key: 'bulkAdd' });
+    message.loading({ content: `Importing ${lines.length} Vias into the system...`, key: 'bulkAdd' });
 
     let successCount = 0;
     let duplicateCount = 0;
@@ -943,14 +944,14 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             const proxyPart = parts.find((p) => p.includes(':') && (p.includes('.') || p.includes('http')));
             if (proxyPart && proxyPart !== cookie) proxy = proxyPart;
           } else {
-            // Định dạng UID/Link | Tên | Cookie | Proxy
+            // Format UID/Link | Name | Cookie | Proxy
             uid = extractUidFromLink(parts[0]) || parts[0];
             name = parts[1] || `Via ${uid}`;
             cookie = parts[2] || line;
             proxy = parts[3] || '';
           }
         } else {
-          // Chỉ có cookie
+          // Cookie only
           const pCookie = parseFacebookCookie(line);
           cookie = pCookie.cookieString || line;
           uid = pCookie.c_user || extractUidFromCookie(line);
@@ -982,19 +983,19 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     if (successCount > 0) {
       setIsAddViaModalOpen(false);
       message.success({
-        content: `Đã nạp thành công ${successCount} Via vào hệ thống!${duplicateCount > 0 ? ` ${duplicateCount} Via đã có sẵn nên bỏ qua.` : ''}${failCount > 0 ? ` (${failCount} lỗi)` : ''}`,
+        content: `Imported ${successCount} Vias into the system!${duplicateCount > 0 ? ` ${duplicateCount} Vias already existed and were skipped.` : ''}${failCount > 0 ? ` (${failCount} errors)` : ''}`,
         key: 'bulkAdd',
         duration: 4,
       });
     } else if (duplicateCount > 0 && failCount === 0) {
-      message.info({ content: `Cả ${duplicateCount} Via đã có sẵn trong hệ thống, không thêm mới.`, key: 'bulkAdd' });
+      message.info({ content: `All ${duplicateCount} Vias already exist in the system; nothing added.`, key: 'bulkAdd' });
     } else {
-      message.error({ content: 'Không thêm được Via nào. Vui lòng kiểm tra định dạng Cookie (cần đủ c_user và xs)!', key: 'bulkAdd' });
+      message.error({ content: 'No Vias were added. Check the Cookie format (needs both c_user and xs)!', key: 'bulkAdd' });
     }
-    if (dbWarning) message.warning({ content: 'Chưa lưu được vào MySQL, dữ liệu mới chỉ lưu tạm trên máy này. Hãy kiểm tra kết nối MySQL.', duration: 8 });
+    if (dbWarning) message.warning({ content: 'Could not save to MySQL; the new data is only stored temporarily on this machine. Check the MySQL connection.', duration: 8 });
   };
 
-  // Kiểm tra sống/chết của Cookie riêng từng Via Mẹ
+  // Check whether each parent Via's Cookie is alive
   const handleTestViaLive = async (via: MotherViaAccount) => {
     setTestingCookieIds((prev) => new Set(prev).add(via.id));
     try {
@@ -1003,19 +1004,19 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         proxyUrl: via.proxyUrl || '',
       });
       if (res.data?.live) {
-        message.success(`Cookie nick [${via.pageName}] còn LIVE hoạt động tốt!`);
+        message.success(`Cookie for account [${via.pageName}] is LIVE and healthy!`);
         await api.put(`/connections/${via.id}`, { tokenStatus: 'OK' });
         onRefresh();
       } else {
-        message.error(`Cookie nick [${via.pageName}] đã CHECKPOINT hoặc hết hạn!`);
+        message.error(`Cookie for account [${via.pageName}] is CHECKPOINTED or expired!`);
         await api.put(`/connections/${via.id}`, { tokenStatus: 'CHECKPOINT' });
         onRefresh();
       }
     } catch (e: any) {
       if (via.cookieString?.includes('c_user=') && via.cookieString?.includes('xs=')) {
-        message.info(`Cookie nick [${via.pageName}] có cấu trúc hợp lệ (c_user + xs).`);
+        message.info(`Cookie for account [${via.pageName}] has a valid structure (c_user + xs).`);
       } else {
-        message.warning(`Cookie nick [${via.pageName}] thiếu c_user hoặc xs.`);
+        message.warning(`Cookie for account [${via.pageName}] is missing c_user or xs.`);
       }
     } finally {
       setTestingCookieIds((prev) => {
@@ -1026,11 +1027,11 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     }
   };
 
-  // Xóa Via Mẹ
+  // Delete a parent Via
   const handleDeleteVia = async (via: MotherViaAccount) => {
     try {
       const delRes = await api.delete(`/connections/${via.id}`);
-      message.success(`Đã xóa tài khoản Via [${via.pageName}] khỏi hệ thống`);
+      message.success(`Removed Via account [${via.pageName}] from the system`);
       if (delRes.data?.warning) message.warning({ content: delRes.data.warning, duration: 8 });
       onRefresh();
     } catch (err: any) {
@@ -1038,18 +1039,18 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     }
   };
 
-  // Xóa một Fanpage / Group con trong MySQL Database
+  // Delete a child Fanpage / Group from the MySQL database
   const handleDeleteChildDbAccount = async (childId: number) => {
     try {
       await api.delete(`/connections/${childId}`);
-      message.success('Đã xóa Page/Nhóm con khỏi database');
+      message.success('Child Page/Group deleted from the database');
       onRefresh();
     } catch (err: any) {
       message.error(err.response?.data?.error || err.message);
     }
   };
 
-  // Thêm Page thủ công vào Via đang mở Drawer (hỗ trợ cả từng ô riêng & dán hàng loạt)
+  // Manually add Pages to the Via open in the Drawer (supports individual fields & bulk paste)
   const handleSaveManualToDrawer = async () => {
     if (!selectedMotherVia) return;
     const uid = selectedMotherVia.uid;
@@ -1058,7 +1059,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     if (manualAddMode === 'fields') {
       const validRows = manualRows.filter((r) => r.id && r.id.trim());
       if (validRows.length === 0) {
-        message.warning('Vui lòng điền ít nhất 1 ô ID Fanpage hoặc Link Page!');
+        message.warning('Please fill in at least 1 Fanpage ID or Page link!');
         return;
       }
       for (const r of validRows) {
@@ -1085,14 +1086,14 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       }
     } else {
       if (!manualAddText.trim()) {
-        message.warning('Vui lòng nhập ít nhất 1 dòng ID_PAGE | Tên Page hoặc link Facebook!');
+        message.warning('Please enter at least 1 line of PAGE_ID | Page Name or a Facebook link!');
         return;
       }
       parsed = parseFanpagesInput(manualAddText);
     }
 
     if (parsed.length === 0) {
-      message.error('Không tìm thấy ID Fanpage hợp lệ trong nội dung đã nhập!');
+      message.error('No valid Fanpage ID found in what you entered!');
       return;
     }
 
@@ -1110,31 +1111,31 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     }
 
     await persistPagesForVia(uid, merged, selectedMotherVia.pageName || `Via ${uid}`);
-    message.success(`Đã thêm ${newCount} Fanpage mới vào Via [${selectedMotherVia.pageName}]!`);
+    message.success(`Added ${newCount} new Fanpages to Via [${selectedMotherVia.pageName}]!`);
     setManualAddText('');
     setManualRows([{ id: '', name: '' }]);
     setIsAddingManualToDrawer(false);
   };
 
-  // Xóa 1 Page khỏi danh sách quét của Via
+  // Remove 1 Page from the Via's scan list
   const handleDeletePageFromVia = async (pageId: string) => {
     if (!selectedMotherVia) return;
     const uid = selectedMotherVia.uid;
     const existing = cachedPagesMap[uid] || [];
     const updated = existing.filter((p) => p.id !== pageId);
     await persistPagesForVia(uid, updated, selectedMotherVia.pageName);
-    message.success('Đã xóa Fanpage khỏi Via này');
+    message.success('Fanpage removed from this Via');
   };
 
-  // Xóa toàn bộ Page khỏi danh sách quét của Via
+  // Remove every Page from the Via's scan list
   const handleClearAllPagesFromVia = async () => {
     if (!selectedMotherVia) return;
     const uid = selectedMotherVia.uid;
     await persistPagesForVia(uid, [], selectedMotherVia.pageName);
-    message.info('Đã xóa toàn bộ danh sách Fanpage quét của Via này');
+    message.info('Cleared this Via\'s whole scanned Fanpage list');
   };
 
-  // Mở modal cập nhật Cookie cho 1 Via cụ thể (tách sẵn c_user & xs)
+  // Open the update-Cookie modal for a specific Via (c_user & xs pre-split)
   const handleOpenUpdateCookieModal = (record: MotherViaAccount) => {
     setUpdateCookieModalVia(record);
     const existingCookie = record.cookieString || '';
@@ -1142,7 +1143,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     const matchCUser = parsed.c_user || record.uid || '';
     const matchXs = parsed.xs || '';
 
-    // NẾU VIA ĐÃ HẾT HẠN HOẶC CHECKPOINT: TỰ ĐỘNG XÓA TRỐNG Ô XS ĐỂ NGƯỜI DÙNG DÁN COOKIE MỚI VÀO NGAY LẬP TỨC
+    // IF THE VIA IS EXPIRED OR CHECKPOINTED: CLEAR THE XS FIELD SO THE USER CAN PASTE A NEW COOKIE RIGHT AWAY
     const isDead = record.tokenStatus === 'EXPIRED' || record.tokenStatus === 'CHECKPOINT' || record.tokenStatus === 'INVALID';
     setCookieCUser(matchCUser);
     setCookieXs(isDead ? '' : matchXs);
@@ -1154,7 +1155,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     setUpdateCookieTab('blob');
   };
 
-  // Hàm xử lý chung khi người dùng dán hoặc gõ vào bất kỳ ô nào (c_user, xs, raw hoặc dán nhanh JSON)
+  // Shared handler when the user pastes or types into any field (c_user, xs, raw or quick JSON paste)
   const applyParsedCookie = (val: string, source: 'c_user' | 'xs' | 'raw') => {
     const trimmed = val.trim();
     if (!trimmed) {
@@ -1169,27 +1170,27 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
     const parsed = parseFacebookCookie(trimmed);
 
-    // 1. Nếu là định dạng JSON (Cookie-Editor, J2TEAM, DevTools export...)
+    // 1. JSON format (Cookie-Editor, J2TEAM, DevTools export...)
     if (parsed.isJson) {
       if (parsed.c_user) setCookieCUser(parsed.c_user);
       if (parsed.xs) setCookieXs(parsed.xs);
       setRawCookieInput(parsed.cookieString);
       setParsedCookieInfo(parsed);
-      message.success(`⚡ Đã tự động nhận diện JSON Cookie (${parsed.cookieCount} cookies): UID ${parsed.c_user || 'N/A'}`);
+      message.success(`⚡ JSON Cookie detected automatically (${parsed.cookieCount} cookies): UID ${parsed.c_user || 'N/A'}`);
       return;
     }
 
-    // 2. Nếu là chuỗi cookie gộp có chứa cả c_user và xs (hoặc dạng pipe UID|PASS|2FA|COOKIE)
+    // 2. Combined cookie string containing both c_user and xs (or pipe format UID|PASS|2FA|COOKIE)
     if (parsed.valid || (trimmed.includes('c_user=') && trimmed.includes('xs='))) {
       if (parsed.c_user) setCookieCUser(parsed.c_user);
       if (parsed.xs) setCookieXs(parsed.xs);
       setRawCookieInput(parsed.cookieString || trimmed);
       setParsedCookieInfo(parsed);
-      message.info(`✨ Đã tự động bóc tách c_user (${parsed.c_user}) và xs!`);
+      message.info(`✨ Automatically split c_user (${parsed.c_user}) and xs!`);
       return;
     }
 
-    // 3. Nếu là nhập riêng ô c_user
+    // 3. c_user field entered on its own
     if (source === 'c_user') {
       if (trimmed.includes('xs=')) {
         const xsMatch = trimmed.match(/(?:^|;\s*)xs=([^;]+)/)?.[1];
@@ -1200,7 +1201,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       return;
     }
 
-    // 4. Nếu là nhập riêng ô xs
+    // 4. xs field entered on its own
     if (source === 'xs') {
       if (trimmed.includes('c_user=')) {
         const cMatch = trimmed.match(/(?:^|;\s*)c_user=([^;]+)/)?.[1];
@@ -1211,14 +1212,14 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       return;
     }
 
-    // 5. Ô raw/chuỗi gộp
+    // 5. Raw/combined string field
     setRawCookieInput(trimmed);
     if (parsed.c_user) setCookieCUser(parsed.c_user);
     if (parsed.xs) setCookieXs(parsed.xs);
     if (parsed.valid) setParsedCookieInfo(parsed);
   };
 
-  // Lưu Cookie mới cho Via (ghép từ 2 dòng c_user & xs và giữ toàn bộ cookies đầy đủ)
+  // Save the new Cookie for the Via (joined from the c_user & xs lines, keeping every cookie)
   const handleSaveNewCookie = async (forceOverwriteUid = false) => {
     if (!updateCookieModalVia) return;
 
@@ -1227,11 +1228,11 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     const cleanXs = cookieXs.trim();
 
     if (!cleanXs) {
-      message.error('Vui lòng điền mã phiên xs!');
+      message.error('Please fill in the xs session token!');
       return;
     }
 
-    // Ưu tiên chuỗi cookie đầy đủ nếu có (giữ sb, datr, pas, locale, fr, ...)
+    // Prefer the full cookie string if available (keeps sb, datr, pas, locale, fr, ...)
     if (rawCookieInput.trim() && (rawCookieInput.includes('c_user=') || rawCookieInput.includes('xs='))) {
       let updated = rawCookieInput.trim();
       if (cleanCUser) {
@@ -1253,23 +1254,23 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       finalCookie = `c_user=${cleanCUser}; xs=${cleanXs};`;
     }
 
-    // Kiểm tra nếu UID trong cookie khác với UID của Via hiện tại
+    // Check whether the UID in the cookie differs from the current Via's UID
     const targetUid = cleanCUser || updateCookieModalVia.uid;
     if (updateCookieModalVia.uid && cleanCUser && updateCookieModalVia.uid !== cleanCUser && !forceOverwriteUid) {
       Modal.confirm({
-        title: 'Xác nhận cập nhật Cookie cho UID mới',
+        title: 'Confirm Cookie update for a new UID',
         icon: <SyncOutlined className="text-amber-400" />,
         content: (
           <div className="space-y-2 text-xs text-slate-300">
             <p>
-              UID trích xuất từ Cookie vừa dán là <code className="text-cyan-300 font-bold">{cleanCUser}</code>, 
-              khác với UID hiện tại của Via là <code className="text-amber-300 font-bold">{updateCookieModalVia.uid}</code>.
+              The UID extracted from the pasted Cookie is <code className="text-cyan-300 font-bold">{cleanCUser}</code>,{' '}
+              which differs from the Via's current UID <code className="text-amber-300 font-bold">{updateCookieModalVia.uid}</code>.
             </p>
-            <p>Bạn có chắc chắn muốn cập nhật Cookie này cho Via <b className="text-white">{updateCookieModalVia.pageName}</b> không?</p>
+            <p>Are you sure you want to update this Via's Cookie: <b className="text-white">{updateCookieModalVia.pageName}</b>?</p>
           </div>
         ),
-        okText: 'Đồng ý cập nhật',
-        cancelText: 'Xem lại',
+        okText: 'Yes, update',
+        cancelText: 'Review',
         onOk: () => handleSaveNewCookie(true),
       });
       return;
@@ -1277,7 +1278,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
     try {
       setIsUpdatingCookie(true);
-      // Ghi nhớ Cookie vào LocalStorage của máy để app luôn sẵn sàng
+      // Remember the Cookie in this machine's LocalStorage so the app is always ready
       saveStoredCookieForVia(targetUid, finalCookie);
 
       let apiSuccess = false;
@@ -1292,15 +1293,16 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         apiSuccess = Boolean(res.data?.success);
         warningMsg = res.data?.warning || '';
       } catch (backendErr) {
-        // Backend có thể offline hoặc máy mới chưa có backend, LocalStorage vẫn nhận
+        // The backend may be offline or not set up on a new machine; LocalStorage still keeps it
         apiSuccess = true;
       }
 
       if (apiSuccess) {
-        message.success(`Đã cập nhật Cookie mới thành công cho Via [${updateCookieModalVia.pageName}]!`);
+        message.success(`New Cookie saved for Via [${updateCookieModalVia.pageName}]!`);
         if (warningMsg) message.warning({ content: warningMsg, duration: 8 });
+        offerTopUpAfterCookieUpdate();
 
-        // Quét lại Fanpage nếu người dùng chọn và backend đang hoạt động
+        // Rescan Fanpages if the user chose to and the backend is running
         if (autoRescanAfterUpdate) {
           handleScanPagesForVia({
             ...updateCookieModalVia,
@@ -1318,16 +1320,16 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         setParsedCookieInfo(null);
         onRefresh();
       } else {
-        message.error('Không thể cập nhật Cookie');
+        message.error('Could not update the Cookie');
       }
     } catch (err: any) {
-      message.error(err.response?.data?.error || err.message || 'Lỗi cập nhật Cookie');
+      message.error(err.response?.data?.error || err.message || 'Error updating the Cookie');
     } finally {
       setIsUpdatingCookie(false);
     }
   };
 
-  // Thống kê tổng số Fanpage trên toàn bộ hệ thống
+  // Total Fanpage stats across the whole system
   const { totalPagesCount, totalDbPagesCount, totalDbGroupsCount, liveViaCount } = useMemo(() => {
     let pagesSum = 0;
     let liveSum = 0;
@@ -1349,13 +1351,13 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     };
   }, [motherVias]);
 
-  // Danh sách Via đã lọc theo tìm kiếm
+  // Vias filtered by the search
   const filteredMotherVias = useMemo(() => {
     const q = deferredSearchText.toLowerCase().trim();
     if (!q) return motherVias;
 
     return motherVias.filter((v) => {
-      // Tìm theo tên Via hoặc UID hoặc Proxy
+      // Search by Via name, UID or Proxy
       if (
         (v.pageName || '').toLowerCase().includes(q) ||
         v.uid.toLowerCase().includes(q) ||
@@ -1363,7 +1365,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       ) {
         return true;
       }
-      // Tìm sâu vào danh sách Page con của Via này
+      // Also search inside this Via's child Pages
       const hasPageMatch = v.scannedPages.some(
         (p) => p.name.toLowerCase().includes(q) || p.id.includes(q)
       );
@@ -1376,13 +1378,13 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     });
   }, [motherVias, deferredSearchText]);
 
-  // Cập nhật selectedMotherVia khi motherVias thay đổi
+  // Update selectedMotherVia when motherVias changes
   const activeDrawerVia = useMemo(() => {
     if (!selectedMotherVia) return null;
     return motherVias.find((v) => v.uid === selectedMotherVia.uid) || selectedMotherVia;
   }, [motherVias, selectedMotherVia]);
 
-  // Danh sách Fanpage quét của Via đang chọn xem chi tiết trong Drawer
+  // Scanned Fanpages of the Via selected in the Drawer
   const currentScannedPages = activeDrawerVia?.scannedPages ?? EMPTY_PAGES;
   const filteredScannedPages = useMemo(() => {
     if (!deferredPageQuery.trim()) return currentScannedPages;
@@ -1392,7 +1394,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     );
   }, [currentScannedPages, deferredPageQuery]);
 
-  // Danh sách Page / Nhóm DB của Via đang chọn
+  // DB Pages / Groups of the selected Via
   const currentDbPages = activeDrawerVia?.dbPages ?? EMPTY_CHILDREN;
   const currentDbGroups = activeDrawerVia?.dbGroups ?? EMPTY_CHILDREN;
   const filteredDbPages = useMemo(() => {
@@ -1411,13 +1413,13 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     );
   }, [currentDbGroups, deferredPageQuery]);
 
-  // Hiển thị dần danh sách trong Drawer, reset khi đổi Via / tab / từ khóa
+  // Progressively render the Drawer list, reset when the Via / tab / keyword changes
   const drawerListKey = `${activeDrawerVia?.uid ?? ''}|${drawerActiveTab}|${deferredPageQuery}`;
   const scannedList = useIncrementalList(filteredScannedPages, drawerListKey);
   const dbPagesList = useIncrementalList(filteredDbPages, drawerListKey);
   const dbGroupsList = useIncrementalList(filteredDbGroups, drawerListKey);
 
-  // Danh sách ID để xuất: tính một lần, loại trùng bằng Set thay vì quét lồng nhau
+  // IDs to export: computed once, deduped with a Set instead of nested scans
   const exportLines = useMemo(() => {
     const all: string[] = [];
     const scannedIds = new Set<string>();
@@ -1433,7 +1435,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
     return all;
   }, [currentScannedPages, currentDbPages]);
 
-  // Handler mới nhất cho các nút trong bảng, để cột không phải tạo lại mỗi lần render
+  // Latest handlers for the table buttons, so columns don't need to be recreated on every render
   const rowHandlersRef = useRef({ handleScanPagesForVia, handleTestViaProxy, handleTestViaLive, handleDeleteVia, handleOpenUpdateCookieModal });
   rowHandlersRef.current = { handleScanPagesForVia, handleTestViaProxy, handleTestViaLive, handleDeleteVia, handleOpenUpdateCookieModal };
 
@@ -1459,7 +1461,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   href={`https://www.facebook.com/${uid}`}
                   target="_blank"
                   rel="noreferrer"
-                  title="Mở trang cá nhân trên Facebook"
+                  title="Open the profile on Facebook"
                   className="block text-sm font-medium text-slate-100 hover:text-blue-400 truncate max-w-[200px]"
                 >
                   {record.pageName || `Via ${uid}`}
@@ -1471,10 +1473,10 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
               )}
               <button
                 type="button"
-                title="Sao chép UID"
+                title="Copy UID"
                 onClick={() => {
                   navigator.clipboard.writeText(uid);
-                  message.success(`Đã sao chép UID: ${uid}`);
+                  message.success(`Copied UID: ${uid}`);
                 }}
                 className="text-xs text-slate-500 hover:text-slate-300 tabular-nums bg-transparent border-0 p-0 cursor-pointer"
               >
@@ -1493,23 +1495,23 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         const isScanning = scanningUids.has(uid);
         const totalCount = record.totalUniquePagesCount || record.scannedPages.length;
         const parts = [
-          `${record.scannedPages.length} đã quét`,
-          record.dbPages.length > 0 ? `${record.dbPages.length} đã lưu` : '',
-          record.dbGroups.length > 0 ? `${record.dbGroups.length} nhóm` : '',
+          `${record.scannedPages.length} scanned`,
+          record.dbPages.length > 0 ? `${record.dbPages.length} saved` : '',
+          record.dbGroups.length > 0 ? `${record.dbGroups.length} groups` : '',
         ].filter(Boolean);
 
         return (
           <div className="space-y-1.5 py-0.5">
             <div className="text-sm text-slate-300 tabular-nums">{parts.join(' · ')}</div>
             <div className="flex items-center gap-1">
-              <Tooltip title="Mở trình duyệt để quét các Fanpage mà Via này quản lý">
+              <Tooltip title="Open a browser to scan the Fanpages this Via manages">
                 <Button
                   size="small"
                   type="primary"
                   loading={isScanning}
                   onClick={() => rowHandlersRef.current.handleScanPagesForVia(record)}
                 >
-                  {isScanning ? 'Đang quét...' : 'Quét Page'}
+                  {isScanning ? 'Scanning...' : 'Scan Pages'}
                 </Button>
               </Tooltip>
               <Button
@@ -1524,7 +1526,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
               >
                 Xem ({totalCount})
               </Button>
-              <Tooltip title="Dán danh sách ID / link Fanpage thủ công cho riêng Via này">
+              <Tooltip title="Paste a Fanpage ID / link list manually for this Via only">
                 <Button
                   size="small"
                   type="text"
@@ -1535,7 +1537,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   }}
                   className="text-slate-300"
                 >
-                  Thêm
+                  Add
                 </Button>
               </Tooltip>
             </div>
@@ -1552,7 +1554,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         const health = viaProxyHealthMap[record.id];
         const isTesting = testingProxyVias.has(record.id);
 
-        if (!val) return <span className="text-sm text-slate-500">Mạng máy</span>;
+        if (!val) return <span className="text-sm text-slate-500">Machine network</span>;
         return (
           <div className="leading-tight">
             <div className="flex items-center gap-2">
@@ -1568,12 +1570,12 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                 onClick={() => rowHandlersRef.current.handleTestViaProxy(record)}
                 className="p-0 h-auto text-xs"
               >
-                Kiểm tra
+                Check
               </Button>
             </div>
             {health && (
               <div className={`text-xs mt-1 ${health.success ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {health.success ? `Hoạt động · ${health.latencyMs}ms${health.country ? ` · ${health.country}` : ''}` : 'Không kết nối được'}
+                {health.success ? `Working · ${health.latencyMs}ms${health.country ? ` · ${health.country}` : ''}` : 'Could not connect'}
               </div>
             )}
           </div>
@@ -1581,24 +1583,24 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       },
     },
     {
-      title: 'Trạng thái',
+      title: 'Status',
       key: 'tokenStatus',
       width: 150,
       render: (_: any, record: MotherViaAccount) => {
         const isLive = record.tokenStatus === 'OK';
         const isTesting = testingCookieIds.has(record.id);
         const statusText = isLive
-          ? 'Hoạt động'
+          ? 'Active'
           : record.tokenStatus === 'CHECKPOINT'
           ? 'Checkpoint'
-          : 'Hết hạn';
+          : 'Expired';
         return (
           <div className="flex items-center gap-2">
             <span className={`inline-flex items-center gap-1.5 text-sm ${isLive ? 'text-emerald-400' : 'text-rose-400'}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-emerald-400' : 'bg-rose-400'}`} />
               {statusText}
             </span>
-            <Tooltip title="Kiểm tra Cookie của Via này còn sống hay không">
+            <Tooltip title="Check whether this Via's Cookie is still alive">
               <Button
                 size="small"
                 type="dashed"
@@ -1607,7 +1609,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                 onClick={() => rowHandlersRef.current.handleTestViaLive(record)}
                 className="!text-[11px] !h-6 !px-2 text-cyan-300 border-cyan-800/80 bg-cyan-950/20 hover:border-cyan-500 hover:text-cyan-200"
               >
-                Kiểm tra hạn
+                Check expiry
               </Button>
             </Tooltip>
           </div>
@@ -1622,23 +1624,23 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       render: (_: any, record: MotherViaAccount) => (
         <div className="flex items-center justify-end gap-1">
           <Button size="small" onClick={() => rowHandlersRef.current.handleOpenUpdateCookieModal(record)}>
-            Đổi Cookie
+            Change Cookie
           </Button>
           <Popconfirm
-            title={`Xóa tài khoản Via [${record.pageName}]?`}
-            description="Via và các Fanpage liên kết sẽ bị xoá khỏi hệ thống."
+            title={`Delete Via account [${record.pageName}]?`}
+            description="The Via and its linked Fanpages will be removed from the system."
             onConfirm={() => rowHandlersRef.current.handleDeleteVia(record)}
-            okText="Xóa luôn"
-            cancelText="Hủy"
+            okText="Delete"
+            cancelText="Cancel"
             okButtonProps={{ danger: true }}
           >
-            <Tooltip title="Xoá Via">
+            <Tooltip title="Delete Via">
               <Button
                 size="small"
                 type="text"
                 icon={<DeleteOutlined />}
                 className="text-slate-500 hover:!text-rose-400"
-                aria-label="Xoá Via"
+                aria-label="Delete Via"
               />
             </Tooltip>
           </Popconfirm>
@@ -1651,12 +1653,12 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
   return (
     <div className="space-y-6 max-w-[1440px] mx-auto pb-20">
-      {/* Tiêu đề + thao tác nhanh */}
+      {/* Title + quick actions */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-100 m-0">Tài khoản Via</h2>
+          <h2 className="text-lg font-semibold text-slate-100 m-0">Via Accounts</h2>
           <p className="text-xs text-slate-400 m-0 mt-1">
-            Thêm Cookie của Via, hệ thống tự quét các Fanpage mà Via đang quản lý.
+            Add a Via's Cookie and the system automatically scans the Fanpages it manages.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
@@ -1666,19 +1668,19 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             loading={isCheckingAllVias}
             onClick={handleCheckAllViasLive}
             className="!bg-cyan-600 hover:!bg-cyan-500 font-semibold shadow-md"
-            title="Kiểm tra xem toàn bộ Cookie của các tài khoản Via còn hạn hay không"
+            title="Check whether every Via account's Cookie is still valid"
           >
-            🩺 Kiểm tra hạn Cookie (Tất cả Via)
+            🩺 Check Cookie expiry (All Vias)
           </Button>
           <Button
             loading={loading}
             onClick={() => {
               onRefresh();
               loadCachedPages();
-              message.success('Đã làm mới danh sách Via');
+              message.success('Via list refreshed');
             }}
           >
-            Làm mới
+            Refresh
           </Button>
           {onNavigateToBuff && <Button onClick={onNavigateToBuff}>Sang Buff Like</Button>}
           <Button
@@ -1686,18 +1688,18 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             icon={<PlusOutlined />}
             onClick={() => setIsAddViaModalOpen(true)}
           >
-            Thêm Via
+            Add Via
           </Button>
         </div>
       </div>
 
-      {/* Số liệu tổng quan */}
+      {/* Overview stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="app-surface p-4 rounded-xl">
           <div className="text-xs text-slate-400">Via</div>
           <div className="text-2xl font-semibold text-slate-100 mt-1 tabular-nums">{motherVias.length}</div>
           <div className="text-xs text-slate-500 mt-1">
-            <span className="text-emerald-400">{liveViaCount}</span> đang hoạt động
+            <span className="text-emerald-400">{liveViaCount}</span> active
           </div>
         </div>
 
@@ -1705,49 +1707,49 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
           <div className="text-xs text-slate-400">Fanpage</div>
           <div className="text-2xl font-semibold text-slate-100 mt-1 tabular-nums">{totalPagesCount}</div>
           <div className="text-xs text-slate-500 mt-1 tabular-nums">
-            {totalDbPagesCount} đã lưu{totalDbGroupsCount > 0 ? ` · ${totalDbGroupsCount} nhóm` : ''}
+            {totalDbPagesCount} saved{totalDbGroupsCount > 0 ? ` · ${totalDbGroupsCount} groups` : ''}
           </div>
         </div>
 
         <button
           type="button"
           onClick={onCheckDb}
-          title="Bấm để kiểm tra lại"
+          title="Click to recheck"
           className="app-surface p-4 rounded-xl text-left cursor-pointer hover:border-slate-600 transition-colors"
         >
-          <div className="text-xs text-slate-400">Lưu trữ</div>
+          <div className="text-xs text-slate-400">Storage</div>
           <div className="text-base font-semibold text-slate-100 mt-1.5 flex items-center gap-2">
             <span
               className={`w-2 h-2 rounded-full ${
                 dbStatus.connected ? 'bg-emerald-400' : dbStatus.usingCache ? 'bg-amber-400' : 'bg-rose-500'
               }`}
             />
-            {dbStatus.connected ? 'Đã đồng bộ' : dbStatus.usingCache ? 'Đang dùng bộ nhớ đệm' : 'Mất kết nối'}
+            {dbStatus.connected ? 'Synced' : dbStatus.usingCache ? 'Using cache' : 'Disconnected'}
           </div>
           <div className="text-xs text-slate-500 mt-1">
-            {dbStatus.usingCache && !dbStatus.connected ? `${accounts.length} hồ sơ tạm` : 'Bấm để kiểm tra lại'}
+            {dbStatus.usingCache && !dbStatus.connected ? `${accounts.length} temporary profiles` : 'Click to recheck'}
           </div>
         </button>
       </div>
 
-      {/* 2. MODAL: NHẬP & KÍCH HOẠT VIA MỚI (CHỈ HIỂN THỊ KHI BẤM NÚT "THÊM VIA") */}
+      {/* 2. MODAL: ENTER & ACTIVATE A NEW VIA (ONLY SHOWN WHEN "ADD VIA" IS CLICKED) */}
       <Modal
         title={
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pr-6 pb-3 border-b border-slate-800/80">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-base font-semibold text-slate-100 m-0">Thêm Via</h3>
+              <h3 className="text-base font-semibold text-slate-100 m-0">Add Via</h3>
               {recognizedUid && (
                 <span className="text-xs text-slate-400 tabular-nums">UID: <span className="text-cyan-400 font-mono font-bold">{recognizedUid}</span></span>
               )}
             </div>
 
-            {/* Chọn chế độ: Nhập 1 Via vs Nhập Hàng Loạt */}
+            {/* Mode: single Via vs bulk import */}
             <Segmented
               value={addMode}
               onChange={(val) => setAddMode(val as 'single' | 'bulk')}
               options={[
-                { label: 'Từng tài khoản', value: 'single' },
-                { label: 'Hàng loạt', value: 'bulk' },
+                { label: 'One account', value: 'single' },
+                { label: 'Bulk', value: 'bulk' },
               ]}
             />
           </div>
@@ -1765,7 +1767,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       >
         <div className="pt-3">
 
-        {/* CHẾ ĐỘ 1: NHẬP TỪNG VIA THEO TỪNG CỘT RÕ RÀNG */}
+        {/* MODE 1: ENTER ONE VIA FIELD BY FIELD */}
         {addMode === 'single' ? (
           <Form
             form={form}
@@ -1776,10 +1778,10 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             }}
           >
             <Row gutter={16}>
-              {/* Cột 1: Tên gợi nhớ */}
+              {/* Column 1: nickname */}
               <Col xs={24} sm={12} lg={6}>
                 <Form.Item
-                  label={<span className="text-xs text-slate-300">Tên gợi nhớ <span className="text-slate-500">(tuỳ chọn)</span></span>}
+                  label={<span className="text-xs text-slate-300">Nickname <span className="text-slate-500">(optional)</span></span>}
                   name="pageName"
                   className="mb-3"
                 >
@@ -1790,28 +1792,28 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                 </Form.Item>
               </Col>
 
-              {/* Cột 2: Link Facebook hoặc UID */}
+              {/* Column 2: Facebook link or UID */}
               <Col xs={24} sm={12} lg={6}>
                 <Form.Item
-                  label={<span className="text-xs text-slate-300">Link hoặc UID <span className="text-slate-500">(tuỳ chọn)</span></span>}
+                  label={<span className="text-xs text-slate-300">Link or UID <span className="text-slate-500">(optional)</span></span>}
                   name="profileUrl"
                   className="mb-3"
                 >
                   <Input
                     value={linkOrUidInput}
                     onChange={(e) => setLinkOrUidInput(e.target.value)}
-                    placeholder="facebook.com/... hoặc UID"
+                    placeholder="facebook.com/... or UID"
                     className="h-10"
                   />
                 </Form.Item>
               </Col>
 
-              {/* Cột 3: Proxy riêng */}
+              {/* Column 3: dedicated Proxy */}
               <Col xs={24} sm={12} lg={12}>
                 <Form.Item
                   label={
                     <div className="flex items-center justify-between w-full">
-                      <span className="text-xs text-slate-300">Proxy <span className="text-slate-500">(tuỳ chọn)</span></span>
+                      <span className="text-xs text-slate-300">Proxy <span className="text-slate-500">(optional)</span></span>
                       <Button
                         type="link"
                         size="small"
@@ -1819,7 +1821,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                         onClick={handleTestModalProxy}
                         className="p-0 text-xs h-auto"
                       >
-                        Kiểm tra
+                        Check
                       </Button>
                     </div>
                   }
@@ -1827,7 +1829,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   className="mb-1"
                 >
                   <Input
-                    placeholder="Để trống để dùng IP máy · ip:port:user:pass hoặc socks5://..."
+                    placeholder="Leave empty to use this machine's IP · ip:port:user:pass or socks5://..."
                     className="h-10"
                   />
                 </Form.Item>
@@ -1838,15 +1840,15 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                       : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
                   }`}>
                     {modalProxyTestResult.success ? (
-                      <span>Hoạt động · IP: <span className="font-mono">{modalProxyTestResult.ip}</span> ({modalProxyTestResult.country || 'Global'}) · {modalProxyTestResult.latencyMs}ms</span>
+                      <span>Working · IP: <span className="font-mono">{modalProxyTestResult.ip}</span> ({modalProxyTestResult.country || 'Global'}) · {modalProxyTestResult.latencyMs}ms</span>
                     ) : (
-                      <span>Lỗi · {modalProxyTestResult.error}</span>
+                      <span>Error · {modalProxyTestResult.error}</span>
                     )}
                   </div>
                 )}
               </Col>
 
-              {/* Cookie Facebook (bắt buộc): dán cả chuỗi hoặc nhập từng ô */}
+              {/* Facebook Cookie (required): paste the whole string or fill each field */}
               <Col xs={24}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs text-slate-300">
@@ -1857,30 +1859,30 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                     value={cookieMode}
                     onChange={(v) => setCookieMode(v as 'paste' | 'fields')}
                     options={[
-                      { label: 'Dán cả chuỗi', value: 'paste' },
-                      { label: 'Nhập từng ô', value: 'fields' },
+                      { label: 'Paste whole string', value: 'paste' },
+                      { label: 'Field by field', value: 'fields' },
                     ]}
                   />
                 </div>
                 <Form.Item
                   name="cookieString"
                   rules={[
-                    { required: true, message: 'Vui lòng nhập Cookie Facebook!' },
+                    { required: true, message: 'Please enter the Facebook Cookie!' },
                     {
                       validator: (_, v) =>
                         cookieMode === 'fields' && v && !(/c_user=/.test(v) && /xs=/.test(v))
-                          ? Promise.reject(new Error('Cần nhập đủ c_user và xs'))
+                          ? Promise.reject(new Error('Both c_user and xs are required'))
                           : Promise.resolve(),
                     },
                   ]}
                   extra={
                     cookieMode === 'paste' ? (
                       <span className="text-[11px] text-slate-500">
-                        Dạng <code>c_user=...; xs=...</code> hoặc <code>UID|PASS|2FA|COOKIE</code>
+                        Format <code>c_user=...; xs=...</code> or <code>UID|PASS|2FA|COOKIE</code>
                       </span>
                     ) : (
                       <span className="text-[11px] text-slate-500">
-                        Lấy các giá trị này trong trình duyệt (F12 → Application → Cookies → facebook.com).
+                        Get these values from your browser (F12 → Application → Cookies → facebook.com).
                       </span>
                     )
                   }
@@ -1892,7 +1894,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             </Row>
 
             <div className="flex items-center justify-between pt-2">
-              <div className="text-xs text-slate-500">Sau khi thêm, bấm “Quét Page” ở danh sách bên dưới để lấy Fanpage.</div>
+              <div className="text-xs text-slate-500">After adding, click “Scan Pages” in the list below to fetch Fanpages.</div>
 
               <div className="flex items-center gap-3">
                 <Button
@@ -1903,7 +1905,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   }}
                   type="text"
                 >
-                  Xoá nội dung
+                  Clear
                 </Button>
                 <Button
                   type="primary"
@@ -1911,20 +1913,20 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   loading={submitting}
                   className="px-5"
                 >
-                  Thêm Via
+                  Add Via
                 </Button>
               </div>
             </div>
           </Form>
         ) : (
-          /* CHẾ ĐỘ 2: NHẬP HÀNG LOẠT NHIỀU VIA (BULK IMPORT DẠNG CỘT) */
+          /* MODE 2: BULK-IMPORT MANY VIAS (COLUMN FORMAT) */
           <div className="space-y-3">
             <div className="text-xs text-slate-300">
-              Dán danh sách nhiều nick cùng lúc (Mỗi dòng một nick). Hệ thống hỗ trợ 3 định dạng phổ biến:
+              Paste many accounts at once (one per line). 3 common formats are supported:
               <div className="mt-1 font-mono text-[11px] text-cyan-300 bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-0.5">
-                <div>• Định dạng 1: <span className="text-slate-200">UID/Link | Tên Via | Cookie | Proxy</span></div>
-                <div>• Định dạng 2 (Chuỗi mua Via): <span className="text-slate-200">UID | Password | 2FA | Cookie | Proxy</span></div>
-                <div>• Định dạng 3: <span className="text-slate-200">Chỉ dán chuỗi Cookie (mỗi dòng 1 cookie)</span></div>
+                <div>• Format 1: <span className="text-slate-200">UID/Link | Via Name | Cookie | Proxy</span></div>
+                <div>• Format 2 (purchased Via string): <span className="text-slate-200">UID | Password | 2FA | Cookie | Proxy</span></div>
+                <div>• Format 3: <span className="text-slate-200">Cookie string only (1 cookie per line)</span></div>
               </div>
             </div>
 
@@ -1938,7 +1940,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
             <div className="flex items-center justify-between pt-1">
               <span className="text-[11px] text-slate-500">
-                Đã nhập: {bulkLineCount} dòng nick
+                Entered: {bulkLineCount} account lines
               </span>
 
               <div className="flex items-center gap-2">
@@ -1946,7 +1948,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   onClick={() => setBulkInputText('')}
                   className="rounded-xl border-slate-700 text-slate-400 text-xs px-3 h-9"
                 >
-                  Xoá nội dung
+                  Clear
                 </Button>
                 <Button
                   type="primary"
@@ -1955,7 +1957,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   icon={<UploadOutlined />}
                   className="bg-cyan-600 hover:bg-cyan-500 text-on-accent font-bold text-xs rounded-xl px-5 h-9 border-0"
                 >
-                  Nạp Tất Cả Via Vào Hệ Thống
+                  Import All Vias Into The System
                 </Button>
               </div>
             </div>
@@ -1964,18 +1966,18 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         </div>
       </Modal>
 
-      {/* 3. BẢNG QUẢN LÝ VIA MẸ & DÀN FANPAGE TRỰC THUỘC */}
+      {/* 3. PARENT VIA TABLE & THEIR FANPAGES */}
       <div className="app-surface p-5 space-y-4 rounded-2xl shadow-xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
           <div className="flex items-center gap-2">
-            <h3 className="text-base font-semibold text-slate-100 m-0">Danh sách Via</h3>
+            <h3 className="text-base font-semibold text-slate-100 m-0">Vias</h3>
             <span className="text-xs text-slate-500 tabular-nums">{filteredMotherVias.length}</span>
           </div>
 
           {/* Search box & Refresh */}
           <div className="flex items-center gap-2.5">
             <Input
-              placeholder="Tìm theo tên Via, UID hoặc Fanpage..."
+              placeholder="Search by Via name, UID or Fanpage..."
               prefix={<SearchOutlined className="text-slate-400" />}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
@@ -1991,12 +1993,12 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
               loading={loading}
               className="bg-slate-900 border-slate-700 text-slate-200 text-xs rounded-xl h-9 hover:border-slate-500"
             >
-              Làm mới
+              Refresh
             </Button>
           </div>
         </div>
 
-        {/* Bảng danh sách Via Mẹ */}
+        {/* Parent Via table */}
         <Table
           dataSource={filteredMotherVias}
           rowKey="uid"
@@ -2009,9 +2011,9 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                 <div className="w-16 h-16 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-center text-slate-500 text-2xl">
                   <UserOutlined />
                 </div>
-                <div className="text-slate-300 font-bold text-sm">Chưa có tài khoản Via nào</div>
+                <div className="text-slate-300 font-bold text-sm">No Via accounts yet</div>
                 <p className="text-slate-500 text-xs max-w-sm text-center">
-                  Bấm nút <b>"Thêm Via"</b> ở góc trên để nạp tài khoản vào hệ thống!
+                  Click <b>"Add Via"</b> at the top to load accounts into the system!
                 </p>
                 <Button
                   type="primary"
@@ -2019,7 +2021,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   onClick={() => setIsAddViaModalOpen(true)}
                   className="mt-1"
                 >
-                  Thêm Via ngay
+                  Add Via now
                 </Button>
               </div>
             ),
@@ -2028,14 +2030,14 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         />
       </div>
 
-      {/* 4. DRAWER: XEM & QUẢN LÝ TOÀN BỘ DÀN FANPAGE VÀ NHÓM CON CỦA VIA MẸ */}
+      {/* 4. DRAWER: VIEW & MANAGE ALL FANPAGES AND CHILD GROUPS OF A PARENT VIA */}
       <Drawer
         title={
           <div className="flex items-center justify-between w-full pr-6">
             <div className="flex items-center gap-2.5 text-slate-100 font-bold text-base min-w-0">
               <CrownOutlined className="text-amber-400 text-lg" />
               <div className="truncate">
-                Dàn Fanpage Của Via: <span className="text-cyan-300">{activeDrawerVia?.pageName}</span>
+                Via Fanpages: <span className="text-cyan-300">{activeDrawerVia?.pageName}</span>
               </div>
             </div>
             <Tag color="cyan" className="font-mono text-xs font-bold rounded-full px-2.5 py-0.5 border-0">
@@ -2059,7 +2061,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
       >
         {activeDrawerVia && (
           <div className="space-y-4">
-            {/* Thẻ tóm tắt thông tin Via Mẹ */}
+            {/* Parent Via summary card */}
             <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <Avatar
@@ -2100,15 +2102,15 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   onClick={() => handleScanPagesForVia(activeDrawerVia)}
                   className="bg-cyan-600 hover:bg-cyan-500 text-xs rounded-lg font-semibold"
                 >
-                  Quét lại Page
+                  Rescan Pages
                 </Button>
               </div>
             </div>
 
-            {/* Thanh tìm kiếm & chuyển Tab */}
+            {/* Search bar & tab switch */}
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <Input
-                placeholder="Tìm Page / Nhóm theo tên hoặc ID..."
+                placeholder="Search Pages / Groups by name or ID..."
                 prefix={<SearchOutlined className="text-slate-400" />}
                 value={pageSearchQuery}
                 onChange={(e) => setPageSearchQuery(e.target.value)}
@@ -2124,7 +2126,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   onClick={() => handleCheckPagesHealth(currentScannedPages)}
                   className="bg-slate-900 border-slate-700 hover:border-emerald-500 text-slate-200 text-xs rounded-lg"
                 >
-                  Kiểm tra sức khỏe ({currentScannedPages.length})
+                  Health check ({currentScannedPages.length})
                 </Button>
 
                 <Button
@@ -2138,26 +2140,26 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   }}
                   className="bg-slate-800 border-slate-700 text-slate-200 text-xs rounded-lg hover:border-cyan-500 hover:text-cyan-400"
                 >
-                  {isAddingManualToDrawer ? 'Đóng ô thêm' : '+ Thêm Fanpage'}
+                  {isAddingManualToDrawer ? 'Close add box' : '+ Add Fanpage'}
                 </Button>
               </div>
             </div>
 
-            {/* Form thêm Page thủ công: Chia theo ô rõ ràng hoặc Dán hàng loạt */}
+            {/* Manual Page form: separate fields or bulk paste */}
             {isAddingManualToDrawer && (
               <div className="p-4 rounded-xl bg-slate-900/95 border border-cyan-500/40 space-y-3 shadow-xl">
                 <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
                   <div className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
                     <PlusCircleFilled className="text-cyan-400" />
-                    <span>Thêm Fanpage con cho riêng Via này:</span>
+                    <span>Add child Fanpages for this Via only:</span>
                   </div>
                   <Segmented
                     size="small"
                     value={manualAddMode}
                     onChange={(val) => setManualAddMode(val as 'fields' | 'bulk')}
                     options={[
-                      { label: 'Từng ô rõ ràng', value: 'fields' },
-                      { label: 'Dán hàng loạt', value: 'bulk' },
+                      { label: 'Separate fields', value: 'fields' },
+                      { label: 'Bulk paste', value: 'bulk' },
                     ]}
                     className="bg-slate-950 border border-slate-800 text-xs"
                   />
@@ -2170,8 +2172,8 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                         <span>1. ID Fanpage / Link Page</span>
                         <span className="text-rose-400">*</span>
                       </div>
-                      <div className="col-span-5">2. Tên Fanpage gợi nhớ <span className="text-slate-500">(tùy chọn)</span></div>
-                      <div className="col-span-1 text-center">Xóa</div>
+                      <div className="col-span-5">2. Fanpage nickname <span className="text-slate-500">(optional)</span></div>
+                      <div className="col-span-1 text-center">Delete</div>
                     </div>
 
                     <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
@@ -2179,7 +2181,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                         <div key={idx} className="grid grid-cols-12 gap-2 items-center">
                           <div className="col-span-6">
                             <Input
-                              placeholder="VD: 61586984840264 hoặc Link Facebook"
+                              placeholder="e.g. 61586984840264 or a Facebook link"
                               value={row.id}
                               onChange={(e) => {
                                 const next = [...manualRows];
@@ -2191,7 +2193,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                           </div>
                           <div className="col-span-5">
                             <Input
-                              placeholder="VD: Làm Sen, Shop Quần Áo..."
+                              placeholder="e.g. Làm Sen, Clothing Shop..."
                               value={row.name}
                               onChange={(e) => {
                                 const next = [...manualRows];
@@ -2227,23 +2229,23 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                         onClick={() => setManualRows([...manualRows, { id: '', name: '' }])}
                         className="text-cyan-400 border-cyan-800/80 bg-slate-950/70 hover:bg-slate-900 rounded-lg text-xs"
                       >
-                        + Thêm ô dòng tiếp theo
+                        + Add another row
                       </Button>
                       <span className="text-[11px] text-slate-400">
-                        Đang nhập: <b className="text-cyan-300">{manualRows.filter((r) => r.id.trim()).length}</b> page hợp lệ
+                        Entering: <b className="text-cyan-300">{manualRows.filter((r) => r.id.trim()).length}</b> valid pages
                       </span>
                     </div>
                   </div>
                 ) : (
                   <div className="space-y-2">
                     <div className="text-[11px] text-slate-400">
-                      Định dạng: <code className="text-cyan-300 font-mono">ID_PAGE | Tên Page</code> hoặc dán URL Facebook (mỗi dòng 1 page):
+                      Format: <code className="text-cyan-300 font-mono">PAGE_ID | Page Name</code> or paste a Facebook URL (1 page per line):
                     </div>
                     <Input.TextArea
                       rows={4}
                       value={manualAddText}
                       onChange={(e) => setManualAddText(e.target.value)}
-                      placeholder={`61586984840264 | Làm con mèo\n10008765432198 | Fanpage Bán Hàng\nhttps://www.facebook.com/10009876543210`}
+                      placeholder={`61586984840264 | My Cat Page\n10008765432198 | Sales Fanpage\nhttps://www.facebook.com/10009876543210`}
                       className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl"
                     />
                   </div>
@@ -2259,7 +2261,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                     }}
                     className="rounded-lg text-xs bg-slate-800 border-slate-700 text-slate-300"
                   >
-                    Hủy
+                    Cancel
                   </Button>
                   <Button
                     size="small"
@@ -2267,13 +2269,13 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                     onClick={handleSaveManualToDrawer}
                     className="bg-cyan-600 hover:bg-cyan-500 rounded-lg text-xs font-semibold shadow-md shadow-cyan-900/30"
                   >
-                    Lưu Fanpage vào Via
+                    Save Fanpages to Via
                   </Button>
                 </div>
               </div>
             )}
 
-            {/* Tabs phân loại: Fanpage quét tự động vs Page & Nhóm trong MySQL Database */}
+            {/* Category tabs: auto-scanned Fanpages vs Pages & Groups in the MySQL database */}
             <Tabs
               activeKey={drawerActiveTab}
               onChange={(k) => setDrawerActiveTab(k as any)}
@@ -2284,7 +2286,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   label: (
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
                       <ThunderboltOutlined className="text-cyan-400" />
-                      <span>Fanpage Quét Tự Động ({currentScannedPages.length})</span>
+                      <span>Auto-scanned Fanpages ({currentScannedPages.length})</span>
                     </span>
                   ),
                   children: (
@@ -2292,8 +2294,8 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                       {filteredScannedPages.length === 0 ? (
                         <div className="py-12 text-center text-slate-500 text-xs">
                           {currentScannedPages.length === 0
-                            ? 'Chưa có Fanpage nào được quét tự động. Hãy bấm nút "Quét lại Page" ở trên để Playwright quét toàn bộ Fanpage từ Cookie của nick này!'
-                            : 'Không tìm thấy Fanpage nào phù hợp với từ khóa tìm kiếm.'}
+                            ? 'No Fanpages auto-scanned yet. Click "Rescan Pages" above so Playwright scans every Fanpage from this account\'s Cookie!'
+                            : 'No Fanpages match the search keyword.'}
                         </div>
                       ) : (
                         scannedList.visible.map((page) => (
@@ -2325,21 +2327,21 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                                       {pageHealthMap[page.id] === 'LIVE'
                                         ? '● LIVE'
                                         : pageHealthMap[page.id] === 'RESTRICTED'
-                                        ? '● BỊ HẠN CHẾ'
-                                        : '● CHECK LỖI'}
+                                        ? '● RESTRICTED'
+                                        : '● CHECK FAILED'}
                                     </Tag>
                                   )}
                                 </div>
                                 <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
                                   <span>ID: {page.id}</span>
-                                  <Tooltip title="Sao chép ID Page">
+                                  <Tooltip title="Copy Page ID">
                                     <Button
                                       type="text"
                                       size="small"
                                       icon={<CopyOutlined className="text-[10px]" />}
                                       onClick={() => {
                                         navigator.clipboard.writeText(page.id);
-                                        message.success(`Đã chép ID: ${page.id}`);
+                                        message.success(`Copied ID: ${page.id}`);
                                       }}
                                       className="p-0 h-4 w-4 text-slate-400 hover:text-cyan-300"
                                     />
@@ -2351,7 +2353,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                                       rel="noreferrer"
                                       className="text-cyan-400 hover:underline flex items-center gap-0.5 ml-1"
                                     >
-                                      <LinkOutlined /> Mở Page
+                                      <LinkOutlined /> Open Page
                                     </a>
                                   )}
                                 </div>
@@ -2359,10 +2361,10 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                             </div>
 
                             <Popconfirm
-                              title="Xóa Fanpage này khỏi Via?"
+                              title="Remove this Fanpage from the Via?"
                               onConfirm={() => handleDeletePageFromVia(page.id)}
-                              okText="Xóa"
-                              cancelText="Hủy"
+                              okText="Delete"
+                              cancelText="Cancel"
                               okButtonProps={{ danger: true }}
                             >
                               <Button
@@ -2381,17 +2383,17 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
                       {currentScannedPages.length > 0 && (
                         <div className="pt-3 border-t border-slate-800/80 flex justify-between items-center text-xs text-slate-500">
-                          <span>Tổng cộng: {currentScannedPages.length} Fanpage quét</span>
+                          <span>Total: {currentScannedPages.length} scanned Fanpages</span>
                           <Popconfirm
-                            title="Xóa toàn bộ Fanpage quét của Via này?"
-                            description="Danh sách sẽ bị xóa sạch khỏi bộ nhớ cache."
+                            title="Remove every scanned Fanpage from this Via?"
+                            description="The list will be wiped from the cache."
                             onConfirm={handleClearAllPagesFromVia}
-                            okText="Xóa hết"
-                            cancelText="Hủy"
+                            okText="Delete all"
+                            cancelText="Cancel"
                             okButtonProps={{ danger: true }}
                           >
                             <Button size="small" type="link" danger className="p-0 text-xs">
-                              Xóa tất cả Page quét
+                              Delete all scanned Pages
                             </Button>
                           </Popconfirm>
                         </div>
@@ -2404,17 +2406,17 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   label: (
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
                       <DatabaseOutlined className="text-purple-400" />
-                      <span>Trang & Nhóm Đã Đồng Bộ ({currentDbPages.length + currentDbGroups.length})</span>
+                      <span>Synced Pages & Groups ({currentDbPages.length + currentDbGroups.length})</span>
                     </span>
                   ),
                   children: (
                     <div className="space-y-3 mt-2">
                       <div className="text-[11px] text-slate-400 bg-slate-900/90 p-2.5 rounded-xl border border-slate-800 flex items-start gap-1.5">
                         <InfoCircleOutlined className="text-cyan-400 mt-0.5 shrink-0" />
-                        <span>Danh sách Page &amp; Nhóm trực thuộc Via này đã được đồng bộ và lưu trữ an toàn. Bạn có thể quản lý hoặc gỡ bỏ từng mục con mà không ảnh hưởng tới Via.</span>
+                        <span>The Pages &amp; Groups under this Via are synced and stored safely. You can manage or remove each child item without affecting the Via.</span>
                       </div>
 
-                      {/* Danh sách Pages trong DB */}
+                      {/* Pages in the DB */}
                       {filteredDbPages.length > 0 && (
                         <div className="space-y-1.5">
                           <div className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
@@ -2441,11 +2443,11 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                               </div>
 
                               <Popconfirm
-                                title="Xóa Page này khỏi Database?"
-                                description="Bản ghi trong bảng social_accounts sẽ bị xóa."
+                                title="Delete this Page from the Database?"
+                                description="The record in the social_accounts table will be deleted."
                                 onConfirm={() => handleDeleteChildDbAccount(item.id)}
-                                okText="Xóa"
-                                cancelText="Hủy"
+                                okText="Delete"
+                                cancelText="Cancel"
                                 okButtonProps={{ danger: true }}
                               >
                                 <Button
@@ -2462,12 +2464,12 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                         </div>
                       )}
 
-                      {/* Danh sách Groups trong DB */}
+                      {/* Groups in the DB */}
                       {filteredDbGroups.length > 0 && (
                         <div className="space-y-1.5 pt-2">
                           <div className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
                             <TeamOutlined className="text-blue-400" />
-                            <span>Nhóm Facebook ({filteredDbGroups.length})</span>
+                            <span>Facebook Groups ({filteredDbGroups.length})</span>
                           </div>
                           {dbGroupsList.visible.map((item) => (
                             <div
@@ -2489,11 +2491,11 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                               </div>
 
                               <Popconfirm
-                                title="Xóa Nhóm này khỏi Database?"
-                                description="Bản ghi trong bảng social_accounts sẽ bị xóa."
+                                title="Delete this Group from the Database?"
+                                description="The record in the social_accounts table will be deleted."
                                 onConfirm={() => handleDeleteChildDbAccount(item.id)}
-                                okText="Xóa"
-                                cancelText="Hủy"
+                                okText="Delete"
+                                cancelText="Cancel"
                                 okButtonProps={{ danger: true }}
                               >
                                 <Button
@@ -2512,7 +2514,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
 
                       {currentDbPages.length === 0 && currentDbGroups.length === 0 && (
                         <div className="py-10 text-center text-slate-500 text-xs">
-                          Không có Page hoặc Group con nào được lưu trong Database cho Via này.
+                          No child Pages or Groups are saved in the Database for this Via.
                         </div>
                       )}
                     </div>
@@ -2523,13 +2525,13 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   label: (
                     <span className="flex items-center gap-1.5 text-xs font-semibold">
                       <FileTextOutlined className="text-emerald-400" />
-                      <span>Xuất Danh Sách ID</span>
+                      <span>Export ID List</span>
                     </span>
                   ),
                   children: (
                     <div className="space-y-3 mt-2">
                       <div className="text-xs text-slate-300">
-                        Sao chép toàn bộ ID Fanpage trực thuộc của Via này để dán vào công cụ khác hoặc lưu trữ:
+                        Copy every Fanpage ID under this Via to paste into another tool or keep:
                       </div>
 
                       <Input.TextArea
@@ -2544,11 +2546,11 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                         icon={<CopyOutlined />}
                         onClick={() => {
                           navigator.clipboard.writeText(exportLines.join('\n'));
-                          message.success(`Đã sao chép ${exportLines.length} dòng ID Fanpage!`);
+                          message.success(`Copied ${exportLines.length} Fanpage ID lines!`);
                         }}
                         className="bg-cyan-600 hover:bg-cyan-500 text-xs font-semibold rounded-xl"
                       >
-                        Sao Chép Tất Cả ID Page
+                        Copy All Page IDs
                       </Button>
                     </div>
                   ),
@@ -2559,7 +2561,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
         )}
       </Drawer>
 
-      {/* 5. MODAL: CẬP NHẬT / THAY ĐỔI COOKIE CHO VIA MẸ */}
+      {/* 5. MODAL: UPDATE / CHANGE A PARENT VIA'S COOKIE */}
       <Modal
         title={
           <div className="flex items-center gap-2.5 text-white">
@@ -2567,7 +2569,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
               <KeyOutlined />
             </div>
             <div>
-              <div className="font-bold text-sm">Cập Nhật Cookie Facebook Cho Via</div>
+              <div className="font-bold text-sm">Update Facebook Cookie For Via</div>
               <div className="text-xs text-slate-400 font-normal">
                 Nick: <span className="text-cyan-300 font-semibold">{updateCookieModalVia?.pageName}</span> (UID:{' '}
                 <span className="font-mono text-slate-300">{updateCookieModalVia?.uid}</span>)
@@ -2602,7 +2604,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             disabled={isUpdatingCookie}
             className="bg-slate-900 border-slate-700 text-slate-300 rounded-xl"
           >
-            Hủy
+            Cancel
           </Button>,
           <Button
             key="submit"
@@ -2612,13 +2614,13 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             onClick={() => handleSaveNewCookie(false)}
             className="bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl"
           >
-            Lưu & Kích Hoạt Lại
+            Save & Reactivate
           </Button>,
         ]}
         className="dark-modal"
       >
         <div className="space-y-3 pt-1">
-          {/* 2 TAB: 1 TAB DÁN NGUYÊN KHỐI, 1 TAB NHẬP THỦ CÔNG */}
+          {/* 2 TABS: ONE FOR PASTING A WHOLE BLOCK, ONE FOR MANUAL ENTRY */}
           <Tabs
             activeKey={updateCookieTab}
             onChange={(k) => setUpdateCookieTab(k as 'blob' | 'manual')}
@@ -2628,7 +2630,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                 label: (
                   <span className="flex items-center gap-1.5 font-semibold text-xs px-1">
                     <ThunderboltOutlined className="text-amber-400" />
-                    Quăng nguyên cục (JSON Cookie / Chuỗi gộp)
+                    Paste the whole thing (JSON Cookie / combined string)
                   </span>
                 ),
                 children: (
@@ -2636,18 +2638,18 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                     <div className="p-3.5 rounded-xl bg-gradient-to-r from-sky-950/60 via-slate-900 to-indigo-950/60 border border-sky-500/40 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-sky-300">
-                          Quăng 1 đống JSON hoặc chuỗi Cookie vào đây:
+                          Drop a JSON blob or Cookie string here:
                         </span>
                         {parsedCookieInfo && (
                           <Tag color={parsedCookieInfo.isJson ? 'cyan' : 'blue'} className="font-mono text-[11px] !m-0">
-                            {parsedCookieInfo.isJson ? `JSON (${parsedCookieInfo.cookieCount} cookies)` : 'Chuỗi Cookie'}
+                            {parsedCookieInfo.isJson ? `JSON (${parsedCookieInfo.cookieCount} cookies)` : 'Cookie string'}
                           </Tag>
                         )}
                       </div>
                       <Input.TextArea
                         rows={4}
                         allowClear
-                        placeholder={`Quăng 1 đống {"url":"...","cookies":[...]} hoặc [{name:"c_user",...}] hoặc chuỗi c_user=...; xs=... vào đây...`}
+                        placeholder={`Drop a {"url":"...","cookies":[...]} or [{name:"c_user",...}] or a c_user=...; xs=... string here...`}
                         value={rawCookieInput}
                         onChange={(e) => applyParsedCookie(e.target.value, 'raw')}
                         className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl hover:border-cyan-500 focus:border-cyan-500"
@@ -2656,7 +2658,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                         <div className="text-[11px] text-emerald-400 flex items-center gap-2 bg-emerald-950/40 border border-emerald-800/40 px-2.5 py-1 rounded-lg">
                           <CheckCircleFilled />
                           <span>
-                            Đã bóc tách thành công: <b>c_user = {parsedCookieInfo.c_user}</b> | <b>xs = {parsedCookieInfo.xs.slice(0, 18)}...</b>
+                            Parsed successfully: <b>c_user = {parsedCookieInfo.c_user}</b> | <b>xs = {parsedCookieInfo.xs.slice(0, 18)}...</b>
                           </span>
                         </div>
                       )}
@@ -2664,14 +2666,14 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                         <div className="text-[11px] text-amber-300 flex items-center gap-1.5 bg-amber-950/40 border border-amber-800/40 px-2.5 py-1 rounded-lg">
                           <ExclamationCircleOutlined className="text-amber-400 shrink-0" />
                           <span>
-                            Lưu ý: UID trong Cookie (<b>{parsedCookieInfo.c_user}</b>) khác với UID của Via (<b>{updateCookieModalVia.uid}</b>). Khi bấm Lưu, hệ thống sẽ đồng bộ theo UID mới này!
+                            Note: the UID in the Cookie (<b>{parsedCookieInfo.c_user}</b>) differs from the Via's UID (<b>{updateCookieModalVia.uid}</b>). When you click Save, the system will sync to this new UID!
                           </span>
                         </div>
                       )}
                     </div>
                     <div className="text-[11px] text-slate-400 flex items-center gap-1.5 px-1">
                       <InfoCircleOutlined className="text-sky-400 shrink-0" />
-                      <span>Hỗ trợ JSON Cookie-Editor, J2TEAM, mảng cookies hoặc chuỗi <code>c_user=...; xs=...</code>. Hệ thống sẽ tự động bóc tách và đồng bộ sang tab thủ công!</span>
+                      <span>Supports Cookie-Editor JSON, J2TEAM, cookie arrays or <code>c_user=...; xs=...</code> strings. The system automatically parses and syncs to the manual tab!</span>
                     </div>
                   </div>
                 ),
@@ -2681,22 +2683,22 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                 label: (
                   <span className="flex items-center gap-1.5 font-semibold text-xs px-1">
                     <KeyOutlined className="text-cyan-400" />
-                    Nhập thủ công từng cái (c_user & xs)
+                    Enter manually (c_user & xs)
                   </span>
                 ),
                 children: (
                   <div className="space-y-3 pt-1">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                      {/* DÒNG 1: c_user */}
+                      {/* LINE 1: c_user */}
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
                           <label className="text-xs font-semibold text-slate-200">
-                            1. Dòng 1: <code className="text-cyan-300 font-bold">c_user</code> (UID) <span className="text-rose-400">*</span>
+                            1. Line 1: <code className="text-cyan-300 font-bold">c_user</code> (UID) <span className="text-rose-400">*</span>
                           </label>
-                          <span className="text-[11px] text-slate-400 font-mono">Dãy số UID nick</span>
+                          <span className="text-[11px] text-slate-400 font-mono">Account UID digits</span>
                         </div>
                         <Input
-                          placeholder="Ví dụ: 100023403136194"
+                          placeholder="e.g. 100023403136194"
                           value={cookieCUser}
                           onChange={(e) => applyParsedCookie(e.target.value, 'c_user')}
                           prefix={<UserOutlined className="text-slate-500" />}
@@ -2704,15 +2706,15 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                         />
                         <div className="mt-1 text-[11px] text-slate-400 flex items-center gap-1">
                           <InfoCircleOutlined className="text-slate-500" />
-                          <span>Tự động điền theo UID của Via hoặc trích xuất từ tab dán nguyên cục.</span>
+                          <span>Filled automatically from the Via's UID or extracted from the paste tab.</span>
                         </div>
                       </div>
 
-                      {/* DÒNG 2: xs */}
+                      {/* LINE 2: xs */}
                       <div>
                         <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
                           <label className="text-xs font-semibold text-slate-200">
-                            2. Dòng 2: <code className="text-cyan-300 font-bold">xs</code> (Token phiên) <span className="text-rose-400">*</span>
+                            2. Line 2: <code className="text-cyan-300 font-bold">xs</code> (session token) <span className="text-rose-400">*</span>
                           </label>
                           <div className="flex items-center gap-2">
                             {cookieXs && (
@@ -2725,20 +2727,20 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                                 }}
                                 className="text-[11px] text-rose-400 hover:text-rose-300 bg-rose-950/40 border border-rose-800/50 px-2 py-0.5 rounded cursor-pointer transition-colors"
                               >
-                                Xóa mã xs
+                                Clear xs
                               </button>
                             )}
-                            <span className="text-[11px] text-cyan-400 font-mono">Chỉ cần mã xs</span>
+                            <span className="text-[11px] text-cyan-400 font-mono">Only xs needed</span>
                           </div>
                         </div>
                         <Input
-                          placeholder="Dán mã xs mới vào đây (Ví dụ: 2%3A0UeZEJylLU5ccA%3A2...)"
+                          placeholder="Paste the new xs here (e.g. 2%3A0UeZEJylLU5ccA%3A2...)"
                           value={cookieXs}
                           onChange={(e) => applyParsedCookie(e.target.value, 'xs')}
                           className="bg-slate-950 border-slate-700 text-slate-100 font-mono text-xs rounded-xl h-10 hover:border-cyan-500 focus:border-cyan-500"
                         />
                         <div className="mt-1 text-[11px] text-slate-400">
-                          Chỉ cần copy giá trị <b className="text-slate-300">xs</b> mới dán vào đây rồi bấm Lưu.
+                          Just copy the new <b className="text-slate-300">xs</b> value, paste it here and click Save.
                         </div>
                       </div>
                     </div>
@@ -2748,14 +2750,14 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
             ]}
           />
 
-          {/* HÀNG DÙNG CHUNG PHÍA DƯỚI: PROXY VÀ TÙY CHỌN QUÉT LẠI (2 CỘT) */}
+          {/* SHARED BOTTOM ROW: PROXY AND RESCAN OPTION (2 COLUMNS) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 items-end pt-2 border-t border-slate-800/80">
             <div>
               <label className="block text-xs font-semibold text-slate-200 mb-1.5">
-                Proxy riêng cho Via <span className="text-slate-500 font-normal">(Tùy chọn)</span>
+                Dedicated Proxy for this Via <span className="text-slate-500 font-normal">(optional)</span>
               </label>
               <Input
-                placeholder="ip:port:user:pass hoặc http://user:pass@ip:port"
+                placeholder="ip:port:user:pass or http://user:pass@ip:port"
                 value={newProxyInput}
                 onChange={(e) => setNewProxyInput(e.target.value)}
                 prefix={<GlobalOutlined className="text-slate-500" />}
@@ -2771,7 +2773,7 @@ export const ViaManagementPage: React.FC<ViaManagementPageProps> = ({
                   onChange={(e) => setAutoRescanAfterUpdate(e.target.checked)}
                   className="rounded border-slate-700 text-cyan-600 focus:ring-cyan-500"
                 />
-                <span className="font-medium">Tự động quét lại Fanpage con sau khi lưu</span>
+                <span className="font-medium">Automatically rescan child Fanpages after saving</span>
               </label>
             </div>
           </div>

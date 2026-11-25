@@ -12,40 +12,40 @@ export interface WallpaperPreset {
 export const WALLPAPER_PRESETS: WallpaperPreset[] = [
   {
     id: 'alpine-mist',
-    name: 'Rừng Thông & Núi Mờ',
-    description: 'Dãy núi sương mờ & rừng thông tĩnh lặng (Chuẩn mẫu PhuSocial)',
+    name: 'Pine Forest & Misty Mountains',
+    description: 'Misty mountain range & calm pine forest (PhuSocial standard)',
     url: '/wallpapers/alpine-mist.jpg',
     thumbnail: '/wallpapers/alpine-mist.jpg',
     category: 'nature',
   },
   {
     id: 'misty-forest',
-    name: 'Đại Ngàn Rừng Sương Đêm',
-    description: 'Rừng thông cao vút bảng lảng mây sương huyền ảo',
+    name: 'Misty Night Forest',
+    description: 'Towering pines wrapped in drifting mist',
     url: '/wallpapers/misty-forest.jpg',
     thumbnail: '/wallpapers/misty-forest.jpg',
     category: 'nature',
   },
   {
     id: 'yosemite-valley',
-    name: 'Thung Lũng Đá Hùng Vĩ',
-    description: 'Vách đá sừng sững giữa thung lũng Yosemite bao la',
+    name: 'Majestic Rock Valley',
+    description: 'Granite cliffs rising over the vast Yosemite valley',
     url: '/wallpapers/yosemite-valley.jpg',
     thumbnail: '/wallpapers/yosemite-valley.jpg',
     category: 'nature',
   },
   {
     id: 'starry-mountain',
-    name: 'Đỉnh Núi & Dải Ngân Hà',
-    description: 'Đỉnh tuyết vươn mình dưới hàng triệu vì tinh tú',
+    name: 'Peak & Milky Way',
+    description: 'A snowy peak under millions of stars',
     url: '/wallpapers/starry-mountain.jpg',
     thumbnail: '/wallpapers/starry-mountain.jpg',
     category: 'space',
   },
   {
     id: 'nordic-aurora',
-    name: 'Cực Quang Bắc Âu',
-    description: 'Dải lụa xanh ngọc lục bảo nhảy múa trên bầu trời đêm tuyết',
+    name: 'Northern Lights',
+    description: 'Emerald ribbons dancing over a snowy night sky',
     url: '/wallpapers/nordic-aurora.jpg',
     thumbnail: '/wallpapers/nordic-aurora.jpg',
     category: 'nature',
@@ -53,7 +53,7 @@ export const WALLPAPER_PRESETS: WallpaperPreset[] = [
   {
     id: 'cyber-city',
     name: 'Cyberpunk Midnight City',
-    description: 'Ánh đèn neon rực rỡ chân trời công nghệ tương lai',
+    description: 'Bright neon lights on a futuristic skyline',
     url: '/wallpapers/cyber-city.jpg',
     thumbnail: '/wallpapers/cyber-city.jpg',
     category: 'cyber',
@@ -61,7 +61,7 @@ export const WALLPAPER_PRESETS: WallpaperPreset[] = [
   {
     id: 'solid-stealth',
     name: 'Obsidian Stealth Dark',
-    description: 'Nền đen nhám cao cấp tối giản, không ảnh nền',
+    description: 'Premium minimal matte black, no background image',
     url: '',
     thumbnail: '',
     category: 'minimal',
@@ -105,17 +105,17 @@ export const WallpaperProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
       }
     } catch (e) {
-      console.warn('Lỗi đọc cấu hình hình nền từ localStorage:', e);
+      console.warn('Failed to read wallpaper config from localStorage:', e);
     }
     return DEFAULT_CONFIG;
   });
 
-  // Lưu vào localStorage khi config thay đổi
+  // Save to localStorage when the config changes
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
     } catch (e) {
-      console.warn('Lỗi lưu cấu hình hình nền vào localStorage:', e);
+      console.warn('Failed to save wallpaper config to localStorage:', e);
     }
   }, [config]);
 
@@ -198,11 +198,11 @@ export const WallpaperProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           backgroundPosition: 'center center',
           backgroundAttachment: 'fixed',
           filter: config.blurAmount > 0 ? `blur(${config.blurAmount}px)` : 'none',
-          transform: config.blurAmount > 0 ? 'scale(1.03)' : 'none', // tránh viền trắng khi blur
+          transform: config.blurAmount > 0 ? 'scale(1.03)' : 'none', // avoid white edges when blurred
         }}
       />
 
-      {/* Dark Vignette & Contrast Overlay để giữ chữ và bảng biểu siêu nét */}
+      {/* Dark vignette & contrast overlay to keep text and tables crisp */}
       <div
         className="fixed inset-0 pointer-events-none z-0 transition-all duration-300"
         style={{

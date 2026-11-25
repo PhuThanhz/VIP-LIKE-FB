@@ -23,10 +23,10 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 180000, // 3 phút cho các tác vụ Playwright
+  timeout: 180000, // 3 minutes for Playwright tasks
 });
 
-// Gắn Token JWT và mã máy HWID vào mọi request
+// Attach the JWT token and machine HWID to every request
 const attachAuthHeaders = (config: InternalAxiosRequestConfig) => {
   const token = getToken();
   if (token) {
@@ -40,7 +40,7 @@ const attachAuthHeaders = (config: InternalAxiosRequestConfig) => {
 };
 
 api.interceptors.request.use(attachAuthHeaders);
-// Gắn cả cho axios mặc định (một số component gọi axios trực tiếp)
+// Also attach to the default axios instance (some components call axios directly)
 axios.interceptors.request.use(attachAuthHeaders);
 
 api.interceptors.response.use(
@@ -51,10 +51,10 @@ api.interceptors.response.use(
       window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
     }
     if (!error.response && error.code === 'ERR_NETWORK') {
-      error.message = 'Không kết nối được máy chủ Backend VIPLIKE (:3100). Hãy kiểm tra backend đang chạy.';
+      error.message = 'Cannot reach the VIPLIKE backend server (:3100). Check that the backend is running.';
     }
     if (error.code === 'ECONNABORTED') {
-      error.message = 'Yêu cầu quá thời gian chờ (Timeout).';
+      error.message = 'Request timed out.';
     }
     return Promise.reject(error);
   }

@@ -2,9 +2,9 @@ import colors from 'tailwindcss/colors';
 import plugin from 'tailwindcss/plugin';
 
 /**
- * Chế độ Sáng/Tối dùng biến CSS: mọi class màu (slate-*, cyan-*, white...) đọc từ
- * `--c-<màu>-<cấp>`. `:root` giữ đúng màu gốc của Tailwind (bản Tối),
- * `html.light` đổi giá trị biến nên không phải sửa từng class trong component.
+ * Light/Dark mode via CSS variables: every color class (slate-*, cyan-*, white...) reads from
+ * `--c-<color>-<shade>`. `:root` keeps Tailwind's original colors (Dark),
+ * `html.light` swaps the variable values, so no class in a component needs editing.
  */
 const SHADES = ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'];
 
@@ -13,14 +13,14 @@ const ACCENTS = [
   'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose',
 ];
 
-// Accent ở chế độ Sáng: đảo cấp nhạt/đậm, giữ 500-700 để nút màu đặc vẫn đậm
+// Accent in Light mode: invert light/dark shades, keep 500-700 so solid buttons stay strong
 const ACCENT_LIGHT_MAP = {
   50: '950', 100: '900', 200: '800', 300: '700', 400: '600',
   500: '500', 600: '600', 700: '700',
   800: '200', 900: '100', 950: '50',
 };
 
-// Slate ở chế độ Sáng: nền trang/thẻ thành trắng, chữ phụ thành xám đậm
+// Slate in Light mode: page/card backgrounds turn white, secondary text turns dark grey
 const SLATE_LIGHT = {
   50: colors.slate[950],
   100: colors.slate[900],
@@ -45,7 +45,7 @@ const varColor = (name) => `rgb(var(--c-${name}) / <alpha-value>)`;
 const palette = (name) =>
   Object.fromEntries(SHADES.map((s) => [s, varColor(`${name}-${s}`)]));
 
-// Màu nền ngữ nghĩa: [Tối, Sáng]
+// Semantic background colors: [Dark, Light]
 const SEMANTIC = {
   app: ['#0f172a', '#f8fafc'],
   surface: ['#1e293b', '#ffffff'],

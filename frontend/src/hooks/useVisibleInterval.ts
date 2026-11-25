@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * setInterval chỉ chạy khi tab đang hiển thị.
- * - Tab bị ẩn: dừng hẳn, không gọi API / không render lại.
- * - Quay lại tab: gọi ngay 1 lần rồi chạy tiếp theo chu kỳ.
- * Callback luôn là bản mới nhất (lưu qua ref) nên không cần đưa vào deps.
+ * setInterval that only runs while the tab is visible.
+ * - Tab hidden: stops completely, no API calls / no re-renders.
+ * - Back to the tab: calls once immediately, then continues on schedule.
+ * The callback is always the latest one (kept in a ref), so it doesn't need to be in deps.
  */
 export function useVisibleInterval(callback: () => void, delayMs: number | null) {
   const savedCallback = useRef(callback);

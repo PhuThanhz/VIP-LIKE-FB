@@ -20,7 +20,7 @@ import {
 import { WORKER_BASE_URL } from '../config/axios';
 import { TableSkeleton, PageSkeleton } from '../components/common/SaaSLoadingSkeleton';
 
-// Tách nhỏ bundle (Code-splitting) với React.lazy cho các phân hệ quản trị lớn
+// Code-splitting with React.lazy for the large admin modules
 const PostHunterTab = lazy(() => import('../components/buff/PostHunterTab'));
 const BuffQueueTab = lazy(() => import('../components/buff/BuffQueueTab'));
 const ViaManagementPage = lazy(() => import('./ViaManagementPage'));
@@ -184,27 +184,27 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
   return (
     <div className="space-y-5 max-w-[1440px] mx-auto px-2 sm:px-4 md:px-6 pb-28 md:pb-12">
-      {/* Ngoài các tab Like & Bình luận (không có thanh tab), vẫn giữ nút dừng khẩn cấp khi đang chạy */}
+      {/* Outside the Likes & Comments tabs (no tab bar), keep the emergency stop button while running */}
       {!isBuffTab && isAnyBuffRunning && !bmOverview?.system?.isEmergencyStopped && (
         <div className="flex justify-end">{emergencyStopButton}</div>
       )}
 
-      {/* CẢNH BÁO VIA HẾT HẠN COOKIE / CHECKPOINT */}
+      {/* WARNING: VIA COOKIE EXPIRED / CHECKPOINT */}
       {deadViaList.length > 0 && (
         <div className="px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="min-w-0 text-sm">
             <div className="text-amber-200 font-medium">
-              {deadViaList.length} Via cần cập nhật Cookie
+              {deadViaList.length} Vias need a Cookie update
             </div>
             <div className="text-xs text-amber-200/70 mt-0.5 truncate">
               {deadViaList
-                .map((v) => `${v.viaName || v.uid} (${v.tokenStatus === 'CHECKPOINT' ? 'checkpoint' : 'hết hạn'})`)
+                .map((v) => `${v.viaName || v.uid} (${v.tokenStatus === 'CHECKPOINT' ? 'checkpoint' : 'expired'})`)
                 .join(' · ')}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Button size="small" loading={checkingViaHealth} onClick={handleRunViaHealthCheck}>
-              Kiểm tra lại
+              Recheck
             </Button>
             <Button
               size="small"
@@ -214,21 +214,21 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               onClick={() => openCookieAlertModal(deadViaList[0]?.uid)}
               className="font-semibold shadow-sm"
             >
-              Cập nhật Cookie ngay
+              Update Cookie now
             </Button>
           </div>
         </div>
       )}
 
-      {/* BANNER CẢNH BÁO NẾU HỆ THỐNG ĐANG DỪNG KHẨN CẤP */}
+      {/* WARNING BANNER WHEN THE SYSTEM IS IN EMERGENCY STOP */}
       {bmOverview?.system?.isEmergencyStopped && (
         <div className="p-3.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-200 flex items-center justify-between text-xs gap-3 shadow-lg">
           <div className="flex items-center gap-2.5">
             <StopOutlined className="text-rose-400 text-base shrink-0" />
             <div>
-              <strong className="text-rose-200 text-xs font-semibold uppercase tracking-wider">Hệ thống đang dừng khẩn cấp (Emergency Stop)</strong>
+              <strong className="text-rose-200 text-xs font-semibold uppercase tracking-wider">System is in Emergency Stop</strong>
               <div className="text-rose-300/80 text-[11px] mt-0.5">
-                Toàn bộ hàng đợi tự động và tác vụ Playwright đang tạm dừng an toàn ({bmOverview?.system?.emergencyReason || 'Bởi Quản trị viên'}).
+                All auto queues and Playwright tasks are safely paused ({bmOverview?.system?.emergencyReason || 'By an administrator'}).
               </div>
             </div>
           </div>
@@ -239,30 +239,30 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             onClick={handleResumeSystem}
             className="bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold shrink-0 rounded-lg"
           >
-            Khôi phục ngay
+            Resume now
           </Button>
         </div>
       )}
 
-      {/* Thanh điều hướng phân hệ VIPLIKE RADIANT (Linear/Apple-Tier Segmented Dock) */}
+      {/* VIPLIKE RADIANT module navigation (Linear/Apple-tier segmented dock) */}
       {isBuffTab && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-800/60">
           <div
             role="tablist"
-            aria-label="Điều hướng tính năng tương tác"
+            aria-label="Engagement feature navigation"
             className="inline-flex p-1.5 rounded-2xl bg-slate-900/85 border border-slate-800/90 backdrop-blur-xl shadow-lg shadow-black/25 gap-1.5 overflow-x-auto max-w-full scrollbar-none"
           >
             {[
               {
                 key: 'buff-like',
-                label: 'Tạo mới',
+                label: 'New',
                 icon: PlusCircleOutlined,
                 iconColor: 'text-cyan-400',
                 count: 0,
               },
               {
                 key: 'buff-running',
-                label: 'Tiến trình chạy',
+                label: 'Live progress',
                 icon: ThunderboltFilled,
                 iconColor: 'text-amber-400',
                 count: (autoBuffProgress.status === 'RUNNING' || isBatchRunning || queueItems.some((i) => i.status === 'RUNNING')) ? 1 : 0,
@@ -270,21 +270,21 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               },
               {
                 key: 'buff-queue',
-                label: 'Hàng đợi',
+                label: 'Queue',
                 icon: ClockCircleOutlined,
                 iconColor: 'text-sky-400',
                 count: queueItems.filter((i) => i.status === 'QUEUED' || i.status === 'RUNNING').length,
               },
               {
                 key: 'buff-history',
-                label: 'Lịch sử',
+                label: 'History',
                 icon: HistoryOutlined,
                 iconColor: 'text-indigo-400',
                 count: 0,
               },
               {
                 key: 'buff-hunter',
-                label: 'Săn bài tự động',
+                label: 'Post Hunter',
                 icon: AimOutlined,
                 iconColor: 'text-rose-400',
                 count: monitors.length,
@@ -305,7 +305,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 border border-transparent'
                   }`}
                 >
-                  {/* Icon vector chuyên nghiệp */}
+                  {/* Vector icon */}
                   <span
                     className={`flex items-center justify-center text-sm transition-transform duration-200 group-hover:scale-110 ${
                       active ? t.iconColor : 'text-slate-400 group-hover:text-slate-300'
@@ -314,10 +314,10 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                     <IconComp />
                   </span>
 
-                  {/* Nhãn tính năng */}
+                  {/* Feature label */}
                   <span>{t.label}</span>
 
-                  {/* Đèn báo live radar cho Tiến trình chạy */}
+                  {/* Live radar indicator for Live progress */}
                   {t.isPulse && (
                     <span className="relative flex h-2 w-2 ml-0.5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -325,7 +325,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                     </span>
                   )}
 
-                  {/* Badge số lượng hiện đại */}
+                  {/* Count badge */}
                   {t.count > 0 && !t.isPulse && (
                     <span
                       className={`ml-0.5 px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold tabular-nums leading-none transition-colors ${
@@ -338,7 +338,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                     </span>
                   )}
 
-                  {/* Đường viền neon ánh sáng dưới chân tab đang active */}
+                  {/* Neon underline for the active tab */}
                   {active && (
                     <span className="absolute inset-x-3 -bottom-px h-[2px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent rounded-full shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
                   )}
@@ -347,13 +347,13 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             })}
           </div>
 
-          {/* Bên phải: số Via/Page (bấm để kiểm tra Via) + dừng khẩn cấp khi đang chạy */}
+          {/* Right side: Via/Page counts (click to check Vias) + emergency stop while running */}
           <div className="flex items-center gap-2 pr-1 shrink-0">
-            <Tooltip title="Bấm để kiểm tra tình trạng cookie của các Via">
+            <Tooltip title="Click to check the cookie status of your Vias">
               <Button size="small" loading={checkingViaHealth} onClick={handleRunViaHealthCheck} className="text-xs">
                 <span className={`inline-block h-1.5 w-1.5 rounded-full ${bmOverview?.deadVias > 0 ? 'bg-rose-400' : 'bg-emerald-400'}`} />
                 <span className="text-slate-300">{bmOverview?.liveVias ?? fbAccounts.length} Via</span>
-                {bmOverview?.deadVias > 0 && <span className="text-rose-400">· {bmOverview.deadVias} lỗi</span>}
+                {bmOverview?.deadVias > 0 && <span className="text-rose-400">· {bmOverview.deadVias} errors</span>}
                 <span className="text-slate-500">·</span>
                 <span className="text-slate-300">{scannedPages.length} Page</span>
               </Button>
@@ -373,7 +373,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         items={[
           {
             key: 'buff-like',
-            label: 'Like & bình luận',
+            label: 'Likes & comments',
             children: (
               <CreateBuffTab controller={controller} />
             ),
@@ -383,7 +383,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             label: (
               <span className="flex items-center gap-1.5">
                 <PlayCircleOutlined className="text-blue-400" />
-                <span>Tiến trình chạy</span>
+                <span>Live progress</span>
                 {(autoBuffProgress.status === 'RUNNING' || isBatchRunning || queueItems.some((i) => i.status === 'RUNNING')) && (
                   <span className="relative flex h-2 w-2 ml-0.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
@@ -433,7 +433,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             label: (
               <span className="flex items-center gap-1.5">
                 <ThunderboltOutlined className="text-amber-400" />
-                <span>Hàng đợi tự động</span>
+                <span>Auto queue</span>
                 {queueItems.filter((i) => i.status === 'QUEUED' || i.status === 'RUNNING').length > 0 && (
                   <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-amber-500/20 text-amber-300 font-mono font-bold border border-amber-500/40">
                     {queueItems.filter((i) => i.status === 'QUEUED' || i.status === 'RUNNING').length}
@@ -481,7 +481,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             label: (
               <span className="flex items-center gap-1.5">
                 <CheckCircleFilled className="text-emerald-400" />
-                <span>Lịch sử tương tác ({buffLogs.length})</span>
+                <span>Engagement history ({buffLogs.length})</span>
               </span>
             ),
             children: (
@@ -500,14 +500,14 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                   setSelectedReaction(log.reactionType);
                   setActiveTabKey('buff-like');
                   window.scrollTo({ top: 0, behavior: 'smooth' });
-                  message.info('Đã nạp lại link vào form. Các Page đã like sẽ được tự động bỏ qua.');
+                  message.info('Link reloaded into the form. Pages that already liked will be skipped automatically.');
                 }}
               />
             ),
           },
           {
             key: 'buff-hunter',
-            label: `Săn bài tự động (${monitors.length})`,
+            label: `Post Hunter (${monitors.length})`,
             children: (
               <Suspense fallback={<TableSkeleton rows={4} columns={3} />}>
                 <PostHunterTab
@@ -538,9 +538,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           },
           {
             key: 'via-management',
-            label: 'Dàn Via & Fanpage',
+            label: 'Vias & Fanpages',
             children: (
-              <Suspense fallback={<PageSkeleton title="Đang tải Dàn Via & Fanpage..." />}>
+              <Suspense fallback={<PageSkeleton title="Loading Vias & Fanpages..." />}>
                 <ViaManagementPage
                   accounts={accounts as any[]}
                   loading={loadingAccounts}
@@ -557,9 +557,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           },
           {
             key: 'system-settings',
-            label: 'Cấu Hình & Telegram',
+            label: 'Config & Telegram',
             children: (
-              <Suspense fallback={<PageSkeleton title="Đang tải Cấu hình hệ thống..." />}>
+              <Suspense fallback={<PageSkeleton title="Loading system config..." />}>
                 <SystemSettingsPage
                   systemSettings={systemSettings}
                   setSystemSettings={setSystemSettings}
@@ -576,9 +576,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           },
           {
             key: 'license-management',
-            label: 'Cho Thuê & Bản Quyền',
+            label: 'Rental & License',
             children: (
-              <Suspense fallback={<PageSkeleton title="Đang tải Quản lý Bản quyền..." />}>
+              <Suspense fallback={<PageSkeleton title="Loading license management..." />}>
                 <LicenseManagementPage />
               </Suspense>
             ),
@@ -587,7 +587,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
       />
 
 
-      {/* Modal Xem Chi Tiết Log Lịch Sử Tương Tác */}
+      {/* Engagement history log detail modal */}
       <LogDetailModal
         log={selectedLogDetail}
         onClose={() => setSelectedLogDetail(null)}
@@ -596,11 +596,11 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           setSelectedReaction(log.reactionType);
           setSelectedLogDetail(null);
           setActiveTabKey('buff-like');
-          message.info('Đã nạp lại bài viết này vào form để tiếp tục.');
+          message.info('Post reloaded into the form to continue.');
         }}
       />
 
-      {/* Modal Khai Báo & Quản Lý i_user (Fanpage) cho Từng Via */}
+      {/* Modal to declare & manage i_user (Fanpages) per Via */}
       <ManagePagesModal
         managePagesModalOpen={managePagesModalOpen}
         onClose={() => setManagePagesModalOpen(false)}
@@ -633,7 +633,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         handleGenerateAiComments={handleGenerateAiComments}
       />
 
-      {/* MODAL: THÊM / CẬP NHẬT MỤC TIÊU THEO DÕI POST HUNTER */}
+      {/* MODAL: ADD / UPDATE POST HUNTER MONITOR */}
       <MonitorFormModal
         open={isMonitorModalOpen}
         editing={monitorModalTarget.editing}
@@ -644,14 +644,14 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         onSaved={fetchBuffMonitors}
       />
 
-      {/* MODAL: BÁO CÁO SỨC KHỎE DÀN VIA TRONG BM */}
+      {/* MODAL: BM VIA FLEET HEALTH REPORT */}
       <ViaHealthModal
         open={isHealthModalOpen}
         results={viaHealthResults}
         onClose={() => setIsHealthModalOpen(false)}
       />
 
-      {/* MODAL: XÁC NHẬN CHẠY TIẾP / BÙ LIKE */}
+      {/* MODAL: CONFIRM CONTINUE / TOP UP LIKES */}
       <ResumeBuffModal
         resumeModalOpen={resumeModalOpen}
         onClose={() => setResumeModalOpen(false)}

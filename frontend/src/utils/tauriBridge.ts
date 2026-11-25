@@ -1,7 +1,7 @@
 /**
- * tauriBridge.ts - Cầu nối giao tiếp giữa React JS và Rust Core (Tauri)
- * Tự động nhận diện: Khi chạy app desktop sẽ gọi trực tiếp các lệnh native của Rust.
- * Khi chạy trên web browser sẽ sử dụng fallback an toàn.
+ * tauriBridge.ts - Bridge between React JS and the Rust core (Tauri)
+ * Auto-detects: in the desktop app it calls the native Rust commands directly.
+ * In a web browser it uses a safe fallback.
  */
 
 export const isTauri = (): boolean => {
@@ -11,7 +11,7 @@ export const isTauri = (): boolean => {
 export const getMachineHwid = async (): Promise<string> => {
   try {
     if (isTauri()) {
-      // Gọi trực tiếp hàm Rust `get_machine_hwid` đã đăng ký trong src/lib.rs
+      // Call the Rust `get_machine_hwid` command registered in src/lib.rs
       const { invoke } = await import('@tauri-apps/api/core');
       const hwid = await invoke<string>('get_machine_hwid');
       if (hwid) {
@@ -20,10 +20,10 @@ export const getMachineHwid = async (): Promise<string> => {
       }
     }
   } catch (err) {
-    console.warn('[Tauri Bridge] Không gọi được lệnh Rust, chuyển sang fallback:', err);
+    console.warn('[Tauri Bridge] Could not call Rust command, using fallback:', err);
   }
 
-  // Fallback khi chạy trên trình duyệt web thông thường
+  // Fallback when running in a regular web browser
   const saved = localStorage.getItem('viplike_hwid');
   if (saved) return saved;
   const newHwid = `WEB-${Math.random().toString(36).substring(2, 8).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
@@ -38,7 +38,7 @@ export const getSystemInfo = async (): Promise<Record<string, any>> => {
       return await invoke<Record<string, any>>('get_system_info');
     }
   } catch (err) {
-    console.warn('[Tauri Bridge] Lỗi lấy thông tin hệ thống:', err);
+    console.warn('[Tauri Bridge] Failed to read system info:', err);
   }
 
   return {
@@ -48,4 +48,39 @@ export const getSystemInfo = async (): Promise<Record<string, any>> => {
     is_tauri: false,
     engine: 'Web Browser Mode',
   };
+};
+
+/**
+ * Bundled backend (src-tauri/src/backend.rs).
+ * Status: starting | installing_browser | running | external | missing | error: <msg> | web
+ */
+export const getBackendStatus = async (): Promise<string> => {
+  if (!isTauri()) return 'web';
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<string>('backend_status');
+  } catch {
+    return 'external';
+  }
+};
+
+export const startBackend = async (): Promise<void> => {
+  if (!isTauri()) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('start_backend');
+  } catch (err) {
+    console.warn('[Tauri Bridge] start_backend failed:', err);
+  }
+};
+
+/** Must run before installing an update: Windows cannot overwrite a running node.exe. */
+export const stopBackend = async (): Promise<void> => {
+  if (!isTauri()) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('stop_backend');
+  } catch (err) {
+    console.warn('[Tauri Bridge] stop_backend failed:', err);
+  }
 };

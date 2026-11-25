@@ -42,7 +42,7 @@ export const TableSkeleton: React.FC<{ rows?: number; columns?: number; classNam
   );
 };
 
-export const PageSkeleton: React.FC<{ title?: string }> = ({ title = 'Đang tải phân hệ...' }) => {
+export const PageSkeleton: React.FC<{ title?: string }> = ({ title = 'Loading module...' }) => {
   return (
     <div className="space-y-4 p-4 sm:p-6 animate-pulse">
       {/* Header */}

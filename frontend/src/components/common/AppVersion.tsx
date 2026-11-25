@@ -9,8 +9,8 @@ interface AppVersionProps {
 }
 
 /**
- * Số phiên bản + giờ build, hiện ở cuối menu để biết máy người dùng đã cập nhật chưa.
- * Desktop: đọc phiên bản đang cài (getVersion) và hỏi bộ cập nhật xem có bản mới hơn không.
+ * Version number + build time, shown at the bottom of the menu so you can tell whether the user's machine is up to date.
+ * Desktop: reads the installed version (getVersion) and asks the updater whether a newer one exists.
  */
 export default function AppVersion({ compact = false, className = '' }: AppVersionProps) {
   const [version, setVersion] = useState<string>(
@@ -29,7 +29,7 @@ export default function AppVersion({ compact = false, className = '' }: AppVersi
         const v = await getVersion();
         if (!cancelled && v) setVersion(v);
       } catch {
-        // Giữ __APP_VERSION__ mặc định
+        // Keep the default __APP_VERSION__
       }
 
       try {
@@ -39,7 +39,7 @@ export default function AppVersion({ compact = false, className = '' }: AppVersi
           setLatest(update.version);
         }
       } catch {
-        // Chưa có mạng / chưa cấu hình updater
+        // No network / updater not configured
       }
     })();
 
@@ -48,15 +48,15 @@ export default function AppVersion({ compact = false, className = '' }: AppVersi
     };
   }, []);
 
-  const label = version === 'dev' ? 'Bản dev' : `v${version}`;
+  const label = version === 'dev' ? 'Dev build' : `v${version}`;
   const tip = [
-    `Phiên bản ${version}`,
-    builtAt && builtAt.isValid() ? `Build lúc ${builtAt.format('HH:mm DD/MM/YYYY')}` : null,
+    `Version ${version}`,
+    builtAt && builtAt.isValid() ? `Built at ${builtAt.format('HH:mm DD/MM/YYYY')}` : null,
     latest
-      ? `Đã có bản ${latest} — mở lại app hoặc bấm cập nhật`
+      ? `Version ${latest} is available — reopen the app or click update`
       : isTauri()
-      ? 'Đang dùng bản mới nhất'
-      : 'Chế độ Trình duyệt Web',
+      ? 'You are on the latest version'
+      : 'Web browser mode',
   ]
     .filter(Boolean)
     .join('\n');
@@ -94,10 +94,10 @@ export default function AppVersion({ compact = false, className = '' }: AppVersi
         {latest ? (
           <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded-full animate-pulse shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-            bản {latest}
+            v{latest}
           </span>
         ) : (
-          <span className="text-[10px] text-slate-500 shrink-0">mới nhất</span>
+          <span className="text-[10px] text-slate-500 shrink-0">latest</span>
         )}
       </div>
     </Tooltip>

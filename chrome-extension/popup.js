@@ -1,4 +1,4 @@
-// popup.js - Quản lý giao diện Popup của VIPLIKE Avatar Fast Uploader
+// popup.js - Manages the VIPLIKE Avatar Fast Uploader popup UI
 
 const BACKEND_URL = 'http://localhost:3100';
 
@@ -8,7 +8,7 @@ let isRunning = false;
 let isPaused = false;
 let syncTimer = null;
 
-// Quản lý danh sách Fanpage và bộ lọc
+// Fanpage list and filter state
 let allLoadedPages = [];
 let selectedPageIds = new Set();
 let searchQuery = '';
@@ -53,7 +53,7 @@ const currentPageStatus = document.getElementById('current-page-status');
 const logsList = document.getElementById('logs-list');
 const btnClearLogs = document.getElementById('btn-clear-logs');
 
-// Khởi chạy khi mở popup
+// Runs when the popup opens
 document.addEventListener('DOMContentLoaded', async () => {
   setupEventListeners();
   loadSavedState();
@@ -61,7 +61,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadPagesList();
   await syncJobStateFromStorage();
 
-  // Polling sync định kỳ để đồng bộ liên tục
+  // Periodic polling sync to stay continuously in sync
   syncTimer = setInterval(syncJobStateFromStorage, 1000);
 });
 
@@ -136,7 +136,7 @@ function setupEventListeners() {
   btnStop.addEventListener('click', handleStop);
 
   btnClearLogs.addEventListener('click', async () => {
-    logsList.innerHTML = '<div class="empty-log">Chưa có nhật ký hoạt động.</div>';
+    logsList.innerHTML = '<div class="empty-log">No activity logged yet.</div>';
     const { activeJob } = await chrome.storage.local.get('activeJob');
     if (activeJob) {
       activeJob.logs = [];
@@ -144,7 +144,7 @@ function setupEventListeners() {
     }
   });
 
-  // Lắng nghe thông điệp trực tiếp từ Content Script
+  // Listen for messages directly from the Content Script
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'AVATAR_PROGRESS') {
       renderProgress(msg.data);
@@ -157,13 +157,13 @@ function setFilterButtonActive(activeBtn) {
   if (activeBtn) activeBtn.classList.add('active');
 }
 
-// Kiểm tra tab Facebook hiện tại
+// Check the current Facebook tab
 async function checkActiveTab() {
-  setConnectionStatus(false, 'Đang kiểm tra tab...');
+  setConnectionStatus(false, 'Checking tab...');
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tabs || tabs.length === 0) {
-      setConnectionStatus(false, 'Không tìm thấy tab');
+      setConnectionStatus(false, 'No tab found');
       return;
     }
 
@@ -171,17 +171,17 @@ async function checkActiveTab() {
     const url = tabs[0].url || '';
 
     if (!url.includes('facebook.com')) {
-      setConnectionStatus(false, 'Hãy mở tab Facebook');
-      userNameEl.textContent = 'Bạn chưa mở Facebook!';
-      userUidEl.textContent = 'Vui lòng mở trang Facebook trên tab này';
+      setConnectionStatus(false, 'Please open a Facebook tab');
+      userNameEl.textContent = 'Facebook is not open!';
+      userUidEl.textContent = 'Please open Facebook in this tab';
       btnStart.disabled = true;
       return;
     }
 
-    // Gửi message tới content script để lấy thông tin đăng nhập
+    // Message the content script to get login info
     chrome.tabs.sendMessage(currentTabId, { action: 'GET_FB_INFO' }, async (res) => {
       if (chrome.runtime.lastError || !res) {
-        // Tự động inject Script nếu tab chưa được F5
+        // Auto-inject the script if the tab hasn't been reloaded
         try {
           await chrome.scripting.executeScript({
             target: { tabId: currentTabId },
@@ -192,17 +192,17 @@ async function checkActiveTab() {
               if (retryRes && retryRes.loggedIn) {
                 applyConnectedUser(retryRes);
               } else {
-                setConnectionStatus(false, 'Cần F5 tab Facebook');
-                userNameEl.textContent = 'Chưa tải được Script';
-                userUidEl.textContent = 'Nhấn Cmd+R (F5) tab Facebook phía sau nhé!';
+                setConnectionStatus(false, 'Reload the Facebook tab');
+                userNameEl.textContent = 'Script not loaded';
+                userUidEl.textContent = 'Press Cmd+R (F5) on the Facebook tab behind!';
               }
             });
           }, 400);
           return;
         } catch (injectErr) {
-          setConnectionStatus(false, 'Cần F5 tab Facebook');
-          userNameEl.textContent = 'Chưa tải được Script';
-          userUidEl.textContent = 'Nhấn Cmd+R (F5) tab Facebook phía sau nhé!';
+          setConnectionStatus(false, 'Reload the Facebook tab');
+          userNameEl.textContent = 'Script not loaded';
+          userUidEl.textContent = 'Press Cmd+R (F5) on the Facebook tab behind!';
           return;
         }
       }
@@ -210,19 +210,19 @@ async function checkActiveTab() {
       if (res.loggedIn && res.uid) {
         applyConnectedUser(res);
       } else {
-        setConnectionStatus(false, 'Chưa đăng nhập FB');
-        userNameEl.textContent = 'Chưa đăng nhập Facebook';
-        userUidEl.textContent = 'Hãy đăng nhập vào Facebook trên tab này';
+        setConnectionStatus(false, 'Not logged in to FB');
+        userNameEl.textContent = 'Not logged in to Facebook';
+        userUidEl.textContent = 'Please log in to Facebook in this tab';
       }
     });
   } catch (e) {
-    setConnectionStatus(false, 'Lỗi kết nối');
+    setConnectionStatus(false, 'Connection error');
   }
 }
 
 function applyConnectedUser(user) {
   fbUser = user;
-  setConnectionStatus(true, 'Facebook Đã Kết Nối');
+  setConnectionStatus(true, 'Facebook Connected');
   userNameEl.textContent = user.name || 'Nick Facebook';
   userUidEl.textContent = `UID: ${user.uid}`;
   if (user.avatarUrl) {
@@ -241,15 +241,15 @@ function setConnectionStatus(connected, text) {
 }
 
 // =========================================================================
-// QUẢN LÝ TẢI VÀ CHỌN DANH SÁCH FANPAGE
+// LOAD AND SELECT THE FANPAGE LIST
 // =========================================================================
 
 async function loadPagesList() {
-  pagesListEl.innerHTML = '<div class="empty-pages-msg">⏳ Đang nạp danh sách Fanpage...</div>';
+  pagesListEl.innerHTML = '<div class="empty-pages-msg">⏳ Loading Fanpage list...</div>';
   const source = pageSourceSelect.value;
   let pages = [];
 
-  // 1. Tự nhập danh sách ID / Link
+  // 1. Manually entered ID / link list
   if (source === 'custom_list') {
     const rawText = customPagesInput ? customPagesInput.value : '';
     const lines = rawText.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -262,7 +262,7 @@ async function loadPagesList() {
         pages.push({
           id,
           name: `Fanpage ${id.slice(-4)}`,
-          hasAvatar: false, // Tự nhập mặc định xem là cần đổi
+          hasAvatar: false, // Manually entered pages are assumed to need a change
           isSilhouette: true,
           avatarUrl: '',
         });
@@ -270,7 +270,7 @@ async function loadPagesList() {
     }
   }
 
-  // 2. Nạp từ VIPLIKE RADIANT (:3100)
+  // 2. Load from VIPLIKE RADIANT (:3100)
   if (source === 'viplike_backend') {
     try {
       const uidQuery = fbUser && fbUser.uid ? `?uid=${fbUser.uid}` : '';
@@ -286,11 +286,11 @@ async function loadPagesList() {
         }
       }
     } catch (e) {
-      console.warn('Backend không phản hồi khi lấy pages');
+      console.warn('Backend did not respond when loading pages');
     }
   }
 
-  // 3. Quét từ tab Facebook hiện tại
+  // 3. Scan from the current Facebook tab
   if (source === 'fb_tab') {
     try {
       const resScan = await new Promise((resolve) => {
@@ -309,9 +309,9 @@ async function loadPagesList() {
 
   allLoadedPages = pages;
 
-  // QUY TẮC AN TOÀN TUYỆT ĐỐI THEO YÊU CẦU:
-  // MẶC ĐỊNH CHỈ TÍCH CHỌN CÁC PAGE CHƯA CÓ AVATAR (!p.hasAvatar)
-  // Các nick đã có avatar để trống (không được đổi bậy)
+  // STRICT SAFETY RULE AS REQUESTED:
+  // BY DEFAULT ONLY TICK PAGES WITHOUT AN AVATAR (!p.hasAvatar)
+  // Accounts that already have an avatar are left unticked (must not be changed by mistake)
   selectedPageIds.clear();
   allLoadedPages.forEach((p) => {
     if (!p.hasAvatar) {
@@ -326,11 +326,11 @@ function renderPagesList() {
   const missingCount = allLoadedPages.filter((p) => !p.hasAvatar).length;
   const hasCount = allLoadedPages.filter((p) => p.hasAvatar).length;
 
-  pillMissingCount.textContent = `${missingCount} chưa có`;
-  pillHasCount.textContent = `${hasCount} đã có`;
+  pillMissingCount.textContent = `${missingCount} missing`;
+  pillHasCount.textContent = `${hasCount} have one`;
   totalPagesCountEl.textContent = allLoadedPages.length;
 
-  // Lọc theo từ khóa tìm kiếm
+  // Filter by search keyword
   let displayPages = allLoadedPages;
   if (searchQuery) {
     displayPages = allLoadedPages.filter((p) => {
@@ -341,7 +341,7 @@ function renderPagesList() {
   if (displayPages.length === 0) {
     pagesListEl.innerHTML = `
       <div class="empty-pages-msg">
-        ${allLoadedPages.length === 0 ? 'Chưa tìm thấy Fanpage nào.' : 'Không có Fanpage nào khớp tìm kiếm.'}
+        ${allLoadedPages.length === 0 ? 'No Fanpages found yet.' : 'No Fanpages match the search.'}
       </div>
     `;
     updateSelectedCountUI();
@@ -364,8 +364,8 @@ function renderPagesList() {
 
     // Status tag
     const statusTag = page.hasAvatar
-      ? '<span class="page-status-tag tag-has">🟢 Đã có Avatar</span>'
-      : '<span class="page-status-tag tag-missing">🔴 Chưa có Avatar</span>';
+      ? '<span class="page-status-tag tag-has">🟢 Has Avatar</span>'
+      : '<span class="page-status-tag tag-missing">🔴 No Avatar</span>';
 
     row.innerHTML = `
       <input type="checkbox" class="page-checkbox" ${isSelected ? 'checked' : ''}>
@@ -377,7 +377,7 @@ function renderPagesList() {
       ${statusTag}
     `;
 
-    // Click checkbox hoặc click hàng để chọn/bỏ chọn
+    // Click the checkbox or the row to select/deselect
     const cb = row.querySelector('.page-checkbox');
     cb.addEventListener('change', (e) => {
       e.stopPropagation();
@@ -414,14 +414,14 @@ function updateSelectedCountUI() {
 
   if (count === 0) {
     btnStart.disabled = true;
-    btnStart.innerHTML = '<span>⚠️</span> Hãy chọn ít nhất 1 Page cần đổi';
+    btnStart.innerHTML = '<span>⚠️</span> Select at least 1 Page to change';
   } else {
     btnStart.disabled = false;
-    btnStart.innerHTML = `<span>🚀</span> Bắt đầu đổi Avatar (Đã chọn ${count} Page)`;
+    btnStart.innerHTML = `<span>🚀</span> Start changing Avatars (${count} Pages selected)`;
   }
 }
 
-// Đồng bộ trạng thái Job từ Chrome Storage
+// Sync Job status from Chrome Storage
 async function syncJobStateFromStorage() {
   const { activeJob } = await chrome.storage.local.get('activeJob');
   if (!activeJob) return;
@@ -449,23 +449,23 @@ async function syncJobStateFromStorage() {
   }
 }
 
-// Bắt đầu tiến trình cập nhật Avatar
+// Start the Avatar update run
 async function handleStart() {
   const preset = avatarPresetSelect.value;
   const delaySec = parseFloat(delaySlider.value);
 
-  // CHỈ LẤY CÁC PAGE ĐƯỢC NGƯỜI DÙNG TÍCH CHỌN
+  // ONLY TAKE PAGES THE USER TICKED
   const pagesToRun = allLoadedPages.filter((p) => selectedPageIds.has(p.id));
 
   if (pagesToRun.length === 0) {
-    alert('Vui lòng tích chọn ít nhất một Fanpage cần đổi ảnh đại diện!');
+    alert('Please tick at least one Fanpage to change its avatar!');
     return;
   }
 
-  currentPageStatus.textContent = `⏳ Đang chuẩn bị chạy cho ${pagesToRun.length} Fanpage đã chọn...`;
+  currentPageStatus.textContent = `⏳ Preparing to run for ${pagesToRun.length} selected Fanpages...`;
   btnStart.disabled = true;
 
-  // Lưu Job mới vào chrome.storage.local
+  // Save the new Job to chrome.storage.local
   const newJob = {
     isRunning: true,
     isPaused: false,
@@ -479,10 +479,10 @@ async function handleStart() {
     failed: 0,
     phase: 'INIT',
     currentPageName: pagesToRun[0].name,
-    statusMessage: `Bắt đầu cập nhật ${pagesToRun.length} Fanpage đã chọn...`,
+    statusMessage: `Starting update of ${pagesToRun.length} selected Fanpages...`,
     logs: [{
       time: new Date().toLocaleTimeString(),
-      text: `🚀 Bắt đầu đổi Avatar cho ${pagesToRun.length} Fanpage (Kho: ${preset}, Chờ: ${delaySec}s)`,
+      text: `🚀 Starting Avatar change for ${pagesToRun.length} Fanpages (Library: ${preset}, Wait: ${delaySec}s)`,
       type: 'info'
     }],
     startedAt: Date.now(),
@@ -499,10 +499,10 @@ async function handleStart() {
     percent: 0,
     pageName: pagesToRun[0].name,
     status: 'RUNNING',
-    message: `Đã khởi động tiến trình ${pagesToRun.length} Page`,
+    message: `Started a run for ${pagesToRun.length} Pages`,
   });
 
-  // Đánh thức Content Script trong tab Facebook
+  // Wake up the Content Script in the Facebook tab
   if (currentTabId) {
     chrome.tabs.sendMessage(currentTabId, { action: 'TRIGGER_RESUME' });
   }
@@ -510,14 +510,14 @@ async function handleStart() {
   btnStart.disabled = false;
 }
 
-// Tạm dừng / Tiếp tục
+// Pause / Resume
 async function handlePause() {
   const { activeJob } = await chrome.storage.local.get('activeJob');
   if (!activeJob) return;
 
   const nextPaused = !activeJob.isPaused;
   activeJob.isPaused = nextPaused;
-  activeJob.statusMessage = nextPaused ? 'Đã tạm dừng' : 'Đang tiếp tục...';
+  activeJob.statusMessage = nextPaused ? 'Paused' : 'Resuming...';
   await chrome.storage.local.set({ activeJob });
 
   updateRunningUI(true, nextPaused);
@@ -527,18 +527,18 @@ async function handlePause() {
   }
 }
 
-// Dừng hoàn toàn
+// Stop completely
 async function handleStop() {
   const { activeJob } = await chrome.storage.local.get('activeJob');
   if (activeJob) {
     activeJob.isRunning = false;
     activeJob.isPaused = false;
-    activeJob.statusMessage = 'Đã dừng theo yêu cầu';
+    activeJob.statusMessage = 'Stopped as requested';
     await chrome.storage.local.set({ activeJob });
   }
 
   updateRunningUI(false, false);
-  currentPageStatus.textContent = '⏹️ Đã dừng tiến trình.';
+  currentPageStatus.textContent = '⏹️ Run stopped.';
 
   if (currentTabId) {
     chrome.tabs.sendMessage(currentTabId, { action: 'STOP_JOB' });
@@ -553,7 +553,7 @@ function updateRunningUI(running, paused) {
     btnStart.style.display = 'none';
     btnPause.style.display = 'flex';
     btnStop.style.display = 'flex';
-    btnPause.innerHTML = paused ? '<span>▶️</span> Tiếp tục' : '<span>⏸️</span> Tạm dừng';
+    btnPause.innerHTML = paused ? '<span>▶️</span> Resume' : '<span>⏸️</span> Pause';
   } else {
     btnStart.style.display = 'flex';
     btnPause.style.display = 'none';
@@ -571,14 +571,14 @@ function renderProgress(data) {
   progressBarFill.style.width = `${percent}%`;
 
   if (status === 'RUNNING') {
-    currentPageStatus.textContent = `⚡ [${current + 1}/${total}] Đang xử lý: ${pageName || 'Fanpage'}...`;
+    currentPageStatus.textContent = `⚡ [${current + 1}/${total}] Processing: ${pageName || 'Fanpage'}...`;
   } else if (status === 'PAUSED') {
-    currentPageStatus.textContent = `⏸️ Đang tạm dừng tại [${current}/${total}]`;
+    currentPageStatus.textContent = `⏸️ Paused at [${current}/${total}]`;
   } else if (status === 'DONE') {
-    currentPageStatus.textContent = `🎉 Hoàn tất toàn bộ ${success}/${total} Fanpage!`;
+    currentPageStatus.textContent = `🎉 Finished all ${success}/${total} Fanpages!`;
     updateRunningUI(false, false);
   } else if (status === 'STOPPED') {
-    currentPageStatus.textContent = '⏹️ Đã dừng tiến trình.';
+    currentPageStatus.textContent = '⏹️ Run stopped.';
     updateRunningUI(false, false);
   } else if (message) {
     currentPageStatus.textContent = message;

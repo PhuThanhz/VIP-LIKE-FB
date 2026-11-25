@@ -1,7 +1,7 @@
 /**
  * device-fingerprints.js
- * Bộ giả lập danh tính thiết bị phần cứng & User-Agent đa dạng
- * Chống Meta Fingerprinting gom nhóm các Via vào chung 1 máy tính
+ * Diverse hardware device identity & User-Agent emulator
+ * Prevents Meta Fingerprinting from grouping Vias onto the same computer
  */
 
 const DEVICE_PROFILES = [
@@ -80,13 +80,13 @@ const DEVICE_PROFILES = [
 ];
 
 /**
- * Trả về cấu hình giả lập thiết bị ổn định theo UID (cùng 1 UID luôn dùng 1 loại thiết bị quen thuộc)
+ * Returns a stable device emulation config per UID (the same UID always uses its familiar device type)
  */
 function getDeviceForUid(uid = '') {
   if (!uid) {
     return DEVICE_PROFILES[Math.floor(Math.random() * DEVICE_PROFILES.length)];
   }
-  // Hash chuỗi UID để cố định thiết bị cho từng nick (giống người thật dùng 1 điện thoại/máy tính quen thuộc)
+  // Hash the UID string to pin a device per account (like a real person using their familiar phone/computer)
   let hash = 0;
   for (let i = 0; i < uid.length; i++) {
     hash = (hash << 5) - hash + uid.charCodeAt(i);
@@ -97,11 +97,11 @@ function getDeviceForUid(uid = '') {
 }
 
 /**
- * Áp dụng cấu hình và script ẩn danh cho context
+ * Applies the config and the stealth script to the context
  */
 async function applyFingerprintToContext(context, profile) {
   await context.addInitScript((prof) => {
-    // 1. Ẩn dấu vết Playwright/Selenium webdriver
+    // 1. Hide Playwright/Selenium webdriver traces
     Object.defineProperty(navigator, 'webdriver', {
       get: () => undefined,
     });
@@ -118,12 +118,12 @@ async function applyFingerprintToContext(context, profile) {
       });
     }
 
-    // 3. Mock languages Tiếng Việt & Tiếng Anh
+    // 3. Mock Vietnamese & English languages
     Object.defineProperty(navigator, 'languages', {
       get: () => ['vi-VN', 'vi', 'en-US', 'en'],
     });
 
-    // 4. Mock window.chrome cho trình duyệt nhân Chromium
+    // 4. Mock window.chrome for Chromium-based browsers
     if (!window.chrome) {
       window.chrome = {
         runtime: {},

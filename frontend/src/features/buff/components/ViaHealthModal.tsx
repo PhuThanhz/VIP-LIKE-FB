@@ -18,12 +18,12 @@ export default function ViaHealthModal({ open, results, onClose }: ViaHealthModa
       title={
         <div className="flex items-center gap-2 text-base font-bold text-slate-100 pb-2 border-b border-slate-800">
           <SafetyCertificateOutlined className="text-emerald-400 text-lg" />
-          <span>Báo Cáo Sức Khỏe Dàn Via Facebook (Live/Die Status)</span>
+          <span>Facebook Via Health Report (Live/Die Status)</span>
         </div>
       }
       footer={[
         <Button key="close" type="primary" onClick={onClose} className="rounded-xl">
-          Đóng
+          Close
         </Button>,
       ]}
       width={720}
@@ -31,14 +31,14 @@ export default function ViaHealthModal({ open, results, onClose }: ViaHealthModa
     >
       <div className="space-y-4 py-2 text-slate-200">
         <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
-          <span>Tổng số Via kiểm tra: <strong className="text-slate-100">{viaHealthResults.length}</strong></span>
+          <span>Vias checked: <strong className="text-slate-100">{viaHealthResults.length}</strong></span>
           <span className="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
             <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            Hoạt Động: {viaHealthResults.filter((r) => r.isLive).length}
+            Active: {viaHealthResults.filter((r) => r.isLive).length}
           </span>
           <span className="inline-flex items-center gap-1.5 text-rose-400 font-semibold">
             <span className="w-2 h-2 rounded-full bg-rose-400"></span>
-            Sự Cố / Hết Hạn: {viaHealthResults.filter((r) => !r.isLive).length}
+            Issues / Expired: {viaHealthResults.filter((r) => !r.isLive).length}
           </span>
         </div>
 
@@ -69,7 +69,7 @@ export default function ViaHealthModal({ open, results, onClose }: ViaHealthModa
                     </Tag>
                   )}
                 </div>
-                <div className="text-[11px] text-slate-400 font-mono">UID: {v.uid || 'N/A'} {v.name && `· Tên Facebook: ${v.name}`}</div>
+                <div className="text-[11px] text-slate-400 font-mono">UID: {v.uid || 'N/A'} {v.name && `· Facebook name: ${v.name}`}</div>
                 {v.error && <div className="text-[11px] text-rose-400">{v.error}</div>}
               </div>
               <div className="shrink-0 text-right text-[11px] text-slate-500 font-mono">

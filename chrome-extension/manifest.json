@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "VIPLIKE Avatar Fast Uploader",
   "version": "1.0.0",
-  "description": "Tiện ích tự động cập nhật Avatar hàng loạt cho dàn Fanpage Facebook siêu tốc và an toàn ngay trên trình duyệt thật.",
+  "description": "Fast, safe bulk Avatar updater for your Facebook Fanpages, right in your real browser.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

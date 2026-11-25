@@ -11,14 +11,14 @@ interface LoginPageProps {
 
 type LoginTab = 'login' | 'license';
 
-// Dùng chung key để lỗi mới thay thế lỗi cũ, không chồng thông báo khi bấm nhiều lần
+// Shared key so a new error replaces the old one instead of stacking on repeated clicks
 const AUTH_MESSAGE_KEY = 'auth-message';
 const LAST_USERNAME_KEY = 'viplike_last_username';
 const DEFAULT_LOCKOUT_SEC = 60;
 
-/** Backend trả 429 kèm "thử lại sau N giây" trong thông báo lỗi */
+/** Backend returns 429 with "retry after N seconds" in the error message */
 const parseLockoutSeconds = (errorText?: string): number => {
-  const match = errorText?.match(/(\d+)\s*giây/);
+  const match = errorText?.match(/(\d+)\s*(?:giây|seconds?)/i);
   return match ? Number(match[1]) : DEFAULT_LOCKOUT_SEC;
 };
 
@@ -27,7 +27,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [hwid, setHwid] = useState('');
   const [lockoutSec, setLockoutSec] = useState(0);
-  // Đã nhớ tên đăng nhập thì đặt con trỏ thẳng vào ô mật khẩu
+  // If the username is remembered, put the cursor straight into the password field
   const [lastUsername] = useState(() => localStorage.getItem(LAST_USERNAME_KEY) || '');
   const [form] = Form.useForm();
   const [licenseForm] = Form.useForm();
@@ -36,7 +36,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     getMachineHwid().then(setHwid);
   }, []);
 
-  // Đếm ngược thời gian bị tạm khoá đăng nhập
+  // Countdown for the temporary login lockout
   useEffect(() => {
     if (lockoutSec <= 0) return;
     const timer = setTimeout(() => setLockoutSec((sec) => sec - 1), 1000);
@@ -54,17 +54,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       if (session) {
         saveSession(session.token, session.user);
         localStorage.setItem(LAST_USERNAME_KEY, values.username.trim());
-        message.success(`Chào mừng ${session.user.fullName} đã đăng nhập thành công!`);
+        message.success(`Welcome ${session.user.fullName}, you are now signed in!`);
         onLoginSuccess(session.user);
       } else {
-        message.error({ content: res.data?.error || 'Đăng nhập không thành công', key: AUTH_MESSAGE_KEY });
+        message.error({ content: res.data?.error || 'Sign-in failed', key: AUTH_MESSAGE_KEY });
       }
     } catch (err: any) {
       const errorText: string | undefined = err.response?.data?.error;
       if (err.response?.status === 429) {
         setLockoutSec(parseLockoutSeconds(errorText));
       }
-      message.error({ content: errorText || err.message || 'Tài khoản hoặc mật khẩu không chính xác!', key: AUTH_MESSAGE_KEY });
+      message.error({ content: errorText || err.message || 'Incorrect username or password!', key: AUTH_MESSAGE_KEY });
     } finally {
       setLoading(false);
     }
@@ -78,14 +78,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         hardwareHwid: hwid,
       });
       if (res.data?.success) {
-        message.success('Kích hoạt Bản Quyền thành công! Vui lòng đăng nhập để tiếp tục.');
+        message.success('License activated! Please sign in to continue.');
         licenseForm.resetFields();
         setActiveTab('login');
       } else {
-        message.error({ content: res.data?.error || 'Mã key không hợp lệ hoặc đã hết hạn.', key: AUTH_MESSAGE_KEY });
+        message.error({ content: res.data?.error || 'Invalid or expired key.', key: AUTH_MESSAGE_KEY });
       }
     } catch (err: any) {
-      message.error({ content: err.response?.data?.error || 'Kích hoạt key bản quyền thất bại.', key: AUTH_MESSAGE_KEY });
+      message.error({ content: err.response?.data?.error || 'License key activation failed.', key: AUTH_MESSAGE_KEY });
     } finally {
       setLoading(false);
     }
@@ -104,7 +104,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 RADIANT
               </span>
             </div>
-            <div className="text-[10px] text-slate-400">Hệ Thống Tăng Tương Tác &amp; Săn Bài Meta</div>
+            <div className="text-[10px] text-slate-400">Meta Engagement &amp; Post Hunting System</div>
           </div>
         </div>
 
@@ -123,10 +123,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 <img src="/logo.png" alt="VIP LIKE RADIANT" className="w-16 h-16 rounded-2xl shadow-2xl border border-slate-800 object-cover" />
               </div>
               <h1 className="text-xl font-bold tracking-tight mb-1 text-white">
-                ĐĂNG NHẬP HỆ THỐNG
+                SYSTEM SIGN IN
               </h1>
               <p className="text-xs text-slate-400">
-                Vui lòng xác thực tài khoản để truy cập dàn Fanpage &amp; Công cụ Buff
+                Please verify your account to access your Fanpages &amp; Buff tools
               </p>
             </div>
 
@@ -139,7 +139,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               items={[
                 {
                   key: 'login',
-                  label: <span className="font-semibold px-2">Đăng Nhập</span>,
+                  label: <span className="font-semibold px-2">Sign In</span>,
                   children: (
                     <Form
                       form={form}
@@ -150,12 +150,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     >
                       <Form.Item
                         name="username"
-                        label={<span className="text-xs font-semibold">Tên Đăng Nhập hoặc Email</span>}
-                        rules={[{ required: true, message: 'Vui lòng nhập tên đăng nhập' }]}
+                        label={<span className="text-xs font-semibold">Username or Email</span>}
+                        rules={[{ required: true, message: 'Please enter your username' }]}
                       >
                         <Input
                           prefix={<UserOutlined className="text-slate-400 mr-1" />}
-                          placeholder="Tên đăng nhập hoặc email"
+                          placeholder="Username or email"
                           autoComplete="username"
                           autoFocus={!lastUsername}
                           size="large"
@@ -165,12 +165,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
                       <Form.Item
                         name="password"
-                        label={<span className="text-xs font-semibold">Mật Khẩu</span>}
-                        rules={[{ required: true, message: 'Vui lòng nhập mật khẩu tài khoản' }]}
+                        label={<span className="text-xs font-semibold">Password</span>}
+                        rules={[{ required: true, message: 'Please enter your password' }]}
                       >
                         <Input.Password
                           prefix={<LockOutlined className="text-slate-400 mr-1" />}
-                          placeholder="Nhập mật khẩu"
+                          placeholder="Enter password"
                           autoComplete="current-password"
                           autoFocus={Boolean(lastUsername)}
                           size="large"
@@ -187,7 +187,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         size="large"
                         className="h-11 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 font-bold border-0 shadow-lg shadow-cyan-500/20 mt-2"
                       >
-                        {lockoutSec > 0 ? `Thử lại sau ${lockoutSec} giây` : 'ĐĂNG NHẬP NGAY'}
+                        {lockoutSec > 0 ? `Try again in ${lockoutSec} seconds` : 'SIGN IN NOW'}
                       </Button>
 
                     </Form>
@@ -195,7 +195,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 },
                 {
                   key: 'license',
-                  label: <span className="font-semibold px-2">Bản Quyền</span>,
+                  label: <span className="font-semibold px-2">License</span>,
                   children: (
                     <Form
                       form={licenseForm}
@@ -204,16 +204,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       className="pt-2 space-y-2"
                     >
                       <div className="p-3 rounded-2xl border text-xs space-y-1 bg-slate-950/80 border-slate-800">
-                        <div className="text-slate-400 font-medium">Mã Thiết Bị Máy Tính (HWID):</div>
+                        <div className="text-slate-400 font-medium">Machine ID (HWID):</div>
                         <div className="font-mono text-cyan-300 font-bold text-xs truncate">
-                          {hwid || 'Đang nhận diện HWID...'}
+                          {hwid || 'Detecting HWID...'}
                         </div>
                       </div>
 
                       <Form.Item
                         name="licenseKey"
-                        label={<span className="text-xs font-semibold">Mã Key Kích Hoạt SaaS</span>}
-                        rules={[{ required: true, message: 'Vui lòng nhập key bản quyền' }]}
+                        label={<span className="text-xs font-semibold">SaaS Activation Key</span>}
+                        rules={[{ required: true, message: 'Please enter your license key' }]}
                       >
                         <Input
                           prefix={<KeyOutlined className="text-slate-400 mr-1" />}
@@ -231,7 +231,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         size="large"
                         className="h-11 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 font-bold border-0 shadow-lg shadow-amber-500/25"
                       >
-                        KÍCH HOẠT &amp; TRUY CẬP
+                        ACTIVATE &amp; ENTER
                       </Button>
                     </Form>
                   ),
@@ -244,7 +244,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
       {/* Footer */}
       <footer className="py-3 px-6 text-center text-xs text-slate-400 border-t border-slate-800/60">
-        VIP LIKE • Được làm bởi <span className="text-slate-200 font-medium">thanhphu</span>
+        VIP LIKE • Made by <span className="text-slate-200 font-medium">thanhphu</span>
       </footer>
     </div>
   );

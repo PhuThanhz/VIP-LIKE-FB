@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -19,7 +19,7 @@
       </div>
       <div id="fb-status-pill" class="status-pill status-disconnected">
         <span class="dot"></span>
-        <span id="fb-status-text">Đang kết nối...</span>
+        <span id="fb-status-text">Connecting...</span>
       </div>
     </header>
 
@@ -27,38 +27,38 @@
     <div class="card account-card">
       <div class="user-avatar" id="user-avatar-placeholder">👤</div>
       <div class="user-info">
-        <div class="user-name" id="user-name">Đang kiểm tra tab Facebook...</div>
+        <div class="user-name" id="user-name">Checking the Facebook tab...</div>
         <div class="user-uid" id="user-uid">UID: ---</div>
       </div>
-      <button id="btn-refresh-user" class="btn-icon" title="Kiểm tra lại Facebook">🔄</button>
+      <button id="btn-refresh-user" class="btn-icon" title="Recheck Facebook">🔄</button>
     </div>
 
     <!-- Configuration Section -->
     <div class="card config-card">
       <!-- Preset Selection -->
       <div class="form-group">
-        <label for="avatar-preset">Kho ảnh đại diện:</label>
+        <label for="avatar-preset">Avatar library:</label>
         <select id="avatar-preset" class="form-select">
-          <option value="mix">✨ Ngẫu nhiên Nam & Nữ HD (220+ ảnh)</option>
-          <option value="women">👩 Chân dung Nữ sắc nét (112 ảnh)</option>
-          <option value="men">👨 Chân dung Nam sắc nét (112 ảnh)</option>
-          <option value="business">💼 Doanh nhân / Studio HD (Unsplash)</option>
+          <option value="mix">✨ Random male & female HD (220+ photos)</option>
+          <option value="women">👩 Sharp female portraits (112 photos)</option>
+          <option value="men">👨 Sharp male portraits (112 photos)</option>
+          <option value="business">💼 Business / Studio HD (Unsplash)</option>
         </select>
       </div>
 
       <!-- Source Selection -->
       <div class="form-group">
-        <label for="page-source">Nguồn nạp danh sách Fanpage:</label>
+        <label for="page-source">Fanpage list source:</label>
         <select id="page-source" class="form-select">
-          <option value="viplike_backend">⚡ Nạp từ VIPLIKE RADIANT (:3100) (Khuyên dùng)</option>
-          <option value="custom_list">📝 Tự nhập danh sách ID / Link Fanpage</option>
-          <option value="fb_tab">🌐 Quét từ Tab Facebook hiện tại</option>
+          <option value="viplike_backend">⚡ Load from VIPLIKE RADIANT (:3100) (Recommended)</option>
+          <option value="custom_list">📝 Enter Fanpage IDs / links manually</option>
+          <option value="fb_tab">🌐 Scan from the current Facebook tab</option>
         </select>
       </div>
 
       <!-- Custom Page Input (Hidden by default) -->
       <div class="form-group" id="custom-pages-group" style="display: none;">
-        <label for="custom-pages-input">Nhập ID / Link Page (mỗi dòng 1 Page):</label>
+        <label for="custom-pages-input">Enter Page IDs / links (1 Page per line):</label>
         <textarea id="custom-pages-input" class="form-textarea" rows="3" placeholder="61594573362379&#10;61594510094814&#10;https://facebook.com/61595161642497"></textarea>
       </div>
 
@@ -66,49 +66,49 @@
       <div class="pages-box" id="pages-box">
         <div class="pages-header">
           <div class="pages-title-row">
-            <span class="pages-title">📋 Chọn Page cần đổi Avatar</span>
+            <span class="pages-title">📋 Choose Pages to change Avatar</span>
             <div id="pages-badge-counts" class="pages-badge-counts">
-              <span class="badge-pill pill-danger" id="pill-missing-count">0 chưa có</span>
-              <span class="badge-pill pill-success" id="pill-has-count">0 đã có</span>
+              <span class="badge-pill pill-danger" id="pill-missing-count">0 missing</span>
+              <span class="badge-pill pill-success" id="pill-has-count">0 have one</span>
             </div>
           </div>
-          <button id="btn-reload-pages" class="btn-icon" title="Tải lại danh sách Page">🔄</button>
+          <button id="btn-reload-pages" class="btn-icon" title="Reload Page list">🔄</button>
         </div>
 
         <!-- Filter / Quick Select Bar -->
         <div class="pages-filters-row">
-          <button id="btn-filter-missing-only" class="btn-filter active" title="Mặc định: Chỉ chọn những Page chưa có avatar">
-            🔴 Chỉ chọn chưa có
+          <button id="btn-filter-missing-only" class="btn-filter active" title="Default: only select Pages without an avatar">
+            🔴 Only missing
           </button>
           <button id="btn-filter-select-all" class="btn-filter">
-            Chọn tất cả
+            Select all
           </button>
           <button id="btn-filter-deselect-all" class="btn-filter">
-            Bỏ chọn
+            Deselect
           </button>
         </div>
 
         <!-- Search Input -->
         <div class="pages-search-box">
-          <input type="text" id="pages-search-input" class="form-input-sm" placeholder="🔍 Tìm kiếm theo tên hoặc ID...">
+          <input type="text" id="pages-search-input" class="form-input-sm" placeholder="🔍 Search by name or ID...">
         </div>
 
         <!-- Scrollable List of Pages with Checkboxes and Avatars -->
         <div id="pages-list" class="pages-list">
-          <div class="empty-pages-msg">Đang nạp danh sách Fanpage...</div>
+          <div class="empty-pages-msg">Loading Fanpage list...</div>
         </div>
 
         <!-- Summary & Safety Notice -->
         <div class="pages-footer">
-          <span class="selected-text">Đã chọn: <b id="selected-count">0</b>/<span id="total-pages-count">0</span> Page</span>
-          <span class="safety-shield" title="Page đã có avatar được bỏ chọn mặc định để bảo vệ an toàn">🛡️ Mặc định bỏ chọn nick đã có Avatar</span>
+          <span class="selected-text">Selected: <b id="selected-count">0</b>/<span id="total-pages-count">0</span> Pages</span>
+          <span class="safety-shield" title="Pages that already have an avatar are deselected by default for safety">🛡️ Accounts with an Avatar are deselected by default</span>
         </div>
       </div>
 
       <!-- Speed & Delay -->
       <div class="form-group">
         <div class="label-row">
-          <label for="delay-slider">Thời gian chờ giữa mỗi Page:</label>
+          <label for="delay-slider">Wait time between Pages:</label>
           <span id="delay-val" class="badge">4.0s</span>
         </div>
         <input type="range" id="delay-slider" min="2.5" max="8" step="0.5" value="4.0" class="form-range">
@@ -117,13 +117,13 @@
       <!-- Action Buttons -->
       <div class="actions-row">
         <button id="btn-start" class="btn btn-primary">
-          <span>🚀</span> Bắt đầu đổi Avatar
+          <span>🚀</span> Start changing Avatars
         </button>
         <button id="btn-pause" class="btn btn-warning" style="display: none;">
-          <span>⏸️</span> Tạm dừng
+          <span>⏸️</span> Pause
         </button>
         <button id="btn-stop" class="btn btn-danger" style="display: none;">
-          <span>⏹️</span> Dừng
+          <span>⏹️</span> Stop
         </button>
       </div>
     </div>
@@ -131,7 +131,7 @@
     <!-- Progress Card -->
     <div class="card progress-card" id="progress-card">
       <div class="progress-header">
-        <span class="progress-title">Tiến trình thực thi:</span>
+        <span class="progress-title">Progress:</span>
         <span id="progress-percent" class="progress-percent">0%</span>
       </div>
       <div class="progress-bar-bg">
@@ -140,36 +140,36 @@
       <div class="stats-row">
         <div class="stat-badge stat-total">
           <span class="stat-num" id="stat-total">0</span>
-          <span class="stat-label">Tổng Page</span>
+          <span class="stat-label">Total Pages</span>
         </div>
         <div class="stat-badge stat-success">
           <span class="stat-num" id="stat-success">0</span>
-          <span class="stat-label">Thành công</span>
+          <span class="stat-label">Success</span>
         </div>
         <div class="stat-badge stat-failed">
           <span class="stat-num" id="stat-failed">0</span>
-          <span class="stat-label">Lỗi</span>
+          <span class="stat-label">Errors</span>
         </div>
       </div>
       <div class="current-page-text" id="current-page-status">
-        Sẵn sàng. Hãy đảm bảo bạn đang mở Facebook trên một tab Chrome.
+        Ready. Make sure Facebook is open in a Chrome tab.
       </div>
     </div>
 
     <!-- Log Stream Card -->
     <div class="card logs-card">
       <div class="logs-header">
-        <span>Nhật ký thời gian thực</span>
-        <button id="btn-clear-logs" class="btn-text">Xóa</button>
+        <span>Real-time log</span>
+        <button id="btn-clear-logs" class="btn-text">Clear</button>
       </div>
       <div id="logs-list" class="logs-list">
-        <div class="empty-log">Chưa có nhật ký hoạt động.</div>
+        <div class="empty-log">No activity logged yet.</div>
       </div>
     </div>
 
     <!-- Footer -->
     <footer class="footer">
-      <span>VIPLIKE RADIANT &copy; 2026 - Tự động hóa trình duyệt thật</span>
+      <span>VIPLIKE RADIANT &copy; 2026 - Real browser automation</span>
     </footer>
   </div>
 

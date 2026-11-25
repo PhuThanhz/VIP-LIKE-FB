@@ -1,11 +1,11 @@
 /**
- * Kho trạng thái dùng chung: MySQL là nguồn chính, file JSON là bản dự phòng.
+ * Shared state store: MySQL is the primary source, JSON files are the backup.
  *
- *  - Đọc luôn đồng bộ, lấy từ bộ nhớ (giữ nguyên cách code cũ đang dùng).
- *  - Ghi: cập nhật bộ nhớ → ghi file JSON → đẩy lên MySQL (gộp theo thời gian).
- *  - Khởi động (init): lấy từ MySQL; nếu MySQL chưa có thì chuyển (migrate) dữ liệu JSON cũ lên;
- *    nếu file mới hơn MySQL (do MySQL từng lỗi) thì dùng file và đẩy ngược lên MySQL.
- *  - MySQL lỗi: vẫn chạy bằng JSON, tự thử đồng bộ lại mỗi phút.
+ *  - Reads are always synchronous, served from memory (keeps the way the old code works).
+ *  - Writes: update memory → write the JSON file → push to MySQL (batched over time).
+ *  - Startup (init): load from MySQL; if MySQL doesn't have it yet, migrate the old JSON data up;
+ *    if the file is newer than MySQL (because MySQL failed before), use the file and push it back to MySQL.
+ *  - MySQL failing: keep running on JSON, retrying the sync every minute.
  */
 const fs = require('fs');
 const path = require('path');
@@ -26,11 +26,11 @@ const KEYS = {
 const FILE_NEWER_TOLERANCE_MS = 5000;
 const RETRY_INTERVAL_MS = 60 * 1000;
 
-function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS, log = console } = {}) {
+function createStateStore({ dataDir = require('./paths').DATA_DIR, keys = KEYS, log = console } = {}) {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-  const cache = new Map(); // key → object đang dùng
-  const dirty = new Set(); // key chưa đẩy được lên MySQL
+  const cache = new Map(); // key → object in use
+  const dirty = new Set(); // keys not yet pushed to MySQL
   const timers = new Map();
   let db = null;
   let ready = false;
@@ -46,7 +46,7 @@ function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS,
     }
   }
 
-  /** Đọc file JSON; file hỏng được đổi tên để giữ lại, không ghi đè. */
+  /** Reads the JSON file; a corrupt file is renamed to keep it, never overwritten. */
   function readFile(key) {
     const fp = filePath(key);
     if (!fs.existsSync(fp)) return null;
@@ -57,13 +57,13 @@ function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS,
       try {
         fs.renameSync(fp, backup);
       } catch (_) {}
-      log.error(`[StateStore] ❌ ${keys[key].file} bị lỗi định dạng (${e.message}); đã giữ lại bản sao ${path.basename(backup)}`);
+      log.error(`[StateStore] ❌ ${keys[key].file} is malformed (${e.message}); kept a copy as ${path.basename(backup)}`);
       return null;
     }
   }
 
   function writeFile(key, value) {
-    if (db) return; // Đã có MySQL Workbench làm nguồn chính, không cần ghi file JSON
+    if (db) return; // MySQL Workbench is already the primary source, no need to write the JSON file
     try {
       const fp = filePath(key);
       const tmp = `${fp}.tmp`;
@@ -80,7 +80,7 @@ function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS,
       return true;
     } catch (e) {
       dirty.add(key);
-      warnOnce(`[StateStore] ⚠️ Chưa lưu được "${key}" lên MySQL: ${e.message}`);
+      warnOnce(`[StateStore] ⚠️ Could not save "${key}" to MySQL yet: ${e.message}`);
       return false;
     }
   }
@@ -94,7 +94,7 @@ function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS,
     retryTimer.unref?.();
   }
 
-  /** Gọi 1 lần lúc khởi động, trước khi nhận request / chạy tác vụ nền. */
+  /** Call once at startup, before accepting requests / running background tasks. */
   async function init(database) {
     db = database;
     let dbOk = true;
@@ -102,7 +102,7 @@ function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS,
       await db.ensureAppStateTable();
     } catch (e) {
       dbOk = false;
-      log.warn(`[StateStore] ⚠️ Không tạo/kiểm tra được bảng app_state: ${e.message}`);
+      log.warn(`[StateStore] ⚠️ Could not create/check the app_state table: ${e.message}`);
     }
 
     for (const key of Object.keys(keys)) {
@@ -113,7 +113,7 @@ function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS,
           row = await db.getAppState(key);
         } catch (e) {
           dbOk = false;
-          log.warn(`[StateStore] ⚠️ Không đọc được "${key}" từ MySQL: ${e.message}`);
+          log.warn(`[StateStore] ⚠️ Could not read "${key}" from MySQL: ${e.message}`);
         }
       }
 
@@ -122,7 +122,7 @@ function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS,
         try {
           dbValue = JSON.parse(row.value);
         } catch (e) {
-          log.error(`[StateStore] ❌ Dữ liệu "${key}" trên MySQL bị lỗi định dạng: ${e.message}`);
+          log.error(`[StateStore] ❌ "${key}" data in MySQL is malformed: ${e.message}`);
         }
       }
 
@@ -131,7 +131,7 @@ function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS,
       } else if (file) {
         cache.set(key, file.value);
         if (dbOk) {
-          log.log(`[StateStore] 📦 Chuyển "${key}" từ JSON lên MySQL (lần đầu).`);
+          log.log(`[StateStore] 📦 Migrating "${key}" from JSON to MySQL (first time).`);
           dirty.add(key);
         }
       } else {
@@ -145,17 +145,17 @@ function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS,
     return { dbOk, pendingSync: [...dirty] };
   }
 
-  /** Đọc đồng bộ. Trước khi init xong chỉ đọc file (không lưu vào bộ nhớ) để không lệch dữ liệu. */
+  /** Synchronous read. Before init finishes, only read the file (not cached in memory) so data doesn't drift. */
   function read(key) {
-    if (!keys[key]) throw new Error(`Khóa không tồn tại: ${key}`);
+    if (!keys[key]) throw new Error(`Key does not exist: ${key}`);
     if (cache.has(key)) return cache.get(key);
     const file = readFile(key);
     return file ? file.value : keys[key].default();
   }
 
-  /** Ghi: bộ nhớ + file (gộp theo thời gian) + MySQL. */
+  /** Write: memory + file (batched over time) + MySQL. */
   function write(key, value) {
-    if (!keys[key]) throw new Error(`Khóa không tồn tại: ${key}`);
+    if (!keys[key]) throw new Error(`Key does not exist: ${key}`);
     cache.set(key, value);
     dirty.add(key);
     if (timers.has(key)) clearTimeout(timers.get(key));
@@ -166,7 +166,7 @@ function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS,
         try {
           writeFile(key, cache.get(key));
         } catch (e) {
-          log.warn(`[StateStore] ⚠️ Lỗi ghi file ${keys[key].file}: ${e.message}`);
+          log.warn(`[StateStore] ⚠️ Error writing file ${keys[key].file}: ${e.message}`);
         }
         if (ready) pushToDb(key);
       }, keys[key].flushMs)
@@ -174,7 +174,7 @@ function createStateStore({ dataDir = path.join(__dirname, 'data'), keys = KEYS,
     return value;
   }
 
-  /** Ghi ngay mọi thay đổi đang chờ (dùng khi tắt server). */
+  /** Flush every pending change right away (used on server shutdown). */
   async function flush() {
     for (const [key, t] of timers) {
       clearTimeout(t);

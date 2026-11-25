@@ -1,4 +1,4 @@
-// Kho ảnh chân dung chất lượng cao dành cho Fanpage vệ tinh VIPLIKE
+// High-quality portrait library for VIPLIKE satellite Fanpages
 const AVATAR_POOLS = {
   women: [
     ...Array.from({ length: 100 }, (_, i) => `https://randomuser.me/api/portraits/women/${i}.jpg`),
