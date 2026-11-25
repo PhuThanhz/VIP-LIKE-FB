@@ -248,7 +248,6 @@ const ThemedApp: React.FC = () => {
 
   return (
     <AntdApp>
-      <AutoUpdateModal />
       {!currentUser ? (
         <Suspense fallback={<div className="min-h-screen bg-[#090d16] flex items-center justify-center"><Spin size="large" /></div>}>
           <LoginPage onLoginSuccess={setCurrentUser} />
@@ -267,6 +266,8 @@ export const App: React.FC = () => {
     <QueryClientProvider client={queryClient}>
       <ConfigProvider theme={DARK_THEME}>
         <WallpaperProvider>
+          {/* Outside the gate: an update must still be installable when the backend fails to start */}
+          <AutoUpdateModal />
           <BackendGate>
             <ThemedApp />
           </BackendGate>
