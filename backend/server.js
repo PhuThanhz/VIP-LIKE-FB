@@ -3770,7 +3770,7 @@ app.post('/api/buff-hunter/pause', requireAdmin, (req, res) => {
 
     const updated = saveBuffSettings({ postHunterPaused: paused });
     if (!updated) {
-      return res.status(500).json({ success: false, error: 'Could not save the Post Hunter status' });
+      return res.status(500).json({ success: false, error: 'Không lưu được trạng thái Săn bài' });
     }
 
     let pausedMonitors = 0;
@@ -3820,7 +3820,7 @@ app.post('/api/buff-monitors', (req, res) => {
     } = req.body;
 
     if (!targetUrl || !String(targetUrl).trim()) {
-      return res.status(400).json({ success: false, error: 'Missing the target link (targetUrl)' });
+      return res.status(400).json({ success: false, error: 'Thiếu link mục tiêu cần theo dõi' });
     }
 
     const data = loadBuffMonitors();
@@ -3906,11 +3906,11 @@ app.post('/api/buff-monitors/:id/toggle', (req, res) => {
     const { id } = req.params;
     const data = loadBuffMonitors();
     const mon = data.monitors.find((m) => m.id === id);
-    if (!mon) return res.status(404).json({ success: false, error: 'Monitor not found' });
+    if (!mon) return res.status(404).json({ success: false, error: 'Không tìm thấy monitor' });
     if (mon.status !== 'ACTIVE' && isPostHunterPaused()) {
       return res.status(400).json({
         success: false,
-        error: 'Post Hunter is paused. Please re-enable it before activating a monitor.',
+        error: 'Săn bài đang tạm dừng. Hãy bật lại Săn bài trước khi bật monitor.',
       });
     }
     mon.status = mon.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
@@ -3925,7 +3925,7 @@ app.post('/api/buff-hunter/test-scan', async (req, res) => {
   try {
     const { targetUrl, cookieString = '' } = req.body;
     if (!targetUrl || !String(targetUrl).trim()) {
-      return res.status(400).json({ success: false, error: 'Missing the target link to test-scan' });
+      return res.status(400).json({ success: false, error: 'Thiếu link để quét thử' });
     }
 
     let scanCookie = cookieString;
@@ -3994,12 +3994,12 @@ function logMonitorPost(mon, post, status, extra = {}) {
 async function scanMonitorTarget(monitorId, options = {}) {
   const data = loadBuffMonitors();
   const mon = data.monitors.find((m) => m.id === monitorId);
-  if (!mon) throw new Error('Monitor not found');
+  if (!mon) throw new Error('Không tìm thấy monitor');
 
   // 1. Check the VIP plan expiry date
   if (mon.expiresAt && new Date(mon.expiresAt).getTime() < Date.now()) {
     mon.status = 'PAUSED';
-    mon.expiredReason = 'The VIP plan has expired';
+    mon.expiredReason = 'Gói VIP đã hết hạn';
     saveBuffMonitors(data);
     console.warn(`[PostHunter] ⏸️ Monitor ${mon.targetName} VIP plan expired (${mon.expiresAt}). Pausing automatically.`);
     return { postsFound: 0, newPostsEnqueued: 0, expired: true };
@@ -4027,14 +4027,27 @@ async function scanMonitorTarget(monitorId, options = {}) {
     }
   }
 
-  const posts = await fbBuffTool.scanTargetForPosts(mon.targetUrl, {
-    cookieStr,
-    proxyUrl,
-    maxPosts: 8,
-    browser: options.browser || null,
-  });
+  let posts;
+  try {
+    posts = await fbBuffTool.scanTargetForPosts(mon.targetUrl, {
+      cookieStr,
+      proxyUrl,
+      maxPosts: 8,
+      browser: options.browser || null,
+    });
+  } catch (err) {
+    // Remember why the scan failed so the UI can explain it (and don't hammer FB every 30s)
+    mon.lastCheckedAt = new Date().toISOString();
+    mon.lastScanError = err.message;
+    mon.lastScanErrorCode = err.scanCode || 'SCAN_FAILED';
+    if (scanViaName) mon.lastScanVia = scanViaName;
+    saveBuffMonitors(data);
+    throw err;
+  }
 
   const postsFound = posts.length;
+  mon.lastScanError = null;
+  mon.lastScanErrorCode = null;
   mon.lastCheckedAt = new Date().toISOString();
   mon.lastPostsFound = postsFound;
   if (scanViaName) mon.lastScanVia = scanViaName;
@@ -4159,7 +4172,7 @@ async function scanMonitorTarget(monitorId, options = {}) {
 app.get('/api/buff-monitors/:id/posts', (req, res) => {
   try {
     const mon = (loadBuffMonitors().monitors || []).find((m) => m.id === req.params.id);
-    if (!mon) return res.status(404).json({ success: false, error: 'Monitor not found' });
+    if (!mon) return res.status(404).json({ success: false, error: 'Không tìm thấy monitor' });
     const queueItems = loadBuffQueue().items || [];
     const history = loadBuffHistory();
     const posts = (mon.postLog || []).map((entry) => {
@@ -4196,7 +4209,7 @@ app.post('/api/buff-monitors/:id/scan-now', async (req, res) => {
     if (isPostHunterPaused()) {
       return res.status(400).json({
         success: false,
-        error: 'Post Hunter is paused. Please re-enable it before scanning.',
+        error: 'Săn bài đang tạm dừng. Hãy bật lại Săn bài trước khi quét.',
       });
     }
     const { id } = req.params;

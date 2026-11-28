@@ -42,6 +42,7 @@ export interface HunterMonitor {
   baselineDone?: boolean;
   lastPostsFound?: number;
   lastScanVia?: string | null;
+  lastScanError?: string | null;
   postLogCount?: number;
   skippedLimitCount?: number;
 }
@@ -116,6 +117,7 @@ function isHunterTask(task: any): boolean {
 // Operating status of 1 monitor (priority: paused → baselining → no posts seen → normal)
 function getMonitorHealth(mon: HunterMonitor): { status: 'default' | 'processing' | 'warning' | 'success'; text: string; hint?: string } {
   if (mon.status !== 'ACTIVE') return { status: 'default', text: 'Tạm dừng' };
+  if (mon.lastScanError) return { status: 'warning', text: 'Quét bị lỗi', hint: mon.lastScanError };
   if (!mon.baselineDone) {
     return mon.lastCheckedAt
       ? { status: 'warning', text: 'Chưa có mốc', hint: 'Lần quét gần nhất không thấy bài nào. Kiểm tra lại link, hoặc via đã là thành viên Group chưa.' }
@@ -165,6 +167,7 @@ export default function PostHunterTab({
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [togglingGlobalPause, setTogglingGlobalPause] = useState(false);
 
+  const [guideOpen, setGuideOpen] = useState(monitors.length === 0);
   const [testOpen, setTestOpen] = useState(false);
   const [testUrl, setTestUrl] = useState('');
   const [testLoading, setTestLoading] = useState(false);
@@ -303,6 +306,9 @@ export default function PostHunterTab({
               )}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5">{TYPE_LABELS[mon.targetType] || 'Fanpage'}</div>
+            {mon.lastScanError && (
+              <div className="text-[11px] text-rose-300 mt-0.5 whitespace-normal leading-snug">⚠️ {mon.lastScanError}</div>
+            )}
           </div>
         );
       },
@@ -454,9 +460,13 @@ export default function PostHunterTab({
             </div>
             <p className="text-xs text-slate-500 mt-1">
               Bài mới trên Page/Group sẽ được buff tự động.{' '}
-              <Tooltip title="Lần quét đầu chỉ lấy mốc nên bài cũ không bị buff. Các Page của via được xoay vòng để dùng đều.">
-                <span className="underline decoration-dotted cursor-help">Cách hoạt động</span>
-              </Tooltip>
+              <button
+                type="button"
+                className="underline decoration-dotted text-slate-400 hover:text-slate-200"
+                onClick={() => setGuideOpen((v) => !v)}
+              >
+                {guideOpen ? 'Ẩn hướng dẫn' : 'Xem hướng dẫn'}
+              </button>
             </p>
           </div>
           <Space className="shrink-0" wrap size={8}>
@@ -499,6 +509,33 @@ export default function PostHunterTab({
             </div>
           ))}
         </div>
+
+        {guideOpen && (
+          <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3 text-xs text-slate-300 space-y-1.5">
+            <div className="font-semibold text-slate-100">Cách dùng Săn bài</div>
+            <div>
+              <b>1. Chuẩn bị Via:</b> vào <i>Via &amp; Fanpage</i> thêm ít nhất 1 Via còn sống. Theo dõi Group kín thì Via phải là thành viên Group.
+            </div>
+            <div>
+              <b>2. Thêm monitor:</b> bấm <i>Thêm monitor</i>, dán link Page/Group, chọn số like mỗi bài và số bài mỗi ngày. Có thể bấm
+              ⋮ → <i>Quét thử một link</i> trước để xem app đọc được bài không.
+            </div>
+            <div>
+              <b>3. Lần quét đầu chỉ lấy mốc:</b> bài đang có được ghi là <i>Bài cũ (mốc ban đầu)</i> và không bị buff.
+            </div>
+            <div>
+              <b>4. Bài mới tự buff:</b> từ lần quét sau, bài mới đăng hiện <i>Đã bắt</i>, vào Hàng đợi và được buff tự động. Bấm{' '}
+              <b>+</b> ở đầu mỗi monitor để xem từng bài: chờ buff, đang buff, đã buff.
+            </div>
+            <div>
+              <b>5. Bị giữ do giới hạn ngày:</b> hôm nay đã đủ số bài/ngày, bài sẽ được buff khi qua ngày mới. Muốn buff ngay thì bấm{' '}
+              <i>Buff ngay</i>.
+            </div>
+            <div className="text-slate-400">
+              Monitor báo <i>Quét bị lỗi</i> thì đọc dòng đỏ dưới tên monitor: thường là chưa có Via, cookie Via hết hạn, hoặc Via bị checkpoint.
+            </div>
+          </div>
+        )}
 
         {postHunterPaused && (
           <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">

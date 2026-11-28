@@ -4088,6 +4088,25 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
 
       await page.waitForTimeout(3000);
 
+      // Login wall / checkpoint: Facebook shows no posts, so report why instead of "0 posts"
+      const landedUrl = page.url();
+      if (/\/checkpoint\//i.test(landedUrl)) {
+        throw scanError('CHECKPOINT', 'Via dùng để quét đang bị Facebook checkpoint. Vào "Via & Fanpage" cập nhật cookie hoặc dùng via khác.');
+      }
+      const hasLoginForm = await page
+        .$('form#login_form, input[name="pass"], form[action*="/login"]')
+        .then(Boolean)
+        .catch(() => false);
+      const hasFeed = await page.$('[role="feed"], [aria-posinset]').then(Boolean).catch(() => false);
+      if (/\/login(\.php|\/)?/i.test(landedUrl) || (hasLoginForm && !hasFeed)) {
+        throw scanError(
+          'LOGIN_REQUIRED',
+          cookieStr
+            ? 'Cookie của via dùng để quét đã hết hạn (Facebook bắt đăng nhập lại). Vào "Via & Fanpage" cập nhật cookie.'
+            : 'Chưa có Via nào còn sống để quét nên Facebook bắt đăng nhập. Vào "Via & Fanpage" thêm ít nhất 1 Via.'
+        );
+      }
+
       // Scroll gently 1-2 times to trigger lazy loading of the Facebook Feed
       for (let s = 0; s < 2; s++) {
         await page.evaluate(() => window.scrollBy({ top: 900, behavior: 'smooth' })).catch(() => { });
@@ -4176,12 +4195,23 @@ async function buffLikesWithPages(cookieStr, targetUrl, options = {}) {
       console.log(`[FB-Hunter] 🎯 Found ${discoveredPosts.length} valid posts from ${cleanTarget}`);
     } catch (err) {
       console.error(`[FB-Hunter] ❌ Error scanning target ${cleanTarget}:`, err.message);
+      if (err.scanCode) throw err;
+      if (/Executable doesn't exist|browserType\.launch|playwright install/i.test(err.message || '')) {
+        throw scanError('NO_BROWSER', 'Chưa có trình duyệt Chromium để quét. Nếu là lần đầu mở app, hãy đợi app tải xong Chromium (~150MB) rồi thử lại.');
+      }
+      throw scanError('SCAN_FAILED', `Quét thất bại: ${err.message}`);
     } finally {
       if (context) await context.close().catch(() => { });
       if (ownsBrowser && browser) await browser.close().catch(() => { });
     }
 
     return discoveredPosts;
+  }
+
+  function scanError(code, message) {
+    const e = new Error(message);
+    e.scanCode = code;
+    return e;
   }
 
   /**
