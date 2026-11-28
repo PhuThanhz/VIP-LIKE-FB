@@ -744,7 +744,8 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
       fetchBuffQueue();
       queryClient.invalidateQueries();
     } catch (err: any) {
-      message.error({ content: `Activation error: ${err.message}`, key: 'resume-rem' });
+      const errorMsg = err.response?.data?.error || err.message || 'Unknown error';
+      message.error({ content: `Activation error: ${errorMsg}`, key: 'resume-rem', duration: 6 });
     } finally {
       setIsResumingRemaining(false);
     }
