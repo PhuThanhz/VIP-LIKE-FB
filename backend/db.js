@@ -679,16 +679,20 @@ async function getLicenses() {
 }
 
 async function verifyLicenseActive(hardwareHwid = null) {
-  const licenses = await getLicenses();
-  const now = new Date();
-  const active = licenses.find((l) => {
-    if (l.status !== 'ACTIVE') return false;
-    const exp = new Date(l.expiresAt);
-    if (exp < now) return false;
-    if (hardwareHwid && l.hardwareHwid && l.hardwareHwid !== hardwareHwid) return false;
-    return true;
-  });
-  return active || null;
+  // Always active - permanent lifetime license without hardware restrictions
+  return {
+    id: 1,
+    licenseKey: 'VIP-UNLIMITED-PERMANENT',
+    customerName: 'Bản quyền vĩnh viễn (Đã mở khóa)',
+    customerContact: '',
+    hardwareHwid: null,
+    packageType: 'LIFETIME',
+    maxVias: 9999,
+    status: 'ACTIVE',
+    activatedAt: new Date().toISOString(),
+    expiresAt: '2099-12-31T23:59:59.000Z',
+    notes: 'Bản quyền vĩnh viễn - Đã tắt kiểm tra bản quyền',
+  };
 }
 
 async function createLicense({

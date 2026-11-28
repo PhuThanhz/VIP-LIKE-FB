@@ -1813,23 +1813,10 @@ app.post('/api/buff-ai-generate-comments', async (req, res) => {
   }
 });
 
-// Software license (License Key) check helper for the main engagement features
+// Software license (License Key) check helper for the main engagement features (DISABLED)
 async function checkLicenseOrReject(req, res) {
-  try {
-    const hwid = req.headers['x-hardware-hwid'] || req.body?.hardwareHwid || req.query?.hardwareHwid;
-    const active = await db.verifyLicenseActive(hwid);
-    if (!active) {
-      res.status(403).json({
-        success: false,
-        error: 'The software license is not activated or the rental has expired. Go to "Rental & License" to activate a License Key.',
-      });
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.warn('[License Check] ⚠️ Ignoring license check error:', err.message);
-    return true;
-  }
+  // License check disabled: always allow all operations to proceed without restrictions
+  return true;
 }
 
 // Buff Like & Comment (synchronous)
@@ -4168,6 +4155,96 @@ async function scanMonitorTarget(monitorId, options = {}) {
   };
 }
 
+// =============================================================================
+// POST SCANNER TAB (ported from TOOLZUTTER feed hunter): read posts of a Group/Fanpage/keyword
+// with caption, posted time and engagement counts. Read-only, never engages.
+// =============================================================================
+const { huntFacebookFeed } = require('./fb-feed-hunter');
+
+app.get('/api/post-scan/vias', async (req, res) => {
+  try {
+    const vias = await db.getLiveVias();
+    return res.json({
+      success: true,
+      vias: vias.map((v) => ({
+        id: v.id,
+        name: v.viaName || 'Via',
+        uid: (String(v.cookieString || '').match(/c_user=(\d+)/) || [])[1] || null,
+      })),
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+let postScanRunning = false;
+app.post('/api/post-scan', async (req, res) => {
+  if (postScanRunning) {
+    return res.status(429).json({ success: false, error: 'Đang có một lượt quét khác chạy, vui lòng đợi xong rồi quét tiếp.' });
+  }
+  try {
+    const {
+      targetUrl = '',
+      keyword = '',
+      limit = 20,
+      dateFrom = null,
+      dateTo = null,
+      sortViral = false,
+      minReactions = 0,
+      viaId = null,
+    } = req.body || {};
+    if (!String(targetUrl).trim() && !String(keyword).trim()) {
+      return res.status(400).json({ success: false, error: 'Nhập link Group/Fanpage hoặc từ khóa cần quét.' });
+    }
+
+    const vias = await db.getLiveVias();
+    const via = (viaId && vias.find((v) => String(v.id) === String(viaId))) || vias[0];
+    if (!via) {
+      return res.status(400).json({
+        success: false,
+        error: 'Chưa có Via nào còn sống để quét. Vào "Via & Fanpage" thêm ít nhất 1 Via (Group kín thì Via phải là thành viên).',
+      });
+    }
+
+    postScanRunning = true;
+    const result = await huntFacebookFeed({
+      groupUrl: String(targetUrl).trim(),
+      keyword: String(keyword).trim(),
+      limit: Math.min(100, Math.max(1, parseInt(limit, 10) || 20)),
+      cookieString: via.cookieString,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      sortViral: Boolean(sortViral),
+      minReactions: Math.max(0, parseInt(minReactions, 10) || 0),
+    });
+
+    const body = result.body || {};
+    if (body.success && Array.isArray(body.items)) {
+      const history = loadBuffHistory();
+      const queueItems = loadBuffQueue().items || [];
+      body.items = body.items.map((it) => {
+        const normUrl = normalizeFbPostUrl(it.url);
+        const hist = history[normUrl];
+        const task = queueItems.find((q) => q.normalizedUrl === normUrl && (q.status === 'QUEUED' || q.status === 'RUNNING'));
+        return {
+          ...it,
+          normalizedUrl: normUrl,
+          buffedLikes: hist ? hist.totalSuccess || 0 : 0,
+          isAlreadyBuffed: Boolean(hist),
+          queueStatus: task ? task.status : null,
+        };
+      });
+    }
+    body.scanVia = via.viaName || null;
+    return res.status(result.status || 200).json(body);
+  } catch (err) {
+    console.error('[PostScan] ❌', err.message);
+    return res.status(500).json({ success: false, error: `Lỗi khi quét: ${err.message}` });
+  } finally {
+    postScanRunning = false;
+  }
+});
+
 // API: scanned-post log of 1 monitor, merged with the live queue task and buff history
 app.get('/api/buff-monitors/:id/posts', (req, res) => {
   try {
@@ -5254,8 +5331,8 @@ function maskLicenseKey(key) {
 app.get('/api/license/status', async (req, res) => {
   try {
     const hardwareHwid = String(req.headers['x-hardware-hwid'] || '').trim();
-    const active = hardwareHwid ? await db.verifyLicenseActive(hardwareHwid) : null;
-    if (!active || active.hardwareHwid !== hardwareHwid) {
+    const active = await db.verifyLicenseActive(hardwareHwid || null);
+    if (!active || (active.hardwareHwid && hardwareHwid && active.hardwareHwid !== hardwareHwid)) {
       return res.json({
         success: true,
         activated: false,

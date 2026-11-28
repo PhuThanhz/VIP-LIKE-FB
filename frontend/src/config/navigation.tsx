@@ -17,6 +17,7 @@ export type NavKey =
   | 'buff-queue'
   | 'buff-history'
   | 'buff-hunter'
+  | 'post-scan'
   | 'via-management'
   | 'system-settings'
   | 'license-management';
@@ -88,6 +89,15 @@ export const NAV_ITEMS: NavItem[] = [
     subtitle: 'Theo dõi 20 Fanpage/Group mục tiêu, tự săn bài mới để buff và gửi báo cáo cuối ngày',
     iconColor: 'text-emerald-400',
     Icon: AimOutlined,
+    group: 'engagement',
+  },
+  {
+    key: 'post-scan',
+    label: 'Quét bài',
+    title: 'Quét bài Fanpage / Group',
+    subtitle: 'Kiểm tra bài mới nhất của Fanpage, Group hoặc theo từ khóa: nội dung, giờ đăng, lượt tương tác, rồi chọn bài để buff',
+    iconColor: 'text-teal-400',
+    Icon: SearchOutlined,
     group: 'engagement',
   },
   {

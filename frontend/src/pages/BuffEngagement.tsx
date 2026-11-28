@@ -22,6 +22,7 @@ import { TableSkeleton, PageSkeleton } from '../components/common/SaaSLoadingSke
 
 // Code-splitting with React.lazy for the large admin modules
 const PostHunterTab = lazy(() => import('../components/buff/PostHunterTab'));
+const PostScanTab = lazy(() => import('../components/buff/PostScanTab'));
 const BuffQueueTab = lazy(() => import('../components/buff/BuffQueueTab'));
 const ViaManagementPage = lazy(() => import('./ViaManagementPage'));
 const SystemSettingsPage = lazy(() => import('./SystemSettingsPage'));
@@ -532,6 +533,26 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                   onOpenSettings={() => {
                     setActiveTabKey('system-settings');
                   }}
+                />
+              </Suspense>
+            ),
+          },
+          {
+            key: 'post-scan',
+            label: 'Quét bài',
+            children: (
+              <Suspense fallback={<TableSkeleton rows={4} columns={3} />}>
+                <PostScanTab
+                  workerBaseUrl={WORKER_BASE_URL}
+                  onBuffUrl={(url) => {
+                    setTargetPostUrl(url);
+                    setActiveTabKey('buff-like');
+                  }}
+                  onMonitorUrl={(url) => {
+                    setActiveTabKey('buff-hunter');
+                    handleOpenAddMonitorModal(undefined, url);
+                  }}
+                  onOpenQueue={() => setActiveTabKey('buff-queue')}
                 />
               </Suspense>
             ),
