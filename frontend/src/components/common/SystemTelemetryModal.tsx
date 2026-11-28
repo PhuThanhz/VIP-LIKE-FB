@@ -119,7 +119,7 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
         setMetrics(data.metrics);
       }
     } catch (err: any) {
-      setError(err.message || 'Could not load monitoring data');
+      setError(err.message || 'Không tải được dữ liệu giám sát');
     } finally {
       setLoading(false);
     }
@@ -157,13 +157,13 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
             </div>
             <div>
               <div className="text-sm font-extrabold text-white flex items-center gap-2">
-                <span>BUFF LIKE 3.0 Telemetry &amp; Observability</span>
+                <span>Giám sát hiệu năng BUFF LIKE 3.0</span>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/60 text-emerald-300 font-mono">
                   Enterprise
                 </span>
               </div>
               <div className="text-[11px] text-slate-400 font-normal">
-                Real-time monitoring: P50/P95 latency, Event Loop lag, Database Ping &amp; Concurrency Engine
+                Giám sát thời gian thực: độ trễ P50/P95, độ trễ Event Loop, ping Database &amp; bộ xử lý song song
               </div>
             </div>
           </div>
@@ -174,7 +174,7 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
               onClick={() => setAutoRefresh(!autoRefresh)}
               className={autoRefresh ? 'bg-cyan-600 hover:bg-cyan-500 text-xs' : 'text-xs text-slate-300'}
             >
-              {autoRefresh ? '⚡ Auto-refresh 3s' : 'Paused'}
+              {autoRefresh ? '⚡ Tự làm mới 3s' : 'Tạm dừng'}
             </Button>
             <Button
               size="small"
@@ -182,7 +182,7 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
               onClick={fetchMetrics}
               className="text-xs"
             >
-              Refresh
+              Làm mới
             </Button>
           </div>
         </div>
@@ -193,14 +193,14 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
         {error && (
           <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2">
             <WarningFilled />
-            <span>Failed to load monitoring data: {error}</span>
+            <span>Tải dữ liệu giám sát thất bại: {error}</span>
           </div>
         )}
 
         {!metrics && loading ? (
           <div className="py-12 flex flex-col items-center justify-center gap-3">
             <Spin size="large" />
-            <span className="text-xs text-slate-400">Collecting telemetry from the Node.js Event Loop...</span>
+            <span className="text-xs text-slate-400">Đang thu thập số liệu từ Event Loop Node.js...</span>
           </div>
         ) : metrics ? (
           <>
@@ -209,7 +209,7 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
               {/* API Latency Global */}
               <div className="p-3 rounded-xl bg-slate-950/70 border border-cyan-500/30">
                 <div className="text-[11px] text-cyan-400 font-semibold flex items-center justify-between">
-                  <span>API latency (P50/P95)</span>
+                  <span>Độ trễ API (P50/P95)</span>
                   <ThunderboltFilled className="text-cyan-400" />
                 </div>
                 <div className="text-xl font-mono font-extrabold text-white mt-1">
@@ -217,16 +217,16 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
                   <span className="text-xs text-slate-400 font-normal ml-1">/ {metrics.latency.global.p95}ms</span>
                 </div>
                 <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1 font-mono">
-                  <span>Avg: {metrics.latency.global.avg}ms</span>
+                  <span>TB: {metrics.latency.global.avg}ms</span>
                   <span>•</span>
-                  <span>Max: {metrics.latency.global.max}ms</span>
+                  <span>Tối đa: {metrics.latency.global.max}ms</span>
                 </div>
               </div>
 
               {/* Event Loop Lag */}
               <div className="p-3 rounded-xl bg-slate-950/70 border border-emerald-500/30">
                 <div className="text-[11px] text-emerald-400 font-semibold flex items-center justify-between">
-                  <span>Event Loop Lag</span>
+                  <span>Độ trễ Event Loop</span>
                   <FieldTimeOutlined className="text-emerald-400" />
                 </div>
                 <div className="text-xl font-mono font-extrabold text-white mt-1 flex items-center gap-1.5">
@@ -239,14 +239,14 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
                   </Tag>
                 </div>
                 <div className="text-[10px] text-slate-400 mt-1">
-                  {metrics.eventLoop.healthy ? 'Event loop not blocked' : 'Heavy synchronous work detected'}
+                  {metrics.eventLoop.healthy ? 'Event loop không bị nghẽn' : 'Phát hiện tác vụ đồng bộ nặng'}
                 </div>
               </div>
 
               {/* Database Status & Ping */}
               <div className="p-3 rounded-xl bg-slate-950/70 border border-blue-500/30">
                 <div className="text-[11px] text-blue-400 font-semibold flex items-center justify-between">
-                  <span>MySQL Latency</span>
+                  <span>Độ trễ MySQL</span>
                   <DatabaseOutlined className="text-blue-400" />
                 </div>
                 <div className="text-xl font-mono font-extrabold text-white mt-1">
@@ -254,7 +254,7 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
                 </div>
                 <div className="text-[10px] text-emerald-400 mt-1 flex items-center gap-1">
                   <CheckCircleFilled className="text-[9px]" />
-                  <span>Pool Active ({metrics.database.status})</span>
+                  <span>Kết nối đang dùng ({metrics.database.status})</span>
                 </div>
               </div>
 
@@ -270,7 +270,7 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
                 </div>
                 <div className="text-[10px] text-purple-300 mt-1 flex items-center justify-between font-mono">
                   <span>CPU: {metrics.cpu?.usagePercent || 0}%</span>
-                  <span className="text-slate-400">({metrics.cpu?.cores || 1} Cores)</span>
+                  <span className="text-slate-400">({metrics.cpu?.cores || 1} Nhân)</span>
                 </div>
               </div>
             </div>
@@ -280,46 +280,46 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-slate-200 flex items-center gap-1.5">
                   <LineChartOutlined className="text-cyan-400" />
-                  Parallel Processing &amp; System Load
+                  Xử lý song song &amp; Tải hệ thống
                 </span>
                 <span className="text-slate-400 font-mono text-[11px]">
-                  Uptime: {formatUptime(metrics.uptimeSeconds)} • {metrics.throughput.totalRequests} reqs
+                  Thời gian chạy: {formatUptime(metrics.uptimeSeconds)} • {metrics.throughput.totalRequests} request
                 </span>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                 <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                  <div className="text-[10px] text-slate-400">Throughput RPS / RPM</div>
+                  <div className="text-[10px] text-slate-400">Lưu lượng RPS / RPM</div>
                   <div className="font-mono font-bold text-white mt-0.5">
                     {metrics.throughput.requestsPerSecond} req/s <span className="text-[10px] text-slate-400">({metrics.throughput.requestsPerMinute} rpm)</span>
                   </div>
                 </div>
 
                 <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                  <div className="text-[10px] text-slate-400">Active Buff Lanes</div>
+                  <div className="text-[10px] text-slate-400">Luồng buff đang chạy</div>
                   <div className="font-mono font-bold text-cyan-300 mt-0.5">
-                    {metrics.concurrencyEngine.activeBuffLanes} active <span className="text-[10px] text-slate-400">({metrics.concurrencyEngine.laneWaiters} waiting)</span>
+                    {metrics.concurrencyEngine.activeBuffLanes} đang chạy <span className="text-[10px] text-slate-400">({metrics.concurrencyEngine.laneWaiters} đang chờ)</span>
                   </div>
                 </div>
 
                 <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                  <div className="text-[10px] text-slate-400">Queue Depth</div>
+                  <div className="text-[10px] text-slate-400">Độ sâu hàng đợi</div>
                   <div className="font-mono font-bold text-emerald-300 mt-0.5">
                     {metrics.queueDepth ? (
-                      <span>{metrics.queueDepth.queued} queued / {metrics.queueDepth.running} running</span>
+                      <span>{metrics.queueDepth.queued} đang chờ / {metrics.queueDepth.running} đang chạy</span>
                     ) : (
                       `${metrics.concurrencyEngine.activeTasksCount} executing`
                     )}
                   </div>
                   {metrics.queueDepth && metrics.queueDepth.deadLetter > 0 && (
                     <div className="text-[9px] text-rose-400 font-semibold mt-0.5">
-                      ⚠️ {metrics.queueDepth.deadLetter} task Dead-Letter
+                      ⚠️ {metrics.queueDepth.deadLetter} task lỗi (Dead-Letter)
                     </div>
                   )}
                 </div>
 
                 <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                  <div className="text-[10px] text-slate-400">HTTP Error Rate</div>
+                  <div className="text-[10px] text-slate-400">Tỉ lệ lỗi HTTP</div>
                   <div className="font-mono font-bold text-white mt-0.5 flex items-center gap-1">
                     <span>{metrics.errors.errorRatePercent}%</span>
                     <span className="text-[10px] text-slate-500 font-normal">
@@ -333,13 +333,13 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
             {/* Top Slowest Routes Breakdown */}
             <div className="p-3.5 rounded-xl bg-slate-900/50 border border-slate-800 space-y-2">
               <div className="text-xs font-bold text-slate-200 flex items-center justify-between">
-                <span>Top API Routes &amp; Percentile Latency (P50 / P95)</span>
-                <span className="text-[10px] text-slate-400 font-mono">Sliding window 1,000 samples</span>
+                <span>Top API &amp; độ trễ phân vị (P50 / P95)</span>
+                <span className="text-[10px] text-slate-400 font-mono">Cửa sổ trượt 1.000 mẫu</span>
               </div>
 
               <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                 {metrics.latency.slowestRoutes.length === 0 ? (
-                  <div className="text-xs text-slate-500 py-3 text-center">Not enough request samples yet</div>
+                  <div className="text-xs text-slate-500 py-3 text-center">Chưa đủ mẫu request</div>
                 ) : (
                   metrics.latency.slowestRoutes.map((r, i) => (
                     <div
@@ -350,10 +350,10 @@ export const SystemTelemetryModal: React.FC<SystemTelemetryModalProps> = ({
                         {r.route}
                       </div>
                       <div className="flex items-center gap-2 shrink-0 font-mono text-[11px]">
-                        <span className="text-slate-400 text-[10px]">({r.count} reqs)</span>
+                        <span className="text-slate-400 text-[10px]">({r.count} request)</span>
                         <span className="text-cyan-400 font-bold">P50: {r.p50}ms</span>
                         <span className="text-amber-400 font-bold">P95: {r.p95}ms</span>
-                        <span className="text-slate-400 text-[10px]">Avg: {r.avg}ms</span>
+                        <span className="text-slate-400 text-[10px]">TB: {r.avg}ms</span>
                       </div>
                     </div>
                   ))

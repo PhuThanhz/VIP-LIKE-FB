@@ -61,11 +61,11 @@ const ToggleRow: React.FC<{
 );
 
 const EVENT_LABELS: Record<string, string> = {
-  BUFF_COMPLETED: 'Completed',
-  VIA_DEAD: 'Via error',
-  ACTION_BLOCKED: 'Blocked',
-  EMERGENCY_STOP: 'Emergency',
-  HUNTER: 'New post',
+  BUFF_COMPLETED: 'Hoàn tất',
+  VIA_DEAD: 'Via lỗi',
+  ACTION_BLOCKED: 'Bị chặn',
+  EMERGENCY_STOP: 'Khẩn cấp',
+  HUNTER: 'Bài mới',
   TEST: 'Test',
   TEST_INIT: 'Test',
 };
@@ -113,13 +113,13 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
     try {
       const res = await api.post('/api/telegram/test-scenario', { scenario });
       if (res.data?.success) {
-        message.success(`Sent test "${label}" to Telegram`);
+        message.success(`Đã gửi thử "${label}" tới Telegram`);
         fetchHistory();
       } else {
-        message.error(res.data?.error || 'Could not send the simulation');
+        message.error(res.data?.error || 'Không gửi được tin thử');
       }
     } catch (err: any) {
-      message.error(err.response?.data?.error || err.message || 'Error sending the simulation');
+      message.error(err.response?.data?.error || err.message || 'Lỗi khi gửi tin thử');
     } finally {
       setSendingScenario(null);
     }
@@ -140,7 +140,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
           <Alert
             type="info"
             showIcon
-            message="Only admin accounts can change settings. You are viewing in read-only mode."
+            message="Chỉ tài khoản admin được đổi cài đặt. Bạn đang ở chế độ chỉ xem."
             className="rounded-xl"
           />
         )}
@@ -151,13 +151,13 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
             type="error"
             showIcon
             className="rounded-xl"
-            message="The system is in emergency stop"
-            description={bmOverview?.system?.emergencyReason || 'The queue and background tasks are paused.'}
+            message="Hệ thống đang dừng khẩn cấp"
+            description={bmOverview?.system?.emergencyReason || 'Hàng đợi và các tác vụ nền đang tạm dừng.'}
             action={
               onResumeSystem && (
                 <ConfigProvider componentDisabled={false}>
                   <Button size="small" onClick={onResumeSystem}>
-                    Resume
+                    Chạy lại
                   </Button>
                 </ConfigProvider>
               )
@@ -168,7 +168,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
         {/* Telegram */}
         <Section
           title="Telegram"
-          description="Get notifications on your phone via a Telegram bot."
+          description="Nhận thông báo trên điện thoại qua bot Telegram."
           extra={
             <span
               className={`inline-flex items-center gap-1.5 text-xs shrink-0 ${
@@ -176,7 +176,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
               }`}
             >
               <span className={`w-1.5 h-1.5 rounded-full ${telegramConnected ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-              {telegramConnected ? 'Connected' : 'Not connected'}
+              {telegramConnected ? 'Đã kết nối' : 'Chưa kết nối'}
             </span>
           }
         >
@@ -199,10 +199,10 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <Button size="small" loading={testingTelegram} disabled={!hasTelegramInput} onClick={onTestTelegram} icon={<SendOutlined />}>
-                    Send test
+                    Gửi thử
                   </Button>
                   <Button size="small" type="text" onClick={() => setEditingBot(true)}>
-                    Change bot
+                    Đổi bot
                   </Button>
                 </div>
               </div>
@@ -215,7 +215,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
                       autoComplete="off"
                       placeholder={
                         systemSettings.telegramBotTokenMasked
-                          ? `${systemSettings.telegramBotTokenMasked} · type to change`
+                          ? `${systemSettings.telegramBotTokenMasked} · gõ để đổi`
                           : '7891234567:AAH...'
                       }
                       value={systemSettings.telegramBotToken}
@@ -235,16 +235,16 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="text-xs text-slate-500">
-                    Create a bot via <span className="text-blue-400">@BotFather</span>, get the Chat ID from <span className="text-blue-400">@userinfobot</span>, then click Save.
+                    Tạo bot qua <span className="text-blue-400">@BotFather</span>, lấy Chat ID từ <span className="text-blue-400">@userinfobot</span>, rồi bấm Lưu.
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {systemSettings?.botInfo && (
                       <Button size="small" type="text" onClick={() => setEditingBot(false)}>
-                        Cancel
+                        Hủy
                       </Button>
                     )}
                     <Button size="small" loading={testingTelegram} disabled={!hasTelegramInput} onClick={onTestTelegram} icon={<SendOutlined />}>
-                      Send test
+                      Gửi thử
                     </Button>
                   </div>
                 </div>
@@ -254,57 +254,57 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
         </Section>
 
         {/* Notifications */}
-        <Section title="Notifications" description="Choose which events are sent to Telegram. Click ➤ to send a test.">
+        <Section title="Thông báo" description="Chọn sự kiện nào được gửi về Telegram. Bấm ➤ để gửi thử.">
           <ToggleRow
-            title="Via checkpoint / cookie expired"
+            title="Via dính checkpoint / hết hạn cookie"
             checked={systemSettings.notifyOnViaDead !== false}
             onChange={(checked) => set({ notifyOnViaDead: checked })}
-            extra={<Button size="small" type="text" icon={<SendOutlined />} loading={sendingScenario === 'VIA_DEAD'} disabled={!hasTelegramInput} onClick={() => handleTestScenario('VIA_DEAD', 'Via error')} className="!text-slate-500 hover:!text-slate-200" aria-label="Send test" />}
+            extra={<Button size="small" type="text" icon={<SendOutlined />} loading={sendingScenario === 'VIA_DEAD'} disabled={!hasTelegramInput} onClick={() => handleTestScenario('VIA_DEAD', 'Via lỗi')} className="!text-slate-500 hover:!text-slate-200" aria-label="Gửi thử" />}
           />
           <ToggleRow
-            title="New post caught"
+            title="Bắt được bài mới"
             checked={systemSettings.notifyOnHunter !== false}
             onChange={(checked) => set({ notifyOnHunter: checked })}
-            extra={<Button size="small" type="text" icon={<SendOutlined />} loading={sendingScenario === 'HUNTER'} disabled={!hasTelegramInput} onClick={() => handleTestScenario('HUNTER', 'New post')} className="!text-slate-500 hover:!text-slate-200" aria-label="Send test" />}
+            extra={<Button size="small" type="text" icon={<SendOutlined />} loading={sendingScenario === 'HUNTER'} disabled={!hasTelegramInput} onClick={() => handleTestScenario('HUNTER', 'Bài mới')} className="!text-slate-500 hover:!text-slate-200" aria-label="Gửi thử" />}
           />
           <ToggleRow
-            title="Post buff finished"
+            title="Buff xong một bài"
             checked={systemSettings.notifyOnBuffDone !== false}
             onChange={(checked) => set({ notifyOnBuffDone: checked })}
-            extra={<Button size="small" type="text" icon={<SendOutlined />} loading={sendingScenario === 'BUFF_COMPLETED'} disabled={!hasTelegramInput} onClick={() => handleTestScenario('BUFF_COMPLETED', 'Buff done')} className="!text-slate-500 hover:!text-slate-200" aria-label="Send test" />}
+            extra={<Button size="small" type="text" icon={<SendOutlined />} loading={sendingScenario === 'BUFF_COMPLETED'} disabled={!hasTelegramInput} onClick={() => handleTestScenario('BUFF_COMPLETED', 'Buff xong')} className="!text-slate-500 hover:!text-slate-200" aria-label="Gửi thử" />}
           />
           <ToggleRow
-            title="Facebook blocked an action"
+            title="Facebook chặn thao tác"
             checked={systemSettings.notifyOnActionBlocked !== false}
             onChange={(checked) => set({ notifyOnActionBlocked: checked })}
-            extra={<Button size="small" type="text" icon={<SendOutlined />} loading={sendingScenario === 'ACTION_BLOCKED'} disabled={!hasTelegramInput} onClick={() => handleTestScenario('ACTION_BLOCKED', 'Blocked')} className="!text-slate-500 hover:!text-slate-200" aria-label="Send test" />}
+            extra={<Button size="small" type="text" icon={<SendOutlined />} loading={sendingScenario === 'ACTION_BLOCKED'} disabled={!hasTelegramInput} onClick={() => handleTestScenario('ACTION_BLOCKED', 'Bị chặn')} className="!text-slate-500 hover:!text-slate-200" aria-label="Gửi thử" />}
           />
           <ToggleRow
-            title="Queue failed 3 posts in a row"
+            title="Hàng đợi lỗi 3 bài liên tiếp"
             checked={systemSettings.notifyOnQueueIssue !== false}
             onChange={(checked) => set({ notifyOnQueueIssue: checked })}
           />
           <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-t border-slate-800/80">
-            <span className="text-sm text-slate-200">Emergency stop</span>
+            <span className="text-sm text-slate-200">Dừng khẩn cấp</span>
             <span className="flex items-center gap-3">
-              <Button size="small" type="text" icon={<SendOutlined />} loading={sendingScenario === 'EMERGENCY_STOP'} disabled={!hasTelegramInput} onClick={() => handleTestScenario('EMERGENCY_STOP', 'Emergency stop')} className="!text-slate-500 hover:!text-slate-200" aria-label="Send test" />
-              <span className="text-xs text-slate-500 w-11 text-right">Always</span>
+              <Button size="small" type="text" icon={<SendOutlined />} loading={sendingScenario === 'EMERGENCY_STOP'} disabled={!hasTelegramInput} onClick={() => handleTestScenario('EMERGENCY_STOP', 'Dừng khẩn cấp')} className="!text-slate-500 hover:!text-slate-200" aria-label="Gửi thử" />
+              <span className="text-xs text-slate-500 w-11 text-right">Luôn gửi</span>
             </span>
           </div>
           <div className="h-2" />
         </Section>
 
         {/* Reports, quiet hours, commands */}
-        <Section title="Reports & commands" >
+        <Section title="Báo cáo & lệnh" >
           <ToggleRow
-            title="Daily report"
-            description="Summary of the last 24 hours."
+            title="Báo cáo hằng ngày"
+            description="Tóm tắt 24 giờ qua."
             checked={systemSettings.dailyReportEnabled !== false}
             onChange={(checked) => set({ dailyReportEnabled: checked })}
           />
           {systemSettings.dailyReportEnabled !== false && (
             <div className="flex items-center justify-between gap-4 px-5 py-3 border-t border-slate-800/80">
-              <span className="text-sm text-slate-400">Send at</span>
+              <span className="text-sm text-slate-400">Gửi lúc</span>
               <Select
                 value={Number(systemSettings.dailyReportHour ?? 8)}
                 onChange={(v) => set({ dailyReportHour: v })}
@@ -314,14 +314,14 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
             </div>
           )}
           <ToggleRow
-            title="Quiet hours"
-            description="Only urgent messages are sent; others are batched for later."
+            title="Giờ yên lặng"
+            description="Chỉ gửi tin khẩn; tin khác được gộp gửi sau."
             checked={Boolean(systemSettings.quietHoursEnabled)}
             onChange={(checked) => set({ quietHoursEnabled: checked })}
           />
           {systemSettings.quietHoursEnabled && (
             <div className="flex items-center justify-between gap-4 px-5 py-3 border-t border-slate-800/80">
-              <span className="text-sm text-slate-400">From – to</span>
+              <span className="text-sm text-slate-400">Từ – đến</span>
               <div className="flex items-center gap-2">
                 <Input
                   type="time"
@@ -340,7 +340,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
             </div>
           )}
           <ToggleRow
-            title="Telegram commands"
+            title="Lệnh Telegram"
             description="/status · /stop · /resume"
             checked={systemSettings.telegramCommands !== false}
             onChange={(checked) => set({ telegramCommands: checked })}
@@ -349,20 +349,20 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
         </Section>
 
         {/* Automation */}
-        <Section title="Auto-buff posts made by the app">
+        <Section title="Tự buff bài do app đăng">
           <ToggleRow
-            title="Enabled"
+            title="Bật"
             checked={Boolean(systemSettings.autoBuffOwnPosts)}
             onChange={(checked) => set({ autoBuffOwnPosts: checked })}
           />
           <ToggleRow
-            title="Fanpage posts"
+            title="Bài Fanpage"
             disabled={!systemSettings.autoBuffOwnPosts}
             checked={systemSettings.autoBuffOwnFanpage !== false}
             onChange={(checked) => set({ autoBuffOwnFanpage: checked })}
           />
           <ToggleRow
-            title="Group posts"
+            title="Bài Group"
             disabled={!systemSettings.autoBuffOwnPosts}
             checked={systemSettings.autoBuffOwnGroup !== false}
             onChange={(checked) => set({ autoBuffOwnGroup: checked })}
@@ -372,26 +372,26 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
 
         {/* Smart Adaptive Pacing & Via Protection */}
         <Section
-          title="Speed & Via protection"
+          title="Tốc độ & Bảo vệ Via"
         >
           <ToggleRow
-            title="Smart pacing"
-            description="Automatically spaces actions by page count and adds random delays."
+            title="Giãn nhịp thông minh"
+            description="Tự giãn cách thao tác theo số page và thêm độ trễ ngẫu nhiên."
             checked={systemSettings.smartAdaptivePacing !== false}
             onChange={(checked) => set({ smartAdaptivePacing: checked })}
           />
           <ToggleRow
-            title="Auto-stop when Facebook blocks an action"
+            title="Tự dừng khi Facebook chặn thao tác"
             checked={systemSettings.autoStopOnActionBlocked !== false}
             onChange={(checked) => set({ autoStopOnActionBlocked: checked })}
           />
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-5 py-3.5 border-t border-slate-800/80">
             <div>
-              <span className="block text-sm text-slate-200">Mid-run breaks</span>
+              <span className="block text-sm text-slate-200">Nghỉ giữa chừng</span>
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-slate-400">Every</span>
+                <span className="text-xs text-slate-400">Mỗi</span>
                 <Input
                   type="number"
                   min={5}
@@ -403,7 +403,7 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
                 <span className="text-xs text-slate-400">Page</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-slate-400">Rest</span>
+                <span className="text-xs text-slate-400">Nghỉ</span>
                 <Input
                   type="number"
                   min={10}
@@ -412,40 +412,40 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
                   onChange={(e) => set({ cooldownDurationSec: parseInt(e.target.value, 10) || 20 })}
                   className="w-20 font-mono text-xs"
                 />
-                <span className="text-xs text-slate-400">sec</span>
+                <span className="text-xs text-slate-400">giây</span>
               </div>
             </div>
           </div>
           <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-t border-slate-800/80">
             <div>
-              <span className="block text-sm text-slate-200">Default speed</span>
+              <span className="block text-sm text-slate-200">Tốc độ mặc định</span>
             </div>
             <Select
               value={systemSettings.defaultSpeedMode || 'NORMAL'}
               onChange={(v) => set({ defaultSpeedMode: v })}
               className="w-52 text-xs"
               options={[
-                { value: 'NORMAL', label: 'Standard · 2.4s (recommended)' },
+                { value: 'NORMAL', label: 'Tiêu chuẩn · 2.4s (khuyên dùng)' },
                 { value: 'FAST', label: 'Nhanh · 2.0s' },
-                { value: 'SMART', label: 'Smart · 2.6–3.4s' },
+                { value: 'SMART', label: 'Thông minh · 2.6–3.4s' },
                 { value: 'TURBO', label: 'Turbo · 1.4s' },
-                { value: 'SAFE', label: 'Safe · 5.0s' },
+                { value: 'SAFE', label: 'An toàn · 5.0s' },
               ]}
             />
           </div>
           <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-t border-slate-800/80">
             <div>
-              <span className="block text-sm text-slate-200">Posts running at once</span>
+              <span className="block text-sm text-slate-200">Số bài chạy cùng lúc</span>
             </div>
             <Select
               value={Number(systemSettings.maxParallelTasks || 2)}
               onChange={(v) => set({ maxParallelTasks: v })}
               className="w-52 text-xs"
               options={[
-                { value: 1, label: '1 post' },
-                { value: 2, label: '2 posts (recommended)' },
-                { value: 3, label: '3 posts' },
-                { value: 4, label: '4 posts' },
+                { value: 1, label: '1 bài' },
+                { value: 2, label: '2 bài (khuyên dùng)' },
+                { value: 3, label: '3 bài' },
+                { value: 4, label: '4 bài' },
               ]}
             />
           </div>
@@ -461,23 +461,23 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
               className="flex items-center gap-2 text-base font-semibold text-slate-100"
             >
               <CaretRightOutlined className={`text-xs text-slate-500 transition-transform ${showHistory ? 'rotate-90' : ''}`} />
-              Notification history
-              <span className="text-xs font-normal text-slate-500">{historyLogs.length} most recent</span>
+              Lịch sử thông báo
+              <span className="text-xs font-normal text-slate-500">{historyLogs.length} gần nhất</span>
             </button>
             {showHistory && (
               <ConfigProvider componentDisabled={false}>
-                <Button size="small" type="text" icon={<ReloadOutlined />} onClick={fetchHistory} loading={loadingHistory} aria-label="Refresh" />
+                <Button size="small" type="text" icon={<ReloadOutlined />} onClick={fetchHistory} loading={loadingHistory} aria-label="Làm mới" />
               </ConfigProvider>
             )}
           </div>
           {showHistory && (
             <div className="border-t border-slate-800/80 divide-y divide-slate-800/70 max-h-96 overflow-y-auto">
               {historyLogs.length === 0 ? (
-                <div className="text-center py-8 text-slate-500 text-xs">No notifications yet.</div>
+                <div className="text-center py-8 text-slate-500 text-xs">Chưa có thông báo nào.</div>
               ) : (
                 historyLogs.map((r: any) => (
                   <div key={r.id} className="px-5 py-2.5 flex items-center gap-3 text-xs">
-                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${r.status === 'SENT' ? 'bg-emerald-400' : 'bg-rose-400'}`} title={r.status === 'SENT' ? 'Sent' : 'Failed'} />
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${r.status === 'SENT' ? 'bg-emerald-400' : 'bg-rose-400'}`} title={r.status === 'SENT' ? 'Đã gửi' : 'Thất bại'} />
                     <span className="w-28 shrink-0 font-mono text-[11px] text-slate-500">
                       {(r.created_at ? new Date(r.created_at) : new Date()).toLocaleString('vi-VN', { hour12: false, hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
                     </span>
@@ -493,9 +493,9 @@ export const SystemSettingsPage: React.FC<SystemSettingsPageProps> = React.memo(
         {/* Sticky save bar */}
         {canEdit && (
           <div className="sticky bottom-4 z-10 px-4 py-3 rounded-2xl border border-slate-800 bg-slate-900/95 backdrop-blur flex items-center justify-between gap-3 shadow-2xl">
-            <span className="text-xs text-slate-400">Changes take effect after saving.</span>
+            <span className="text-xs text-slate-400">Thay đổi có hiệu lực sau khi lưu.</span>
             <Button type="primary" loading={savingSettings} onClick={onSaveSettings} className="px-6">
-              Save
+              Lưu
             </Button>
           </div>
         )}

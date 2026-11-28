@@ -9,11 +9,11 @@ import { getBackendStatus, isTauri, startBackend } from '../../utils/tauriBridge
  * In a regular browser it renders children immediately.
  */
 const MESSAGES: Record<string, string> = {
-  starting: 'Starting local server...',
-  installing_browser: 'First launch: downloading the Chromium browser (~150MB), please wait...',
-  running: 'Starting local server...',
-  external: 'Connecting to server...',
-  missing: 'Waiting for the backend at 127.0.0.1:3100...',
+  starting: 'Đang khởi động máy chủ cục bộ...',
+  installing_browser: 'Lần chạy đầu: đang tải trình duyệt Chromium (~150MB), vui lòng chờ...',
+  running: 'Đang khởi động máy chủ cục bộ...',
+  external: 'Đang kết nối máy chủ...',
+  missing: 'Đang chờ backend tại 127.0.0.1:3100...',
 };
 
 const isUp = async (): Promise<boolean> => {
@@ -56,17 +56,17 @@ export const BackendGate: React.FC<{ children: React.ReactNode }> = ({ children 
     <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center gap-3 px-6 text-center">
       {!isError && <Spin size="large" />}
       <span className={`text-xs font-mono ${isError ? 'text-red-400' : 'text-cyan-400'}`}>
-        {isError ? 'Could not start the local server:' : MESSAGES[status] || MESSAGES.starting}
+        {isError ? 'Không khởi động được máy chủ cục bộ:' : MESSAGES[status] || MESSAGES.starting}
       </span>
       {isError && (
         <pre className="max-w-[900px] max-h-[50vh] overflow-auto whitespace-pre-wrap text-left text-[11px] font-mono text-red-300 bg-black/40 rounded p-3 select-text">
           {status.replace(/^error:\s*/, '')}
-          {'\n\nLogs: %APPDATA%\\com.viplike.radiant\\logs\\backend.log'}
+          {'\n\nLog: %APPDATA%\\com.viplike.radiant\\logs\\backend.log'}
         </pre>
       )}
       {isError && (
         <Button size="small" onClick={() => { setStatus('starting'); startBackend(); }}>
-          Retry
+          Thử lại
         </Button>
       )}
     </div>

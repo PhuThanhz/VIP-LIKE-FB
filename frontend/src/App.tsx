@@ -78,7 +78,7 @@ const useDbStatus = () => {
             usingCache: Boolean(res.data?.usingCache),
             cachedCount: res.data?.cachedCount || 0,
             loading: false,
-            error: res.data?.error || 'Could not connect',
+            error: res.data?.error || 'Không kết nối được',
           });
         }
       } catch (err: any) {
@@ -166,7 +166,7 @@ const DashboardInner: React.FC<MainDashboardProps & { openViaManager: () => void
 
         <Content className="flex-1 p-3 sm:p-5 lg:p-6 overflow-y-auto">
           {/* BuffEngagement counts accountsCount from the account list itself and reports it via onStatsUpdate */}
-          <Suspense fallback={<PageSkeleton title="Loading Engagement Buff 2.0..." />}>
+          <Suspense fallback={<PageSkeleton title="Đang tải Engagement Buff 2.0..." />}>
             <BuffEngagement
               activeTabKey={activeTabKey}
               onTabChange={handleSelectTab}
@@ -243,7 +243,7 @@ const ThemedApp: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center gap-3">
         <Spin size="large" />
-        <span className="text-xs font-mono text-cyan-400">Verifying login session...</span>
+        <span className="text-xs font-mono text-cyan-400">Đang xác thực phiên đăng nhập...</span>
       </div>
     );
   }

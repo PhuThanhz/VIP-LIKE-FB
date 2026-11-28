@@ -48,15 +48,15 @@ export default function AppVersion({ compact = false, className = '' }: AppVersi
     };
   }, []);
 
-  const label = version === 'dev' ? 'Dev build' : `v${version}`;
+  const label = version === 'dev' ? 'Bản dev' : `v${version}`;
   const tip = [
-    `Version ${version}`,
-    builtAt && builtAt.isValid() ? `Built at ${builtAt.format('HH:mm DD/MM/YYYY')}` : null,
+    `Phiên bản ${version}`,
+    builtAt && builtAt.isValid() ? `Build lúc ${builtAt.format('HH:mm DD/MM/YYYY')}` : null,
     latest
-      ? `Version ${latest} is available — reopen the app or click update`
+      ? `Đã có phiên bản ${latest} — mở lại app hoặc bấm cập nhật`
       : isTauri()
-      ? 'You are on the latest version'
-      : 'Web browser mode',
+      ? 'Bạn đang dùng phiên bản mới nhất'
+      : 'Chế độ trình duyệt web',
   ]
     .filter(Boolean)
     .join('\n');
@@ -97,7 +97,7 @@ export default function AppVersion({ compact = false, className = '' }: AppVersi
             v{latest}
           </span>
         ) : (
-          <span className="text-[10px] text-slate-500 shrink-0">latest</span>
+          <span className="text-[10px] text-slate-500 shrink-0">mới nhất</span>
         )}
       </div>
     </Tooltip>

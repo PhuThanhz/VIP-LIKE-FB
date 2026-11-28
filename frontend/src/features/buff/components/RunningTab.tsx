@@ -114,36 +114,36 @@ export default function RunningTab({
                   <div>
                     <div className="flex items-center gap-2.5">
                       <h2 className="text-base sm:text-lg font-bold text-slate-100 flex items-center gap-2 m-0">
-                        <PlayCircleOutlined className="text-blue-400" /> Live engagement progress
+                        <PlayCircleOutlined className="text-blue-400" /> Tiến độ tương tác trực tiếp
                       </h2>
                       {autoBuffProgress.status === 'RUNNING' || isBatchRunning ? (
                         <Tag color="processing" className="text-xs font-bold px-2.5 py-0.5 rounded-full border-blue-500/40">
                           <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse inline-block mr-1.5"></span>
-                          Running live (Form)
+                          Đang chạy trực tiếp (Form)
                         </Tag>
                       ) : queueItems.some((i) => i.status === 'RUNNING') ? (
                         <Tag color="cyan" className="text-xs font-bold px-2.5 py-0.5 rounded-full border-cyan-500/40 bg-cyan-950/60 text-cyan-300">
                           <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse inline-block mr-1.5"></span>
-                          Queue processing ({queueItems.filter((i) => i.status === 'RUNNING').length} posts)
+                          Đang xử lý hàng đợi ({queueItems.filter((i) => i.status === 'RUNNING').length} bài)
                         </Tag>
                       ) : autoBuffProgress.status === 'DONE' ? (
                         <Tag color="success" className="text-xs font-bold px-2.5 py-0.5 rounded-full">
-                          <CheckCircleFilled className="mr-1" /> Completed
+                          <CheckCircleFilled className="mr-1" /> Hoàn tất
                         </Tag>
                       ) : (
                         <Tag className="text-xs font-medium px-2.5 py-0.5 rounded-full text-slate-400 bg-slate-800/60 border-slate-700/60">
-                          No run yet
+                          Chưa chạy
                         </Tag>
                       )}
                     </div>
                     <p className="text-xs text-slate-400 mt-1 mb-0">
                       {autoBuffProgress.status === 'RUNNING' || isBatchRunning
-                        ? 'The system is driving Playwright to drop reactions and comments in real time.'
+                        ? 'Hệ thống đang điều khiển Playwright thả cảm xúc và bình luận theo thời gian thực.'
                         : queueItems.some((i) => i.status === 'RUNNING')
-                        ? 'The auto queue is running tasks with Playwright in real time.'
+                        ? 'Hàng đợi tự động đang chạy task bằng Playwright theo thời gian thực.'
                         : autoBuffProgress.status === 'DONE'
-                        ? 'The campaign just finished all its engagements.'
-                        : 'No campaign is running. Go to the New tab to start one.'}
+                        ? 'Chiến dịch vừa hoàn tất mọi lượt tương tác.'
+                        : 'Chưa có chiến dịch nào chạy. Vào tab Tạo mới để bắt đầu.'}
                     </p>
                   </div>
 
@@ -154,7 +154,7 @@ export default function RunningTab({
                       onClick={handleStartNewCampaign}
                       className="font-semibold rounded-xl text-xs sm:text-sm h-9 bg-blue-600 hover:bg-blue-500"
                     >
-                      New campaign
+                      Chiến dịch mới
                     </Button>
                     {queueItems.filter((i) => i.status === 'QUEUED' || i.status === 'RUNNING').length > 0 && (
                       <Button
@@ -162,7 +162,7 @@ export default function RunningTab({
                         onClick={() => setActiveTabKey('buff-queue')}
                         className="rounded-xl text-xs sm:text-sm h-9"
                       >
-                        Queue ({queueItems.filter((i) => i.status === 'QUEUED' || i.status === 'RUNNING').length})
+                        Hàng đợi ({queueItems.filter((i) => i.status === 'QUEUED' || i.status === 'RUNNING').length})
                       </Button>
                     )}
                     {autoBuffProgress.status === 'RUNNING' && (
@@ -173,7 +173,7 @@ export default function RunningTab({
                         onClick={handleStopAutoBuff}
                         className="font-semibold rounded-xl text-xs sm:text-sm h-9"
                       >
-                        Emergency stop
+                        Dừng khẩn cấp
                       </Button>
                     )}
                   </div>
@@ -213,7 +213,7 @@ export default function RunningTab({
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <Tag color="cyan" className="font-bold text-xs px-2.5 py-0.5 rounded-full border-cyan-500/40">
                                       <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse inline-block mr-1.5 align-middle" />
-                                      Auto queue (Worker {idx + 1})
+                                      Hàng đợi tự động (Worker {idx + 1})
                                     </Tag>
                                     <Tag className="font-semibold text-xs rounded-full">
                                       {rObj.emoji} {rObj.shortLabel}
@@ -225,7 +225,7 @@ export default function RunningTab({
                                     )}
                                   </div>
                                   <div className="flex items-center gap-2 pt-1">
-                                    <span className="text-xs text-slate-400 shrink-0">Post link:</span>
+                                    <span className="text-xs text-slate-400 shrink-0">Link bài:</span>
                                     <a
                                       href={task.targetUrl}
                                       target="_blank"
@@ -246,14 +246,14 @@ export default function RunningTab({
                                     onClick={() => handleStopQueueTask(task.id)}
                                     className="rounded-xl text-xs font-semibold"
                                   >
-                                    {task.stopRequested ? 'Stopping...' : 'Stop'}
+                                    {task.stopRequested ? 'Đang dừng...' : 'Dừng'}
                                   </Button>
                                   <Button
                                     size="small"
                                     onClick={() => setActiveTabKey('buff-queue')}
                                     className="rounded-xl text-xs"
                                   >
-                                    View queue
+                                    Xem hàng đợi
                                   </Button>
                                   <Button
                                     size="small"
@@ -263,7 +263,7 @@ export default function RunningTab({
                                     onClick={() => window.open(task.targetUrl, '_blank')}
                                     className="rounded-xl text-xs"
                                   >
-                                    Open Facebook
+                                    Mở Facebook
                                   </Button>
                                 </div>
                               </div>
@@ -271,19 +271,19 @@ export default function RunningTab({
                               {/* Metrics */}
                               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                                 <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 text-center">
-                                  <div className="text-[11px] text-slate-400 font-bold uppercase">{isKpiMode ? 'KPI target' : 'Target'}</div>
+                                  <div className="text-[11px] text-slate-400 font-bold uppercase">{isKpiMode ? 'Mục tiêu KPI' : 'Mục tiêu'}</div>
                                   <div className="text-xl font-bold text-slate-100 mt-0.5">{targetKpi} {isKpiMode ? 'Like' : 'Page'}</div>
                                 </div>
                                 <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-center">
-                                  <div className="text-[11px] text-emerald-400 font-bold uppercase">Success</div>
+                                  <div className="text-[11px] text-emerald-400 font-bold uppercase">Thành công</div>
                                   <div className="text-xl font-bold text-emerald-300 mt-0.5">{successCount}</div>
                                 </div>
                                 <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/30 text-center">
-                                  <div className="text-[11px] text-rose-400 font-bold uppercase">{isKpiMode ? 'Errors (auto-replaced)' : 'Errors / Skipped'}</div>
+                                  <div className="text-[11px] text-rose-400 font-bold uppercase">{isKpiMode ? 'Lỗi (đã tự thay)' : 'Lỗi / Bỏ qua'}</div>
                                   <div className="text-xl font-bold text-rose-300 mt-0.5">{failedCount}</div>
                                 </div>
                                 <div className="p-3 rounded-xl bg-blue-950/40 border border-blue-500/30 text-center">
-                                  <div className="text-[11px] text-blue-400 font-bold uppercase">{isKpiMode ? 'Still needed' : 'Pending'}</div>
+                                  <div className="text-[11px] text-blue-400 font-bold uppercase">{isKpiMode ? 'Còn thiếu' : 'Đang chờ'}</div>
                                   <div className="text-xl font-bold text-blue-300 mt-0.5">{remainingNeeded}</div>
                                 </div>
                               </div>
@@ -292,17 +292,17 @@ export default function RunningTab({
                               <div className="space-y-1.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
                                 <div className="flex items-center justify-between text-xs flex-wrap gap-1">
                                   <span className="text-slate-300 font-semibold">
-                                    Progress: <b className="text-cyan-400">{isKpiMode ? successCount : done}</b> / {targetKpi} {isKpiMode ? 'successful likes' : 'Fanpages'} ({pct}%)
+                                    Tiến độ: <b className="text-cyan-400">{isKpiMode ? successCount : done}</b> / {targetKpi} {isKpiMode ? 'like thành công' : 'Fanpage'} ({pct}%)
                                     {isKpiMode && failedCount > 0 && (
                                       <span className="text-slate-400 font-normal ml-2 text-[11px]">
-                                        (Went through {done} Fanpages · Auto-replaced {failedCount} failures)
+                                        (Đã chạy qua {done} Fanpage · Tự thay {failedCount} lỗi)
                                       </span>
                                     )}
                                   </span>
                                   {timing && (
                                     <span className="text-slate-400 font-mono text-[11px]">
-                                      Running for {formatDuration(timing.elapsed)}
-                                      {timing.remaining !== null && ` · ~${formatDuration(timing.remaining)} left`}
+                                      Đã chạy {formatDuration(timing.elapsed)}
+                                      {timing.remaining !== null && ` · còn ~${formatDuration(timing.remaining)}`}
                                     </span>
                                   )}
                                 </div>
@@ -319,8 +319,8 @@ export default function RunningTab({
                               {task.pageDetails && task.pageDetails.length > 0 && (
                                 <div className="space-y-2">
                                   <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-                                    <span>Recently engaged Fanpages ({task.pageDetails.length} done):</span>
-                                    <span className="text-[11px]">Auto-updates in real time</span>
+                                    <span>Fanpage vừa tương tác ({task.pageDetails.length} đã xong):</span>
+                                    <span className="text-[11px]">Tự cập nhật theo thời gian thực</span>
                                   </div>
                                   <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/80 divide-y divide-slate-800/60">
                                     {[...task.pageDetails].reverse().slice(0, 10).map((p: any, pIdx: number) => (
@@ -332,14 +332,14 @@ export default function RunningTab({
                                         <div className="flex items-center gap-2 shrink-0">
                                           {p.status === 'SUCCESS' ? (
                                             <Tag color="success" className="text-[10px] m-0 border-0">
-                                              ✅ Success
+                                              ✅ Thành công
                                             </Tag>
                                           ) : (
                                             <Tag color="error" className="text-[10px] m-0 border-0">
-                                              ❌ {p.error || 'Error'}
+                                              ❌ {p.error || 'Lỗi'}
                                             </Tag>
                                           )}
-                                          <span className="text-[11px] font-mono text-slate-500">{p.time || 'just now'}</span>
+                                          <span className="text-[11px] font-mono text-slate-500">{p.time || 'vừa xong'}</span>
                                         </div>
                                       </div>
                                     ))}
@@ -355,10 +355,10 @@ export default function RunningTab({
                         <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-xs">
                           <span className="text-slate-300 flex items-center">
                             <ClockCircleOutlined className="text-amber-400 mr-1.5" />
-                            <span><b>{queueItems.filter((i) => i.status === 'QUEUED').length}</b> more posts are waiting in the queue</span>
+                            <span><b>{queueItems.filter((i) => i.status === 'QUEUED').length}</b> bài nữa đang chờ trong hàng đợi</span>
                           </span>
                           <Button size="small" type="link" onClick={() => setActiveTabKey('buff-queue')} className="text-cyan-400 p-0 text-xs">
-                            Manage the whole queue →
+                            Quản lý toàn bộ hàng đợi →
                           </Button>
                         </div>
                       )}
@@ -372,7 +372,7 @@ export default function RunningTab({
                             <div className="flex items-center gap-2 flex-wrap">
                               <Tag color="success" className="font-bold text-xs px-2.5 py-0.5 rounded-full border-emerald-500/40">
                                 <CheckCircleOutlined className="mr-1" />
-                                Post just finished its run
+                                Bài vừa chạy xong
                               </Tag>
                               <span className="text-xs text-slate-400">
                                 {new Date(buffLogs[0].createdAt).toLocaleTimeString('vi-VN')}
@@ -385,14 +385,14 @@ export default function RunningTab({
                               onClick={() => setActiveTabKey('buff-history')}
                               className="text-cyan-400 p-0 text-xs hover:text-cyan-300"
                             >
-                              View all History ({buffLogs.length}) →
+                              Xem toàn bộ Lịch sử ({buffLogs.length}) →
                             </Button>
                           </div>
 
                           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
                             <div className="min-w-0 flex-1 space-y-1">
                               <div className="text-xs text-slate-400 flex items-center gap-1.5">
-                                <span>Post:</span>
+                                <span>Bài:</span>
                                 <span className="font-semibold text-slate-200">
                                   {buffLogs[0].reactionType || 'LIKE'}
                                 </span>
@@ -409,9 +409,9 @@ export default function RunningTab({
 
                             <div className="flex items-center gap-4 shrink-0">
                               <div className="text-right">
-                                <div className="text-[11px] text-slate-400">Successful likes</div>
+                                <div className="text-[11px] text-slate-400">Like thành công</div>
                                 <div className="text-xl font-bold text-emerald-400">
-                                  {buffLogs[0].successCount} <span className="text-xs font-normal text-slate-400">likes</span>
+                                  {buffLogs[0].successCount} <span className="text-xs font-normal text-slate-400">like</span>
                                 </div>
                               </div>
 
@@ -423,7 +423,7 @@ export default function RunningTab({
                                 onClick={() => handleResumeRemaining(buffLogs[0])}
                                 className="font-semibold text-xs rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 border-none shadow-md shadow-cyan-600/20"
                               >
-                                Run more likes
+                                Chạy thêm like
                               </Button>
                             </div>
                           </div>
@@ -436,9 +436,9 @@ export default function RunningTab({
                           <PlayCircleOutlined />
                         </div>
                         <div className="space-y-1.5">
-                          <h3 className="text-base font-bold text-slate-100">Nothing is running right now</h3>
+                          <h3 className="text-base font-bold text-slate-100">Hiện không có gì đang chạy</h3>
                           <p className="text-xs text-slate-400 leading-relaxed max-w-md mx-auto">
-                            When you click <b>Start</b> on the New tab, or when posts in the Queue get their turn, the real-time progress of every Fanpage/Via shows up here in detail.
+                            Khi bạn bấm <b>Bắt đầu</b> ở tab Tạo mới, hoặc khi bài trong Hàng đợi tới lượt, tiến độ thời gian thực của từng Fanpage/Via sẽ hiện chi tiết ở đây.
                           </p>
                         </div>
                         <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
@@ -449,7 +449,7 @@ export default function RunningTab({
                             onClick={() => setActiveTabKey('buff-like')}
                             className="font-semibold rounded-xl text-xs sm:text-sm"
                           >
-                            Create a campaign now
+                            Tạo chiến dịch ngay
                           </Button>
                           {queueItems.filter((i) => i.status === 'QUEUED').length > 0 && (
                             <Button
@@ -458,7 +458,7 @@ export default function RunningTab({
                               onClick={() => setActiveTabKey('buff-queue')}
                               className="font-semibold rounded-xl text-amber-300 border-amber-500/40 bg-amber-950/30 text-xs sm:text-sm"
                             >
-                              View queue ({queueItems.filter((i) => i.status === 'QUEUED').length} waiting)
+                              Xem hàng đợi ({queueItems.filter((i) => i.status === 'QUEUED').length} đang chờ)
                             </Button>
                           )}
                           {buffLogs.length > 0 && (
@@ -468,7 +468,7 @@ export default function RunningTab({
                               onClick={() => setActiveTabKey('buff-history')}
                               className="font-semibold rounded-xl text-xs sm:text-sm"
                             >
-                              View history ({buffLogs.length})
+                              Xem lịch sử ({buffLogs.length})
                             </Button>
                           )}
                         </div>
@@ -485,9 +485,9 @@ export default function RunningTab({
                           {buffMode === 'BATCH' && batchOrders.length > 0 ? (
                             <div>
                               <div className="text-xs text-slate-400 font-medium flex items-center gap-2">
-                                <span>Multi-post engagement campaign (Batch Mode):</span>
+                                <span>Chiến dịch tương tác nhiều bài (Hàng loạt):</span>
                                 <Tag color="cyan" className="m-0 text-[10px] font-bold border-0 px-2 py-0.5 rounded-full">
-                                  {batchLinkConcurrency === 2 ? '2 posts in parallel' : '1 post at a time'}
+                                  {batchLinkConcurrency === 2 ? '2 bài song song' : '1 bài mỗi lượt'}
                                 </Tag>
                               </div>
                               {(() => {
@@ -497,17 +497,17 @@ export default function RunningTab({
                                 return (
                                   <div className="flex items-center gap-2.5 mt-1 flex-wrap">
                                     <span className="text-sm sm:text-base font-bold text-slate-100">
-                                      Completed <b className="text-emerald-400">{completedCount}</b> / {batchOrders.length} posts
+                                      Hoàn tất <b className="text-emerald-400">{completedCount}</b> / {batchOrders.length} bài
                                       {partialCount > 0 && (
                                         <span className="text-amber-400 font-semibold ml-2 text-xs sm:text-sm">
-                                          ({partialCount} posts need a like top-up)
+                                          ({partialCount} bài cần bù like)
                                         </span>
                                       )}
                                     </span>
                                     {runningCount > 0 && (
                                       <span className="text-[11px] text-cyan-300 font-semibold bg-cyan-950/70 border border-cyan-800/70 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse">
                                         <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-                                        {runningCount} posts running at once
+                                        {runningCount} bài chạy cùng lúc
                                       </span>
                                     )}
                                   </div>
@@ -516,10 +516,10 @@ export default function RunningTab({
                             </div>
                           ) : (
                             <div className="space-y-2">
-                              <div className="text-xs text-slate-400 font-medium">Post being engaged:</div>
+                              <div className="text-xs text-slate-400 font-medium">Bài đang tương tác:</div>
                               <div className="flex items-center gap-2">
                                 <span className="text-sm font-mono font-bold text-blue-300 truncate max-w-xl">
-                                  {runningTargetInfo?.url || targetPostUrl || 'Facebook post'}
+                                  {runningTargetInfo?.url || targetPostUrl || 'Bài viết Facebook'}
                                 </span>
                                 {(runningTargetInfo?.url || targetPostUrl) && (
                                   <Button
@@ -528,9 +528,9 @@ export default function RunningTab({
                                     icon={<ExportOutlined />}
                                     onClick={() => window.open(runningTargetInfo?.url || targetPostUrl, '_blank')}
                                     className="text-blue-400 hover:text-blue-300 text-xs shrink-0 p-1 h-auto"
-                                    title="Open the link on Facebook"
+                                    title="Mở link trên Facebook"
                                   >
-                                    Open Facebook
+                                    Mở Facebook
                                   </Button>
                                 )}
                               </div>
@@ -587,8 +587,8 @@ export default function RunningTab({
                                 <div className="px-3 py-1 rounded-lg bg-slate-950/60 border border-slate-800 flex items-center gap-1.5">
                                   <span className="text-slate-400">
                                     {autoBuffProgress.details.some(hasRealComment) || runningTargetInfo?.engagementMode === 'COMMENT_ONLY' || engagementMode === 'COMMENT_ONLY'
-                                      ? 'Mode:'
-                                      : 'Reaction:'}
+                                      ? 'Chế độ:'
+                                      : 'Cảm xúc:'}
                                   </span>
                                   <span className="font-bold text-slate-100">
                                     {(() => {
@@ -596,7 +596,7 @@ export default function RunningTab({
                                         autoBuffProgress.details.some(hasRealComment) ||
                                         runningTargetInfo?.engagementMode === 'COMMENT_ONLY' ||
                                         engagementMode === 'COMMENT_ONLY';
-                                      if (isCmt && engagementMode !== 'LIKE_AND_COMMENT') return 'Comments only';
+                                      if (isCmt && engagementMode !== 'LIKE_AND_COMMENT') return 'Chỉ bình luận';
                                       const rxKey = runningTargetInfo?.reaction || selectedReaction;
                                       const r = REACTIONS.find((x) => x.key === rxKey);
                                       return r ? `${r.emoji} ${r.label}` : rxKey;
@@ -604,7 +604,7 @@ export default function RunningTab({
                                   </span>
                                 </div>
                                 <div className="px-3 py-1 rounded-lg bg-slate-950/60 border border-slate-800 flex items-center gap-1.5">
-                                  <span className="text-slate-400">Target:</span>
+                                  <span className="text-slate-400">Mục tiêu:</span>
                                   <span className="font-bold text-slate-100 tabular-nums">
                                     {isBatch
                                       ? `${batchTotal} like (${batchOrders.length} link)`
@@ -620,22 +620,22 @@ export default function RunningTab({
                                     {isAnyRunning ? (
                                       <span className="flex items-center gap-1.5 text-cyan-300">
                                         <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                                        RUNNING
+                                        ĐANG CHẠY
                                       </span>
                                     ) : isDoneFull ? (
                                       <span className="flex items-center gap-1.5 text-emerald-300">
                                         <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                                        COMPLETED
+                                        HOÀN TẤT
                                       </span>
                                     ) : autoBuffProgress.status === 'ERROR' ? (
                                       <span className="flex items-center gap-1.5 text-amber-300">
                                         <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                                        INTERRUPTED
+                                        BỊ GIÁN ĐOẠN
                                       </span>
                                     ) : (
                                       <span className="flex items-center gap-1.5 text-amber-300">
                                         <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                                        {isExhausted ? 'OUT OF ACCOUNTS' : 'STOPPED'}
+                                        {isExhausted ? 'HẾT TÀI KHOẢN' : 'STOPPED'}
                                       </span>
                                     )}
                                     <span className="text-slate-400 font-mono text-[10px]">~{totalEstimatedSec}s</span>
@@ -664,12 +664,12 @@ export default function RunningTab({
                                   </div>
 
                                   <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-0.5">
-                                    <span>{isAnyRunning ? `Estimate: ~${estimatedRemainingSec}s left` : (isDoneFull ? 'Target reached' : 'Finished')}</span>
+                                    <span>{isAnyRunning ? `Ước tính: còn ~${estimatedRemainingSec}s` : (isDoneFull ? 'Đã đạt mục tiêu' : 'Đã xong')}</span>
                                     <button
                                       type="button"
                                       onClick={() => setShowLiveTerminal((prev) => !prev)}
                                       className="text-cyan-400 hover:text-cyan-300 text-[10px] flex items-center gap-0.5 cursor-pointer"
-                                      title="View detailed log"
+                                      title="Xem log chi tiết"
                                     >
                                       <CodeOutlined /> Log
                                     </button>
@@ -741,27 +741,27 @@ export default function RunningTab({
                                 {isAnyRunning ? (
                                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-950/70 border border-cyan-500/50 text-cyan-300 text-xs font-bold shadow-sm shadow-cyan-950/50">
                                     <LoadingOutlined spin className="text-cyan-400" />
-                                    <span>Engaging ({elapsedSec}s)</span>
+                                    <span>Đang tương tác ({elapsedSec}s)</span>
                                   </div>
                                 ) : isDoneFull ? (
                                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/70 border border-emerald-500/50 text-emerald-300 text-xs font-bold shadow-sm shadow-emerald-950/50">
                                     <CheckCircleFilled className="text-emerald-400" />
-                                    <span>100% complete ({elapsedSec}s)</span>
+                                    <span>Hoàn tất 100% ({elapsedSec}s)</span>
                                   </div>
                                 ) : autoBuffProgress.status === 'ERROR' ? (
                                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950/70 border border-amber-500/50 text-amber-300 text-xs font-bold shadow-sm shadow-amber-950/50">
                                     <ExclamationCircleOutlined className="text-amber-400" />
-                                    <span>Interrupted ({elapsedSec}s)</span>
+                                    <span>Bị gián đoạn ({elapsedSec}s)</span>
                                   </div>
                                 ) : isExhausted ? (
                                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950/70 border border-amber-500/50 text-amber-300 text-xs font-bold shadow-sm shadow-amber-950/50">
                                     <CheckCircleOutlined className="text-amber-400" />
-                                    <span className="whitespace-nowrap">Short {autoBuffProgress.success}/{autoBuffProgress.total || autoBuffProgress.details.length}</span>
+                                    <span className="whitespace-nowrap">Thiếu {autoBuffProgress.success}/{autoBuffProgress.total || autoBuffProgress.details.length}</span>
                                   </div>
                                 ) : (
                                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-950/70 border border-rose-500/50 text-rose-300 text-xs font-bold">
                                     <StopOutlined className="text-rose-400" />
-                                    <span>Run stopped ({elapsedSec}s)</span>
+                                    <span>Đã dừng chạy ({elapsedSec}s)</span>
                                   </div>
                                 )}
 
@@ -769,23 +769,23 @@ export default function RunningTab({
                                 <div className="text-xs text-slate-300">
                                   {isBatch ? (
                                     isBatchRunning ? (
-                                      <span>Batch progress: <b className="text-white font-bold">{batchDone}/{batchTotal} likes done</b></span>
+                                      <span>Tiến độ hàng loạt: <b className="text-white font-bold">{batchDone}/{batchTotal} like đã xong</b></span>
                                     ) : isDoneFull ? (
-                                      <span className="text-emerald-300 font-semibold">100% of the Batch target reached</span>
+                                      <span className="text-emerald-300 font-semibold">Đã đạt 100% mục tiêu hàng loạt</span>
                                     ) : (
-                                      <span>Batch status: <b className="text-white font-bold">Reached {batchDone}/{batchTotal} likes</b></span>
+                                      <span>Trạng thái hàng loạt: <b className="text-white font-bold">Đã đạt {batchDone}/{batchTotal} like</b></span>
                                     )
                                   ) : isAnyRunning ? (
                                     <span>
-                                      Playwright is processing: <b className="text-cyan-300 font-bold">{autoBuffProgress.currentRunningPageName || 'Opening the post & checking the like button...'}</b>
+                                      Playwright đang xử lý: <b className="text-cyan-300 font-bold">{autoBuffProgress.currentRunningPageName || 'Đang mở bài & kiểm tra nút like...'}</b>
                                     </span>
                                   ) : isDoneFull ? (
                                     <span className="text-emerald-300 font-semibold flex items-center gap-1.5">
-                                      <CheckCircleFilled className="text-emerald-400" /> KPI target reached: {autoBuffProgress.success} successful likes
+                                      <CheckCircleFilled className="text-emerald-400" /> Đã đạt KPI: {autoBuffProgress.success} like thành công
                                     </span>
                                   ) : autoBuffProgress.status === 'ERROR' ? (
                                     <span className="text-amber-300 font-medium">
-                                      The run was interrupted because the server restarted. {autoBuffProgress.success}/{autoBuffProgress.total} likes succeeded. Click "Finish the run" below to complete the remaining {autoBuffProgress.total - autoBuffProgress.success} likes!
+                                      Lượt chạy bị gián đoạn do server khởi động lại. {autoBuffProgress.success}/{autoBuffProgress.total} like thành công. Bấm "Chạy nốt" bên dưới để hoàn tất {autoBuffProgress.total - autoBuffProgress.success} like còn lại!
                                     </span>
                                   ) : isExhausted ? (
                                     <span className="text-amber-300 font-medium flex items-center gap-1.5 flex-wrap">
@@ -798,10 +798,10 @@ export default function RunningTab({
                                           const unit = isCmt ? 'comments' : 'likes';
                                           return (
                                             <>
-                                              Ran {autoBuffProgress.details.length} accounts in this round (<b className="text-emerald-300">{autoBuffProgress.success} successful {unit}</b>{autoBuffProgress.alreadyLiked > 0 ? `, ${autoBuffProgress.alreadyLiked} had engaged before` : ''}).
+                                              Đã chạy {autoBuffProgress.details.length} tài khoản trong lượt này (<b className="text-emerald-300">{autoBuffProgress.success} thành công {unit}</b>{autoBuffProgress.alreadyLiked > 0 ? `, ${autoBuffProgress.alreadyLiked} đã tương tác trước đó` : ''}).
                                               {autoBuffProgress.total > autoBuffProgress.details.length && (
                                                 <span className="text-slate-300 ml-1">
-                                                  {Math.max(0, autoBuffProgress.total - autoBuffProgress.success - autoBuffProgress.alreadyLiked)} {unit} short because some Pages failed or were skipped. Click &quot;Finish the run&quot; to top up.
+                                                  {Math.max(0, autoBuffProgress.total - autoBuffProgress.success - autoBuffProgress.alreadyLiked)} {unit} bị thiếu do một số Page lỗi hoặc bị bỏ qua. Bấm &quot;Chạy nốt&quot; để bù.
                                                 </span>
                                               )}
                                             </>
@@ -813,12 +813,12 @@ export default function RunningTab({
                                         onClick={() => handleOpenManagePages(selectedAccountId)}
                                         className="text-cyan-300 hover:text-cyan-200 underline font-bold cursor-pointer ml-1 inline-flex items-center gap-1"
                                       >
-                                        <PlusOutlined className="text-[10px]" /> Add more Vias / Pages right here
+                                        <PlusOutlined className="text-[10px]" /> Thêm Via / Page ngay tại đây
                                       </button>
                                     </span>
                                   ) : (
                                     <span className="text-slate-400 font-medium">
-                                      {autoBuffProgress.currentRunningPageName || 'The run was stopped safely.'}
+                                      {autoBuffProgress.currentRunningPageName || 'Đã dừng lượt chạy an toàn.'}
                                     </span>
                                   )}
                                 </div>
@@ -854,29 +854,29 @@ export default function RunningTab({
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
                         <div className="p-3.5 rounded-xl border bg-slate-950/80 border-slate-800 text-center">
                           <div className="text-xs text-slate-400 font-medium">
-                            {isBatch ? 'Total target likes' : 'Total accounts'}
+                            {isBatch ? 'Tổng like mục tiêu' : 'Tổng tài khoản'}
                           </div>
                           <div className="text-2xl font-extrabold text-slate-100 tabular-nums mt-1">
                             {isBatch ? `${totalBatchLikesTarget}` : (autoBuffProgress.total || 0)}
                           </div>
                           {isBatch && (
-                            <div className="text-[10px] text-slate-400 mt-0.5 font-medium">{batchOrders.length} posts</div>
+                            <div className="text-[10px] text-slate-400 mt-0.5 font-medium">{batchOrders.length} bài</div>
                           )}
                         </div>
                         <div className="p-3.5 rounded-xl border bg-emerald-950/40 border-emerald-800/50 text-center">
-                          <div className="text-xs text-emerald-400 font-medium">Success</div>
+                          <div className="text-xs text-emerald-400 font-medium">Thành công</div>
                           <div className="text-2xl font-extrabold text-emerald-300 tabular-nums mt-1">
                             {isBatch ? totalBatchSuccess : (autoBuffProgress.success || 0)}
                           </div>
                           {isBatch && totalBatchLikesTarget > 0 && (
                             <div className="text-[10px] text-emerald-400 mt-0.5 font-medium">
-                              Reached {Math.min(100, Math.round((totalBatchSuccess / Math.max(1, totalBatchLikesTarget)) * 100))}%
-                              {totalBatchSuccess > totalBatchLikesTarget && ' (Over KPI)'}
+                              Đã đạt {Math.min(100, Math.round((totalBatchSuccess / Math.max(1, totalBatchLikesTarget)) * 100))}%
+                              {totalBatchSuccess > totalBatchLikesTarget && ' (Vượt KPI)'}
                             </div>
                           )}
                         </div>
                         <div className="p-3.5 rounded-xl border bg-blue-950/40 border-blue-800/50 text-center">
-                          <div className="text-xs text-blue-400 font-medium">Already liked</div>
+                          <div className="text-xs text-blue-400 font-medium">Đã like trước</div>
                           <div className="text-2xl font-extrabold text-blue-300 tabular-nums mt-1">
                             {isBatch ? totalBatchAlreadyLiked : (autoBuffProgress.alreadyLiked || 0)}
                           </div>
@@ -889,7 +889,7 @@ export default function RunningTab({
                           <div className={`text-xs font-medium ${
                             isBatch && totalBatchLikesTarget > totalBatchSuccess ? 'text-amber-400' : 'text-rose-400'
                           }`}>
-                            {isBatch && totalBatchLikesTarget > totalBatchSuccess ? 'Short / Needs top-up' : 'Errors / Skipped'}
+                            {isBatch && totalBatchLikesTarget > totalBatchSuccess ? 'Thiếu / Cần bù' : 'Lỗi / Bỏ qua'}
                           </div>
                           <div className={`text-2xl font-extrabold tabular-nums mt-1 ${
                             isBatch && totalBatchLikesTarget > totalBatchSuccess ? 'text-amber-300' : 'text-rose-300'
@@ -900,7 +900,7 @@ export default function RunningTab({
                           </div>
                           {isBatch && totalBatchLikesTarget > totalBatchSuccess && (
                             <div className="text-[10px] text-amber-400 mt-0.5 font-medium">
-                              {totalBatchLikesTarget - totalBatchSuccess} likes short
+                              {totalBatchLikesTarget - totalBatchSuccess} like còn thiếu
                             </div>
                           )}
                         </div>
@@ -924,16 +924,16 @@ export default function RunningTab({
 
                         if (isHighFailure || isStopped || isError || isExhaustedBox || success < total) {
                           const bannerTitle = isError
-                            ? 'Campaign interrupted by a connection issue'
+                            ? 'Chiến dịch bị gián đoạn do lỗi kết nối'
                             : isBatch
-                            ? (success < total ? `Batch campaign partially complete (${success}/${total} likes - ${Math.round((success / Math.max(1, total)) * 100)}%)` : 'Batch campaign complete')
+                            ? (success < total ? `Chiến dịch hàng loạt xong một phần (${success}/${total} like - ${Math.round((success / Math.max(1, total)) * 100)}%)` : 'Chiến dịch hàng loạt hoàn tất')
                             : isExhaustedBox
-                            ? 'The campaign used every available account in this round'
+                            ? 'Chiến dịch đã dùng hết tài khoản khả dụng trong lượt này'
                             : isStopped
-                            ? 'The campaign was stopped / ended early'
+                            ? 'Chiến dịch đã dừng / kết thúc sớm'
                             : success < total
-                            ? `Campaign complete (${success}/${total} ${unitName}s)`
-                            : 'Campaign complete with error warnings';
+                            ? `Chiến dịch hoàn tất (${success}/${total} ${unitName})`
+                            : 'Chiến dịch hoàn tất nhưng có cảnh báo lỗi';
                           return (
                             <div className="p-4 rounded-xl border border-amber-500/40 bg-amber-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                               <div className="flex items-center gap-3">
@@ -945,9 +945,9 @@ export default function RunningTab({
                                     {bannerTitle}
                                   </div>
                                   <div className="text-xs text-slate-400">
-                                    Successful {unitName}s: <span className="text-emerald-400 font-semibold">{success}</span>/{total}
-                                    {missingLikes > 0 && !isExhaustedBox && <> • Short: <span className="text-amber-400 font-bold">{missingLikes} {unitName}s</span></>}
-                                    {failed > 0 && <> • Errors/skipped: <span className="text-rose-400 font-semibold">{failed}</span></>}
+                                    Thành công {unitName}s: <span className="text-emerald-400 font-semibold">{success}</span>/{total}
+                                    {missingLikes > 0 && !isExhaustedBox && <> • Thiếu: <span className="text-amber-400 font-bold">{missingLikes} {unitName}s</span></>}
+                                    {failed > 0 && <> • Lỗi/bỏ qua: <span className="text-rose-400 font-semibold">{failed}</span></>}
                                   </div>
                                 </div>
                               </div>
@@ -958,7 +958,7 @@ export default function RunningTab({
                                   onClick={handleStartNewCampaign}
                                   className="font-bold text-xs rounded-xl bg-blue-600 hover:bg-blue-500 border-none shadow-md shadow-blue-600/30 text-white cursor-pointer"
                                 >
-                                  New campaign
+                                  Chiến dịch mới
                                 </Button>
                                 {isBatch && (
                                   <Button
@@ -973,11 +973,11 @@ export default function RunningTab({
                                       setSelectedAccountId('ALL_VIAS');
                                       setBatchOrders([]);
                                       setActiveTabKey('buff-like');
-                                      message.success('Preloaded 5 posts with 100 Likes from the Fanpage pool! Click "Start run" to begin.');
+                                      message.success('Đã nạp sẵn 5 bài với 100 like từ nhóm Fanpage! Bấm "Bắt đầu chạy" để chạy.');
                                     }}
                                     className="font-bold text-xs rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border-none shadow-md shadow-emerald-600/20"
                                   >
-                                    Re-run 5 posts with 100 Likes (Fanpages)
+                                    Chạy lại 5 bài với 100 like (Fanpage)
                                   </Button>
                                 )}
                                 {isBatch && (
@@ -988,7 +988,7 @@ export default function RunningTab({
                                     }}
                                     className="font-semibold text-xs rounded-xl text-slate-300 border-slate-700 hover:bg-slate-800"
                                   >
-                                    New / Clear
+                                    Tạo mới / Xóa
                                   </Button>
                                 )}
                                 {isBatch && missingLikes > 0 && (
@@ -998,7 +998,7 @@ export default function RunningTab({
                                     onClick={handleRefillBatchIncomplete}
                                     className="font-semibold text-xs rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 border-none shadow-md shadow-amber-600/20"
                                   >
-                                    Top up likes for short posts ({missingLikes} likes)
+                                    Bù like cho bài còn thiếu ({missingLikes} like)
                                   </Button>
                                 )}
                                 {!isBatch && missingLikes > 0 && (runningTargetInfo?.url || targetPostUrl) && (
@@ -1014,7 +1014,7 @@ export default function RunningTab({
                                     })}
                                     className="font-semibold text-xs rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 border-none shadow-md shadow-cyan-600/20"
                                   >
-                                    Finish the run ({missingLikes} likes)
+                                    Chạy nốt ({missingLikes} like)
                                   </Button>
                                 )}
                                 <Button
@@ -1022,7 +1022,7 @@ export default function RunningTab({
                                   onClick={() => handleOpenManagePages(selectedAccountId)}
                                   className="font-semibold text-xs rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
                                 >
-                                  Add Vias / Pages
+                                  Thêm Via / Page
                                 </Button>
                                 {(runningTargetInfo?.url || targetPostUrl) && (
                                   <Button
@@ -1030,7 +1030,7 @@ export default function RunningTab({
                                     onClick={() => window.open(runningTargetInfo?.url || targetPostUrl, '_blank')}
                                     className="font-semibold text-xs rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700"
                                   >
-                                    Check post
+                                    Kiểm tra bài
                                   </Button>
                                 )}
                                 <Button
@@ -1038,7 +1038,7 @@ export default function RunningTab({
                                   onClick={() => setActiveTabKey('buff-history')}
                                   className="text-xs rounded-xl"
                                 >
-                                  View History
+                                  Xem lịch sử
                                 </Button>
                               </div>
                             </div>
@@ -1052,9 +1052,9 @@ export default function RunningTab({
                                 🎉
                               </div>
                               <div>
-                                <div className="text-sm font-bold text-emerald-300">Engagement campaign 100% complete!</div>
+                                <div className="text-sm font-bold text-emerald-300">Chiến dịch tương tác đã xong 100%!</div>
                                 <div className="text-xs text-slate-400">
-                                  Completed {success}/{total} likes. Data saved to History and a Telegram notification was sent.
+                                  Hoàn tất {success}/{total} like. Dữ liệu đã lưu vào Lịch sử và đã gửi thông báo Telegram.
                                 </div>
                               </div>
                             </div>
@@ -1066,7 +1066,7 @@ export default function RunningTab({
                                   onClick={() => window.open(runningTargetInfo?.url || targetPostUrl, '_blank')}
                                   className="font-semibold text-xs rounded-xl"
                                 >
-                                  Check on Facebook
+                                  Kiểm tra trên Facebook
                                 </Button>
                               )}
                               <Button
@@ -1074,7 +1074,7 @@ export default function RunningTab({
                                 onClick={() => setActiveTabKey('buff-history')}
                                 className="text-xs rounded-xl"
                               >
-                                View History
+                                Xem lịch sử
                               </Button>
                             </div>
                           </div>
@@ -1087,15 +1087,15 @@ export default function RunningTab({
                       <div className="app-surface p-4 sm:p-5 space-y-3">
                         <div className="flex items-center justify-between pb-1 border-b border-slate-800/80">
                           <div className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                            <span>Posts in the Batch ({batchOrders.length} posts)</span>
+                            <span>Các bài trong danh sách ({batchOrders.length} bài)</span>
                             {batchLinkConcurrency === 2 && (
                               <Tag color="cyan" className="m-0 text-[10px] font-bold border-0 px-2 py-0.5 rounded-full">
-                                ⚡ 2 posts in parallel
+                                ⚡ 2 bài song song
                               </Tag>
                             )}
                           </div>
                           <span className="text-xs text-slate-400">
-                            Completed <b className="text-emerald-400">{batchOrders.filter((o) => o.status === 'COMPLETED').length}</b> / {batchOrders.length}
+                            Hoàn tất <b className="text-emerald-400">{batchOrders.filter((o) => o.status === 'COMPLETED').length}</b> / {batchOrders.length}
                           </span>
                         </div>
                         <div className="space-y-2.5">
@@ -1135,14 +1135,14 @@ export default function RunningTab({
                                       </a>
                                       {isRunning && (
                                         <span className="flex items-center gap-1 text-[10px] px-2 py-0.2 rounded-full bg-cyan-900/60 text-cyan-300 border border-cyan-700/60 font-semibold animate-pulse shrink-0">
-                                          Running
+                                          Đang chạy
                                         </span>
                                       )}
                                     </div>
                                     {order.currentRunningPageName && isRunning && (
                                       <div className="text-[11px] text-cyan-300 mt-1 flex items-center gap-1.5">
                                         <LoadingOutlined spin className="text-cyan-400 text-xs" />
-                                        <span>Working on: <b>{order.currentRunningPageName}</b></span>
+                                        <span>Đang xử lý: <b>{order.currentRunningPageName}</b></span>
                                       </div>
                                     )}
                                     {order.status === 'FAILED' && order.error && (
@@ -1162,27 +1162,27 @@ export default function RunningTab({
                                     </span>
                                     {order.status === 'COMPLETED' ? (
                                       <Tag color="success" className="text-xs font-semibold m-0">
-                                        100% complete
+                                        Hoàn tất 100%
                                       </Tag>
                                     ) : order.status === 'PARTIAL' ? (
                                       <Tag color="warning" className="text-xs font-semibold m-0">
-                                        Reached {order.successLikes}/{order.totalLikesTarget} ({order.totalLikesTarget - order.successLikes} short)
+                                        Đã đạt {order.successLikes}/{order.totalLikesTarget} ({order.totalLikesTarget - order.successLikes} thiếu)
                                       </Tag>
                                     ) : isRunning ? (
                                       <Tag color="processing" className="text-xs font-semibold m-0">
-                                        Running ({orderPercent}%)
+                                        Đang chạy ({orderPercent}%)
                                       </Tag>
                                     ) : order.status === 'FAILED' ? (
                                       <Tag color="error" className="text-xs font-semibold m-0">
-                                        Failed
+                                        Thất bại
                                       </Tag>
                                     ) : order.status === 'PAUSED' ? (
                                       <Tag color="warning" className="text-xs font-semibold m-0">
-                                        Paused
+                                        Tạm dừng
                                       </Tag>
                                     ) : (
                                       <Tag color="default" className="text-xs font-semibold m-0">
-                                        Waiting for its turn
+                                        Chờ tới lượt
                                       </Tag>
                                     )}
 
@@ -1194,7 +1194,7 @@ export default function RunningTab({
                                         onClick={() => handleRefillSingleOrder(order)}
                                         className="bg-amber-600 hover:bg-amber-500 border-none text-[11px] font-bold h-6 px-2 shrink-0 shadow-sm"
                                       >
-                                        Top up {order.totalLikesTarget - order.successLikes} likes
+                                        Bù like {order.totalLikesTarget - order.successLikes} like
                                       </Button>
                                     )}
                                     {order.details && order.details.length > 0 && (
@@ -1211,7 +1211,7 @@ export default function RunningTab({
                                         }}
                                         className="text-[11px] text-slate-400 hover:text-cyan-300 p-1 h-auto"
                                       >
-                                        {isExpanded ? 'Hide details' : 'Show details'}
+                                        {isExpanded ? 'Ẩn chi tiết' : 'Xem chi tiết'}
                                       </Button>
                                     )}
                                   </div>
@@ -1231,7 +1231,7 @@ export default function RunningTab({
                                 {isExpanded && order.details && (
                                   <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-1.5 max-h-48 overflow-y-auto pr-1">
                                     <div className="text-[11px] font-semibold text-slate-400 mb-1">
-                                      Pages/Vias involved in this post ({order.details.length} accounts):
+                                      Page/Via tham gia bài này ({order.details.length} tài khoản):
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                                       {order.details.map((d, dIdx) => (
@@ -1253,14 +1253,14 @@ export default function RunningTab({
                                           </div>
                                           <span className="shrink-0 font-medium">
                                             {d.status === 'SUCCESS'
-                                              ? 'Success'
+                                              ? 'Thành công'
                                               : d.status === 'ALREADY_LIKED'
-                                              ? 'Liked'
+                                              ? 'Đã like'
                                               : d.status === 'RUNNING'
-                                              ? 'Liking...'
+                                              ? 'Đang like...'
                                               : d.status === 'ERROR' || d.status === 'FAILED'
-                                              ? 'Error'
-                                              : 'Waiting'}
+                                              ? 'Lỗi'
+                                              : 'Đang chờ'}
                                           </span>
                                         </div>
                                       ))}
@@ -1280,12 +1280,12 @@ export default function RunningTab({
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {[
-                            { key: 'ALL', label: 'All', count: autoBuffProgress.details.length },
-                            { key: 'RUNNING', label: 'Running', count: autoBuffProgress.details.filter((d) => d.status === 'RUNNING').length },
-                            { key: 'SUCCESS', label: 'Success', count: autoBuffProgress.details.filter((d) => d.status === 'SUCCESS').length },
-                            { key: 'ALREADY_LIKED', label: 'Already liked', count: autoBuffProgress.details.filter((d) => d.status === 'ALREADY_LIKED').length },
-                            { key: 'FAILED', label: 'Errors', count: autoBuffProgress.details.filter((d) => d.status === 'ERROR' || d.status === 'NO_BUTTON' || d.status === 'FAILED').length },
-                            { key: 'WAITING', label: 'Waiting', count: autoBuffProgress.details.filter((d) => d.status === 'WAITING').length },
+                            { key: 'ALL', label: 'Tất cả', count: autoBuffProgress.details.length },
+                            { key: 'RUNNING', label: 'Đang chạy', count: autoBuffProgress.details.filter((d) => d.status === 'RUNNING').length },
+                            { key: 'SUCCESS', label: 'Thành công', count: autoBuffProgress.details.filter((d) => d.status === 'SUCCESS').length },
+                            { key: 'ALREADY_LIKED', label: 'Đã like trước', count: autoBuffProgress.details.filter((d) => d.status === 'ALREADY_LIKED').length },
+                            { key: 'FAILED', label: 'Lỗi', count: autoBuffProgress.details.filter((d) => d.status === 'ERROR' || d.status === 'NO_BUTTON' || d.status === 'FAILED').length },
+                            { key: 'WAITING', label: 'Đang chờ', count: autoBuffProgress.details.filter((d) => d.status === 'WAITING').length },
                           ].map((f) => (
                             <button
                               key={f.key}
@@ -1304,7 +1304,7 @@ export default function RunningTab({
 
                         <div className="w-full sm:w-56">
                           <Input
-                            placeholder="Search accounts..."
+                            placeholder="Tìm tài khoản..."
                             prefix={<SearchOutlined className="text-slate-500" />}
                             size="small"
                             value={runningSearch}
@@ -1325,7 +1325,7 @@ export default function RunningTab({
                               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block"></span>
                             </div>
                             <span className="font-mono text-xs font-semibold text-slate-200 ml-1.5 flex items-center gap-1.5">
-                              <CodeOutlined className="text-blue-400" /> Live Execution Log
+                              <CodeOutlined className="text-blue-400" /> Log thực thi trực tiếp
                               {autoBuffProgress.status === 'RUNNING' && (
                                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-1" />
                               )}
@@ -1333,7 +1333,7 @@ export default function RunningTab({
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-[11px] font-mono text-slate-400">
-                              {liveLogs.length} events
+                              {liveLogs.length} sự kiện
                             </span>
                             <Button
                               type="text"
@@ -1341,7 +1341,7 @@ export default function RunningTab({
                               onClick={() => setShowLiveTerminal((prev) => !prev)}
                               className="text-[11px] text-slate-400 hover:text-slate-200 h-6 px-2"
                             >
-                              {showLiveTerminal ? 'Collapse ▲' : 'Expand ▼'}
+                              {showLiveTerminal ? 'Thu gọn ▲' : 'Mở rộng ▼'}
                             </Button>
                           </div>
                         </div>
@@ -1351,8 +1351,8 @@ export default function RunningTab({
                             {liveLogs.length === 0 ? (
                               <div className="text-slate-500 italic py-2">
                                 {autoBuffProgress.status === 'RUNNING'
-                                  ? '🚀 Starting the Playwright browser and connecting accounts...'
-                                  : 'Ready to log once the run starts.'}
+                                  ? '🚀 Đang khởi động trình duyệt Playwright và kết nối tài khoản...'
+                                  : 'Sẵn sàng ghi log khi bắt đầu chạy.'}
                               </div>
                             ) : (
                               liveLogs.map((log, idx) => {
@@ -1405,7 +1405,7 @@ export default function RunningTab({
                         if (filtered.length === 0) {
                           return (
                             <div className="py-8 text-center text-xs text-slate-500">
-                              No accounts match the filter.
+                              Không có tài khoản nào khớp bộ lọc.
                             </div>
                           );
                         }
@@ -1494,12 +1494,12 @@ export default function RunningTab({
                                   <div className="shrink-0 flex items-center justify-end max-w-[140px]">
                                     {isWaiting && (
                                       <span className="text-[10px] text-slate-400 font-medium px-2 py-0.5 rounded bg-slate-900 border border-slate-800">
-                                        Waiting
+                                        Đang chờ
                                       </span>
                                     )}
                                     {isRunning && (
                                       <Tag color="processing" icon={<LoadingOutlined spin />} className="font-bold text-[10px] m-0">
-                                        Liking...
+                                        Đang like...
                                       </Tag>
                                     )}
                                     {isSuccess && (
@@ -1507,37 +1507,37 @@ export default function RunningTab({
                                         color="success"
                                         icon={<CheckCircleFilled />}
                                         className="text-[10px] m-0 font-semibold max-w-[130px] truncate"
-                                        title={detail.message || 'Success'}
+                                        title={detail.message || 'Thành công'}
                                       >
                                         {detail.commentStatus === 'SUCCESS' || detail.message?.includes('cmt') || detail.message?.includes('bình luận') || /comment/i.test(detail.message || '')
-                                          ? 'Commented'
+                                          ? 'Đã bình luận'
                                           : detail.message?.includes('like') || detail.message?.includes('Like')
-                                          ? 'Liked'
-                                          : 'Success'}
+                                          ? 'Đã like'
+                                          : 'Thành công'}
                                       </Tag>
                                     )}
                                     {isAlreadyLiked && (
                                       <Tag color="blue" icon={<CheckOutlined />} className="text-[10px] m-0">
-                                        Already liked
+                                        Đã like trước
                                       </Tag>
                                     )}
                                     {(detail.status === 'ERROR' || detail.status === 'FAILED') && (
                                       <Tag
                                         color="error"
                                         className="text-[10px] m-0 font-medium max-w-[130px] truncate"
-                                        title={detail.error || detail.message || 'Error'}
+                                        title={detail.error || detail.message || 'Lỗi'}
                                       >
-                                        {detail.error || detail.message || 'Error'}
+                                        {detail.error || detail.message || 'Lỗi'}
                                       </Tag>
                                     )}
                                     {detail.status === 'NO_BUTTON' && (
                                       <Tag color="error" className="text-[10px] m-0">
-                                        Like button not found
+                                        Không tìm thấy nút Like
                                       </Tag>
                                     )}
                                     {detail.status === 'SKIPPED' && (
-                                      <Tag className="text-[10px] m-0 max-w-[130px] truncate" title={detail.message || 'Skipped'}>
-                                        {detail.message || 'Skipped'}
+                                      <Tag className="text-[10px] m-0 max-w-[130px] truncate" title={detail.message || 'Bỏ qua'}>
+                                        {detail.message || 'Bỏ qua'}
                                       </Tag>
                                     )}
                                   </div>

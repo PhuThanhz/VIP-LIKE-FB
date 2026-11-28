@@ -37,7 +37,7 @@ const renderBadge = (key: NavKey, stats: SidebarStats): React.ReactNode => {
       if (stats.deadViasCount && stats.deadViasCount > 0) {
         return (
           <span className="ml-auto flex items-center gap-1 text-[11px] font-semibold text-rose-400 bg-rose-500/20 border border-rose-500/40 px-1.5 py-0.5 rounded-full animate-pulse">
-            ⚠️ {stats.deadViasCount} Via errors
+            ⚠️ {stats.deadViasCount} Via bị lỗi
           </span>
         );
       }
@@ -111,9 +111,9 @@ const SidebarComponent: React.FC<SidebarProps> = ({
 
     const groupLabel = (text: string) => <span className="px-1">{text}</span>;
     return [
-      { type: 'group', label: groupLabel('Campaigns'), children: groups.engagement.items },
-      { type: 'group', label: groupLabel('Accounts'), children: groups.channels.items },
-      { type: 'group', label: groupLabel('System'), children: groups.system.items },
+      { type: 'group', label: groupLabel('Chiến dịch'), children: groups.engagement.items },
+      { type: 'group', label: groupLabel('Tài khoản'), children: groups.channels.items },
+      { type: 'group', label: groupLabel('Hệ thống'), children: groups.system.items },
     ];
   }, [collapsed, monitorsCount, queueCount, historyCount, accountsCount]);
 
@@ -147,7 +147,7 @@ const SidebarComponent: React.FC<SidebarProps> = ({
                   RADIANT
                 </span>
               </div>
-              <div className="text-xs text-slate-400 truncate mt-0.5">Meta engagement system</div>
+              <div className="text-xs text-slate-400 truncate mt-0.5">Hệ thống tương tác Meta</div>
             </div>
           )}
         </div>

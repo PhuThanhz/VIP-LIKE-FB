@@ -153,12 +153,12 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     onSuccess: (data) => {
       if (data.success && data.result) {
         setViewProgress({ total: targetViews, done: data.result.completed, status: 'DONE' });
-        message.success(`Buffed ${data.result.completed}/${targetViews} views for the video!`);
+        message.success(`Đã buff ${data.result.completed}/${targetViews} view cho video!`);
       }
     },
     onError: (err: any) => {
       setViewProgress((prev) => ({ ...prev, status: 'IDLE' }));
-      message.error(`View buff error: ${err.response?.data?.error || err.message}`);
+      message.error(`Lỗi buff view: ${err.response?.data?.error || err.message}`);
     },
   });
 
@@ -182,7 +182,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
 
   const handleScanPages = () => {
     if (!activeCookie) {
-      message.warning('Please choose an account or paste a Cookie before scanning Fanpages!');
+      message.warning('Vui lòng chọn tài khoản hoặc dán Cookie trước khi quét Fanpage!');
       return;
     }
     scanPagesMutation.mutate(activeCookie);
@@ -190,11 +190,11 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
 
   const handleStartAutoBuff = () => {
     if (!isFacebookPostUrl(targetPostUrl)) {
-      message.warning('Please enter a valid Facebook post link (https://facebook.com/...).');
+      message.warning('Vui lòng nhập link bài Facebook hợp lệ (https://facebook.com/...).');
       return;
     }
     if (selectedPageIds.length === 0) {
-      message.warning('Please choose at least 1 Fanpage.');
+      message.warning('Vui lòng chọn ít nhất 1 Fanpage.');
       return;
     }
     autoBuffMutation.mutate();
@@ -202,15 +202,15 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
 
   const handleStartBatchBuff = async () => {
     if (!activeCookie) {
-      message.warning('Please choose an account or paste a Facebook Cookie first!');
+      message.warning('Vui lòng chọn tài khoản hoặc dán Cookie Facebook trước!');
       return;
     }
     if (parsedBatchLinks.length === 0) {
-      message.warning('Please paste at least 1 valid Facebook link into the list!');
+      message.warning('Vui lòng dán ít nhất 1 link Facebook hợp lệ vào danh sách!');
       return;
     }
     if (scannedPages.length === 0) {
-      message.warning('No Fanpages loaded yet! Click "Rescan Fanpage list" first.');
+      message.warning('Chưa tải Fanpage nào! Bấm "Quét lại danh sách Fanpage" trước.');
       return;
     }
 
@@ -224,13 +224,13 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
       autoFailoverLiveVia && liveAvailablePages.length > 0 ? liveAvailablePages : rawPages;
 
     if (availablePages.length === 0) {
-      message.warning('Please choose at least 1 Fanpage to like with!');
+      message.warning('Vui lòng chọn ít nhất 1 Fanpage để like!');
       return;
     }
 
     if (actorMode === 'VIAS' && batchLikesPerOrder > availablePages.length) {
       message.error(
-        `You selected personal accounts (${availablePages.length} Vias), so each post can get at most ${availablePages.length} likes (a personal account can like only once). Choose "Page" (satellite Fanpages) in Step 2 to reach ${batchLikesPerOrder} likes!`
+        `Bạn đang chọn tài khoản cá nhân (${availablePages.length} Via), nên mỗi bài tối đa ${availablePages.length} like (mỗi tài khoản cá nhân chỉ like được 1 lần). Chọn "Page" (Fanpage vệ tinh) ở Bước 2 để đạt ${batchLikesPerOrder} like!`
       );
       return;
     }
@@ -270,7 +270,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
           pageId: p.id,
           pageName: p.name,
           status: 'WAITING',
-          message: 'Waiting for this post\'s turn...',
+          message: 'Đang chờ tới lượt bài này...',
         })),
       };
     });
@@ -278,7 +278,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     const commentLines = commentListText.split('\n').map((s) => s.trim()).filter(Boolean);
     const batchAccountName =
       selectedAccountId === 'ALL_VIAS'
-        ? `All Vias (${fbAccounts.length} Vias)`
+        ? `Tất cả Via (${fbAccounts.length} Via)`
         : (fbAccounts as any[]).find((a) => a.id === selectedAccountId)?.pageName || 'Via Facebook';
 
     const batchStartTime = Date.now();
@@ -322,13 +322,13 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
         } else {
           orderDetails.push({
             pageId,
-            pageName: patch.pageName || 'Backup Page',
+            pageName: patch.pageName || 'Page dự phòng',
             viaName: patch.viaName,
             status: patch.status || 'RUNNING',
             likeStatus: patch.likeStatus,
             commentStatus: patch.commentStatus,
             commentText: patch.commentText,
-            message: patch.message || '⚡ Auto top-up from the backup pool to reach the KPI',
+            message: patch.message || '⚡ Tự bù từ nhóm dự phòng để đạt KPI',
             error: patch.error,
           });
         }
@@ -434,7 +434,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
           }
         } catch (err: any) {
           const stopped = controller.signal.aborted || batchAbortRef.current;
-          orderError = stopped ? 'Stopped' : err.message;
+          orderError = stopped ? 'Đã dừng' : err.message;
           for (const p of group.pages) {
             const current = orderDetails.find((d) => d.pageId === p.id);
             if (current && (current.status === 'WAITING' || current.status === 'RUNNING')) {
@@ -464,7 +464,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
         status: finalStatus,
         percent: isTargetReached ? 100 : actualOrderPercent,
         currentRunningPageName: undefined,
-        ...(finalStatus === 'FAILED' ? { error: orderError || 'No Page engaged successfully' } : {}),
+        ...(finalStatus === 'FAILED' ? { error: orderError || 'Không Page nào tương tác thành công' } : {}),
       });
 
       if (orderDetails.some((d) => d.status !== 'WAITING')) {
@@ -508,12 +508,12 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     setIsBatchRunning(false);
     setIsBatchPaused(false);
     if (batchAbortRef.current) {
-      message.info('Stopped the multi-link run.');
+      message.info('Đã dừng chạy nhiều link.');
     } else {
       playVictoryChime();
       notification.success({
-        message: '🎉 ALL LINKS DONE!',
-        description: `Finished all ${initialOrders.length} posts in the list (${parallelWorkersCount > 1 ? '2-link parallel mode' : 'sequential mode'}). The detailed report was saved to history and sent to Telegram!`,
+        message: '🎉 ĐÃ XONG TẤT CẢ LINK!',
+        description: `Đã chạy xong ${initialOrders.length} bài trong danh sách (${parallelWorkersCount > 1 ? '2-link parallel mode' : 'chế độ tuần tự'}). Báo cáo chi tiết đã lưu vào lịch sử và gửi Telegram!`,
         duration: 10,
         placement: 'topRight',
       });
@@ -524,11 +524,11 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     if (isBatchPaused) {
       batchPauseRef.current = false;
       setIsBatchPaused(false);
-      message.info('Resuming...');
+      message.info('Đang chạy tiếp...');
     } else {
       batchPauseRef.current = true;
       setIsBatchPaused(true);
-      message.warning('Will pause after the current post finishes.');
+      message.warning('Sẽ tạm dừng sau khi xong bài hiện tại.');
     }
   };
 
@@ -540,13 +540,13 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     setIsBatchPaused(false);
     setBatchOrders((prev) => prev.map((o) => (o.status === 'PENDING' ? { ...o, status: 'PAUSED' } : o)));
     axios.post(`${WORKER_BASE_URL}/api/buff-live/stop`).catch(() => {});
-    message.info('Stopping: the worker will stop after the current Page.');
+    message.info('Đang dừng: worker sẽ dừng sau Page hiện tại.');
   };
 
   const handleRefillSingleOrder = (order: BatchOrder) => {
     const missing = Math.max(0, order.totalLikesTarget - (order.successLikes || 0));
     if (missing <= 0) {
-      message.info('This post has already reached its Like target!');
+      message.info('Bài này đã đạt đủ mục tiêu like!');
       return;
     }
     setBuffMode('SINGLE');
@@ -554,7 +554,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     setSelectedAccountId('ALL_VIAS');
     handleSelectRandomPages(missing);
     setActiveTabKey('buff-stream');
-    message.success(`⚡ Switched to Live Engagement mode and preselected ${missing} Fanpages from the LIVE pool to top up likes! Click "Start engagement" to run.`);
+    message.success(`⚡ Đã chuyển sang chế độ Tương tác trực tiếp và chọn sẵn ${missing} Fanpage từ nhóm LIVE để bù like! Bấm "Bắt đầu tương tác" để chạy.`);
   };
 
   const handleRefillBatchIncomplete = () => {
@@ -562,7 +562,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
       (o) => (o.successLikes || 0) < o.totalLikesTarget
     );
     if (incompleteOrders.length === 0) {
-      message.success('Every post in the Batch has reached 100% of its KPI!');
+      message.success('Mọi bài trong danh sách đã đạt 100% KPI!');
       return;
     }
     const lines = incompleteOrders.map((o) => o.url).join('\n');
@@ -572,7 +572,7 @@ export function useBatchRunner(deps: UseBatchRunnerDeps) {
     setBatchLikesPerOrder(maxMissing);
     setSelectedAccountId('ALL_VIAS');
     setActiveTabKey('buff-like');
-    message.success(`⚡ Loaded ${incompleteOrders.length} incomplete posts into the Batch list using All Vias mode (${fbAccounts.length} Vias)! Click "Start engagement" to finish them.`);
+    message.success(`⚡ Đã nạp ${incompleteOrders.length} bài chưa xong vào danh sách, dùng chế độ Tất cả Via (${fbAccounts.length} Via)! Bấm "Bắt đầu tương tác" để chạy nốt.`);
   };
 
 

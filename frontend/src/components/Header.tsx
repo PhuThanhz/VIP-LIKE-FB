@@ -70,17 +70,17 @@ const HeaderComponent: React.FC<HeaderProps> = ({
       onClick: () => setAccountModalTab('profile'),
     },
     { type: 'divider' },
-    { key: 'profile', icon: <UserOutlined />, label: 'Account', onClick: () => setAccountModalTab('profile') },
+    { key: 'profile', icon: <UserOutlined />, label: 'Tài khoản', onClick: () => setAccountModalTab('profile') },
     { key: 'change-password', icon: <LockOutlined className="text-amber-400" />, label: 'Đổi mật khẩu', onClick: () => setAccountModalTab('change-password') },
-    { key: 'license', icon: <KeyOutlined />, label: 'License', onClick: () => setAccountModalTab('license') },
+    { key: 'license', icon: <KeyOutlined />, label: 'Bản quyền', onClick: () => setAccountModalTab('license') },
     ...(admin
-      ? [{ key: 'create-user', icon: <UserAddOutlined />, label: 'Create account', onClick: () => setAccountModalTab('create-user') }]
+      ? [{ key: 'create-user', icon: <UserAddOutlined />, label: 'Tạo tài khoản', onClick: () => setAccountModalTab('create-user') }]
       : []),
     { type: 'divider' },
-    { key: 'wallpaper', icon: <PictureOutlined />, label: 'Wallpaper', onClick: () => setWallpaperModalOpen(true) },
-    { key: 'settings', icon: <SettingOutlined />, label: 'Settings', onClick: onOpenSettings },
+    { key: 'wallpaper', icon: <PictureOutlined />, label: 'Hình nền', onClick: () => setWallpaperModalOpen(true) },
+    { key: 'settings', icon: <SettingOutlined />, label: 'Cài đặt', onClick: onOpenSettings },
     { type: 'divider' },
-    { key: 'logout', icon: <LogoutOutlined />, label: 'Log out', danger: true, onClick: onLogout },
+    { key: 'logout', icon: <LogoutOutlined />, label: 'Đăng xuất', danger: true, onClick: onLogout },
   ];
 
   return (
@@ -89,7 +89,7 @@ const HeaderComponent: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-3 min-w-0">
           <Button
             type="text"
-            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            aria-label={collapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
             icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
             onClick={onToggleCollapse}
             className="w-9 h-9 shrink-0 text-slate-400 hover:text-slate-100"
@@ -106,7 +106,7 @@ const HeaderComponent: React.FC<HeaderProps> = ({
             icon={<DashboardOutlined className="text-cyan-400" />}
             onClick={() => setTelemetryModalOpen(true)}
             className="hidden sm:inline-flex items-center text-xs text-cyan-300 border-cyan-800/80 bg-cyan-950/40 hover:border-cyan-500 hover:text-cyan-100"
-            title="View performance metrics, latency and Event Loop (BUFF LIKE 3.0)"
+            title="Xem chỉ số hiệu năng, độ trễ và Event Loop (BUFF LIKE 3.0)"
           >
             ⚡ Telemetry
           </Button>
@@ -116,9 +116,9 @@ const HeaderComponent: React.FC<HeaderProps> = ({
             icon={<SafetyCertificateOutlined className="text-cyan-400" />}
             onClick={() => openModal()}
             className="hidden sm:inline-flex items-center text-xs text-cyan-300 border-cyan-800/80 bg-cyan-950/40 hover:border-cyan-500 hover:text-cyan-100"
-            title="Check whether cookies are still valid"
+            title="Kiểm tra cookie còn hiệu lực không"
           >
-            Check Cookies
+            Kiểm tra cookie
           </Button>
 
           {totalDeadCount > 0 && (
@@ -126,10 +126,10 @@ const HeaderComponent: React.FC<HeaderProps> = ({
               type="button"
               onClick={() => openModal()}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-rose-500/20 border border-rose-500/50 text-rose-300 hover:text-white hover:bg-rose-500/30 transition-all text-xs font-semibold cursor-pointer shadow-sm shadow-rose-950 animate-pulse"
-              title="Some Vias have expired cookies or a checkpoint! Click to update"
+              title="Một số Via bị hết hạn cookie hoặc dính checkpoint! Bấm để cập nhật"
             >
               <WarningFilled className="text-rose-400 text-sm" />
-              <span>{totalDeadCount} Via cookie errors</span>
+              <span>{totalDeadCount} Via lỗi cookie</span>
             </button>
           )}
 
@@ -143,7 +143,7 @@ const HeaderComponent: React.FC<HeaderProps> = ({
               </span>
               <span className="hidden md:flex flex-col items-start leading-tight">
                 <span className="text-sm text-slate-100 max-w-[160px] truncate">{displayName}</span>
-                <span className="text-[11px] text-slate-500">{admin ? 'Administrator' : 'Member'}</span>
+                <span className="text-[11px] text-slate-500">{admin ? 'Quản trị viên' : 'Thành viên'}</span>
               </span>
               <DownOutlined className="text-[10px] text-slate-500" />
             </button>

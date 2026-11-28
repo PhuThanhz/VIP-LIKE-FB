@@ -50,7 +50,7 @@ export async function runBuffStream(
       signal,
     });
     if (!response.ok || !response.body) {
-      let errText = `Worker stream error: ${response.status}`;
+      let errText = `Lỗi luồng worker: ${response.status}`;
       try {
         const errJson = await response.json();
         if (errJson?.error) errText = errJson.error;
@@ -97,14 +97,14 @@ export async function runBuffStream(
               isCheckpoint: data?.isCheckpoint || /checkpoint/i.test(data?.error || ''),
             });
           }
-          throw new BuffStreamError(data?.error || 'Error while running the engagement buff', true);
+          throw new BuffStreamError(data?.error || 'Lỗi khi chạy buff tương tác', true);
         }
       }
     }
     throw new BuffStreamError('Connection to the worker dropped before completion', receivedAny);
   } catch (err: any) {
     if (err instanceof BuffStreamError) throw err;
-    throw new BuffStreamError(err?.name === 'AbortError' ? 'Stopped' : err?.message || 'Stream connection error', receivedAny);
+    throw new BuffStreamError(err?.name === 'AbortError' ? 'Đã dừng' : err?.message || 'Lỗi kết nối luồng', receivedAny);
   }
 }
 
@@ -276,8 +276,8 @@ export const formatDelaySeconds = (ms: number) => `${Number((ms / 1000).toFixed(
 /** Speed label shared by the badge, description line and Summary panel */
 export const getSpeedLabel = (speedMode: string, customSpeed: boolean, delayMs: number, hasComment = false) => {
   // With comments the minimum gap is 12s, so calling it "Very fast · 12s" would be misleading
-  if (hasComment) return `${formatDelaySeconds(delayMs)} (with comments)`;
-  const name = customSpeed ? 'Custom' : SPEED_PRESETS.find((p) => p.key === speedMode)?.name || 'Standard';
+  if (hasComment) return `${formatDelaySeconds(delayMs)} (có bình luận)`;
+  const name = customSpeed ? 'Tùy chỉnh' : SPEED_PRESETS.find((p) => p.key === speedMode)?.name || 'Tiêu chuẩn';
   return `${name} · ${formatDelaySeconds(delayMs)}`;
 };
 

@@ -29,7 +29,7 @@ export const AutoUpdateModal: React.FC = () => {
         if (update && update.available && isMounted) {
           setUpdateAvailable(true);
           setVersion(update.version);
-          setNotes(update.body || 'This update improves performance, refreshes the UI and fixes bugs.');
+          setNotes(update.body || 'Bản cập nhật này cải thiện hiệu năng, làm mới giao diện và sửa lỗi.');
           setUpdateHandle(update);
         }
       } catch (err) {
@@ -81,7 +81,7 @@ export const AutoUpdateModal: React.FC = () => {
 
       setIsReadyToRestart(true);
     } catch (error) {
-      console.error('Failed to download update:', error);
+      console.error('Tải bản cập nhật thất bại:', error);
       setIsDownloading(false);
       startBackend();
     }
@@ -92,7 +92,7 @@ export const AutoUpdateModal: React.FC = () => {
       const { relaunch } = await import('@tauri-apps/plugin-process');
       await relaunch();
     } catch (e) {
-      console.error('Failed to restart app:', e);
+      console.error('Khởi động lại app thất bại:', e);
     }
   };
 
@@ -139,7 +139,7 @@ export const AutoUpdateModal: React.FC = () => {
         <Space direction="vertical" size={4}>
           <Space>
             <Title level={4} style={{ margin: 0, color: '#f8fafc', fontWeight: 700 }}>
-              {isReadyToRestart ? 'Installed!' : 'A new update is available!'}
+              {isReadyToRestart ? 'Đã cài đặt!' : 'Đã có bản cập nhật mới!'}
             </Title>
             <Tag color="blue" style={{ borderRadius: 6, fontWeight: 700, padding: '2px 8px' }}>
               v{version}
@@ -147,8 +147,8 @@ export const AutoUpdateModal: React.FC = () => {
           </Space>
           <Text style={{ color: '#94a3b8', fontSize: 13 }}>
             {isReadyToRestart
-              ? 'The update was installed successfully. Restart to use it now.'
-              : 'A new version of VIPLIKE RADIANT is available with many improvements.'}
+              ? 'Đã cài bản cập nhật. Khởi động lại để dùng ngay.'
+              : 'Đã có phiên bản VIPLIKE RADIANT mới với nhiều cải tiến.'}
           </Text>
         </Space>
       </div>
@@ -174,7 +174,7 @@ export const AutoUpdateModal: React.FC = () => {
               fontWeight: 700,
             }}
           >
-            What's new:
+            Có gì mới:
           </Text>
           <Paragraph style={{ color: '#cbd5e1', fontSize: 13, margin: '6px 0 0', whiteSpace: 'pre-line' }}>
             {notes}
@@ -194,7 +194,7 @@ export const AutoUpdateModal: React.FC = () => {
           />
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
             <Text style={{ color: '#64748b', fontSize: 12 }}>
-              <SyncOutlined spin style={{ marginRight: 6 }} /> Downloading...
+              <SyncOutlined spin style={{ marginRight: 6 }} /> Đang tải...
             </Text>
             {totalBytes > 0 && (
               <Text style={{ color: '#94a3b8', fontSize: 12 }}>
@@ -218,7 +218,7 @@ export const AutoUpdateModal: React.FC = () => {
               }}
               onClick={() => setUpdateAvailable(false)}
             >
-              Later
+              Để sau
             </Button>
             <Button
               type="primary"
@@ -232,7 +232,7 @@ export const AutoUpdateModal: React.FC = () => {
               }}
               onClick={handleStartUpdate}
             >
-              Update now
+              Cập nhật ngay
             </Button>
           </>
         )}
@@ -252,7 +252,7 @@ export const AutoUpdateModal: React.FC = () => {
             }}
             onClick={handleRestartNow}
           >
-            Restart now to apply
+            Khởi động lại để áp dụng
           </Button>
         )}
       </div>

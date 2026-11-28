@@ -46,7 +46,7 @@ export const getSystemInfo = async (): Promise<Record<string, any>> => {
     arch: 'web',
     app_version: '2.0.0',
     is_tauri: false,
-    engine: 'Web Browser Mode',
+    engine: 'Chế độ trình duyệt web',
   };
 };
 

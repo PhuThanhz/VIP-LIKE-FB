@@ -5,7 +5,7 @@ export const LEGACY_BUFF_LOGS_STORAGE_KEY = 'toolzutter:buff-engagement-logs';
 
 export const SEEDING_NICHE_PRESETS: Record<string, { label: string; icon: string; templates: string[] }> = {
   GENERAL: {
-    label: 'Social Engagement & Reach',
+    label: 'Tương tác & Tiếp cận mạng xã hội',
     icon: '',
     templates: [
 '{Bài viết chia sẻ rất hay|Nội dung chất lượng quá|Bổ ích ghê} {ad ơi|ạ|nha bạn} {👏|🌟|❤️}',
@@ -16,7 +16,7 @@ export const SEEDING_NICHE_PRESETS: Record<string, { label: string; icon: string
     ],
   },
   FASHION: {
-    label: 'Fashion & Beauty',
+    label: 'Thời trang & Làm đẹp',
     icon: '',
     templates: [
 '{Shop ơi|Ad ơi} {check ib em|tư vấn em với} {size M|màu đen|mẫu này} {ạ|nha shop|với ạ} {❤️|✨|🛍️}',
@@ -27,7 +27,7 @@ export const SEEDING_NICHE_PRESETS: Record<string, { label: string; icon: string
     ],
   },
   FNB: {
-    label: 'Food & Restaurants',
+    label: 'Ăn uống & Nhà hàng',
     icon: '',
     templates: [
 '{Quán mở cửa tới mấy giờ|Menu này giá bao nhiêu|Có cần đặt bàn trước không} {vậy shop|ạ|ạ ad} {🍲|😋|✨}',
@@ -38,7 +38,7 @@ export const SEEDING_NICHE_PRESETS: Record<string, { label: string; icon: string
     ],
   },
   SERVICES: {
-    label: 'Services, Real Estate & Courses',
+    label: 'Dịch vụ, Bất động sản & Khóa học',
     icon: '',
     templates: [
 '{Cho mình xin thông tin chi tiết|Dự án này pháp lý thế nào|Học phí khóa này bao nhiêu} {ạ|vậy ad|ơi shop} {🏢|📋|💡}',
@@ -49,7 +49,7 @@ export const SEEDING_NICHE_PRESETS: Record<string, { label: string; icon: string
     ],
   },
   TECH: {
-    label: 'Tech & Devices',
+    label: 'Công nghệ & Thiết bị',
     icon: '',
     templates: [
 '{Mẫu này còn hàng không shop|Bản này có bảo hành chính hãng không|Có hỗ trợ ship COD không} {ạ|ad ơi|nhé} {📱|⚡|🔥}',
@@ -72,31 +72,31 @@ export const REACTIONS: ReactionOption[] = [
   { key: 'ANGRY', label: 'Angry', shortLabel: 'Angry', emoji: '😡', color: '#e9710f', isRandom: false },
   {
     key: 'RANDOM_POSITIVE',
-    label: 'Natural reaction mix (like • love • care)',
-    shortLabel: 'Natural mix (like/love)',
+    label: 'Cảm xúc tự nhiên (like • love • care)',
+    shortLabel: 'Trộn tự nhiên (like/love)',
     emoji: '',
     color: '#3b82f6',
     isRandom: true,
-    desc: '65% like + 25% love + 10% care (recommended for sales posts)',
+    desc: '65% like + 25% love + 10% care (khuyên dùng cho bài bán hàng)',
   },
   {
     key: 'RANDOM_ALL',
-    label: 'Diverse mix (all Facebook reactions)',
-    shortLabel: 'Diverse mix',
+    label: 'Trộn đa dạng (mọi cảm xúc Facebook)',
+    shortLabel: 'Trộn đa dạng',
     emoji: '',
     color: '#8b5cf6',
     isRandom: true,
-    desc: 'Mixes in Haha and Wow for viral and entertainment posts',
+    desc: 'Thêm Haha và Wow cho bài viral, giải trí',
   },
 ];
 
 /** The single speed level the user picks; each level comes with a default gap and human simulation */
 export const SPEED_PRESETS: { key: SpeedModeKey; name: string; delayMs: number; human: boolean }[] = [
   { key: 'TURBO', name: 'Turbo', delayMs: 1200, human: false },
-  { key: 'FAST', name: 'Very fast', delayMs: 1800, human: false },
-  { key: 'NORMAL', name: 'Standard', delayMs: 2200, human: true },
-  { key: 'SMART', name: 'Auto', delayMs: 2500, human: true },
-  { key: 'SAFE', name: 'Safe', delayMs: 4500, human: true },
+  { key: 'FAST', name: 'Rất nhanh', delayMs: 1800, human: false },
+  { key: 'NORMAL', name: 'Tiêu chuẩn', delayMs: 2200, human: true },
+  { key: 'SMART', name: 'Tự động', delayMs: 2500, human: true },
+  { key: 'SAFE', name: 'An toàn', delayMs: 4500, human: true },
 ];
 
 export const VIA_PAGES_STORAGE_KEY = 'toolzutter:via_fanpages_map_v3';

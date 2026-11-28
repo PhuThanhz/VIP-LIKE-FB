@@ -75,19 +75,19 @@ export const detectContentType = (url?: string): ContentTypeInfo | null => {
     return { type: 'REEL', label: 'Facebook Reel', color: 'purple', icon: '🎬' };
   }
   if (lower.includes('/groups/')) {
-    return { type: 'GROUP', label: 'Group post', color: 'blue', icon: '👥' };
+    return { type: 'GROUP', label: 'Bài trong Group', color: 'blue', icon: '👥' };
   }
   if (lower.includes('/videos/') || lower.includes('fb.watch') || lower.includes('/watch')) {
     return { type: 'VIDEO', label: 'Video Facebook', color: 'volcano', icon: '📺' };
   }
   if (lower.includes('/photos/') || lower.includes('/photo/')) {
-    return { type: 'PHOTO', label: 'Facebook photo', color: 'green', icon: '🖼️' };
+    return { type: 'PHOTO', label: 'Ảnh Facebook', color: 'green', icon: '🖼️' };
   }
   if (lower.includes('/posts/') || lower.includes('/share/p/') || lower.includes('permalink') || lower.includes('fbid=')) {
-    return { type: 'PAGE_POST', label: 'Fanpage/Feed post', color: 'cyan', icon: '📄' };
+    return { type: 'PAGE_POST', label: 'Bài Fanpage/Feed', color: 'cyan', icon: '📄' };
   }
   if (lower.includes('facebook.com') || lower.includes('fb.com')) {
-    return { type: 'STANDARD_POST', label: 'Facebook link', color: 'blue', icon: '🌐' };
+    return { type: 'STANDARD_POST', label: 'Link Facebook', color: 'blue', icon: '🌐' };
   }
   return null;
 };
@@ -99,14 +99,14 @@ export const detectPlatform = (url?: string): { name: string; color: string; ico
   if (lower.includes('facebook.com') || lower.includes('fb.watch') || lower.includes('fb.com')) return { name: 'Facebook', color: 'blue', icon: <FacebookOutlined /> };
   if (lower.includes('threads.net')) return { name: 'Threads', color: 'purple' };
   if (lower.includes('youtube.com') || lower.includes('youtu.be')) return { name: 'YouTube', color: 'red' };
-  if (lower.startsWith('http://') || lower.startsWith('https://')) return { name: 'Web Link', color: 'cyan', icon: <LinkOutlined /> };
+  if (lower.startsWith('http://') || lower.startsWith('https://')) return { name: 'Link web', color: 'cyan', icon: <LinkOutlined /> };
   return null;
 };
 
 const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
   value = '',
   onChange,
-  placeholder = 'Paste a URL here...',
+  placeholder = 'Dán link vào đây...',
   size = 'large',
   className = '',
   disabled = false,
@@ -131,7 +131,7 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
         if (text && text.trim()) {
           const cleaned = autoCleanParams ? cleanSocialUrl(text) : text.trim();
           onChange?.(cleaned);
-          message.success('📋 Link pasted!');
+          message.success('📋 Đã dán link!');
           return;
         }
       } catch {
@@ -186,7 +186,7 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
           disabled={disabled}
           className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-on-accent font-bold rounded-xl shrink-0 px-4 flex items-center gap-1.5 text-xs sm:text-sm shadow-md shadow-indigo-950/40 border border-blue-400/30 transition-all hover:scale-[1.02] active:scale-[0.98] h-10"
         >
-          <span>Paste link</span>
+          <span>Dán link</span>
         </Button>
 
         {addonAfter}
@@ -206,7 +206,7 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
           )}
           {platform && (
             <span className="text-[11px] text-emerald-500 font-medium flex items-center gap-1">
-              <CheckCircleOutlined /> Valid link
+              <CheckCircleOutlined /> Link hợp lệ
             </span>
           )}
         </div>
@@ -217,7 +217,7 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
         title={
           <div className="flex items-center gap-2 text-slate-100 font-bold text-sm">
             <CopyOutlined className="text-blue-400 text-base" />
-            <span>Paste Post Link</span>
+            <span>Dán link bài viết</span>
           </div>
         }
         open={modalVisible}
@@ -226,12 +226,12 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
           if (modalText.trim()) {
             const cleaned = autoCleanParams ? cleanSocialUrl(modalText) : modalText.trim();
             onChange?.(cleaned);
-            message.success('📋 Link pasted!');
+            message.success('📋 Đã dán link!');
           }
           setModalVisible(false);
         }}
-        okText="Paste"
-        cancelText="Cancel"
+        okText="Dán"
+        cancelText="Hủy"
         centered
         width={520}
         className="max-w-[calc(100vw-24px)]"
@@ -239,14 +239,14 @@ const PasteLinkInput: React.FC<PasteLinkInputProps> = ({
       >
         <div className="space-y-3 py-2">
           <div className="text-xs text-slate-300">
-            Long-press the box below and choose <b>"Paste"</b>:
+            Nhấn giữ ô bên dưới và chọn <b>"Dán"</b>:
           </div>
           <Input.TextArea
             rows={3}
             autoFocus
             value={modalText}
             onChange={(e) => setModalText(e.target.value)}
-            placeholder="Paste a Facebook, TikTok or Threads link here..."
+            placeholder="Dán link Facebook, TikTok hoặc Threads vào đây..."
             className="rounded-xl font-mono text-xs p-3"
           />
         </div>

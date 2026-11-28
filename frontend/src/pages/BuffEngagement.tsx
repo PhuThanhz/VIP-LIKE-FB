@@ -194,7 +194,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         <div className="px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="min-w-0 text-sm">
             <div className="text-amber-200 font-medium">
-              {deadViaList.length} Vias need a Cookie update
+              {deadViaList.length} Via cần cập nhật Cookie
             </div>
             <div className="text-xs text-amber-200/70 mt-0.5 truncate">
               {deadViaList
@@ -204,7 +204,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Button size="small" loading={checkingViaHealth} onClick={handleRunViaHealthCheck}>
-              Recheck
+              Kiểm tra lại
             </Button>
             <Button
               size="small"
@@ -214,7 +214,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               onClick={() => openCookieAlertModal(deadViaList[0]?.uid)}
               className="font-semibold shadow-sm"
             >
-              Update Cookie now
+              Cập nhật Cookie ngay
             </Button>
           </div>
         </div>
@@ -226,9 +226,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           <div className="flex items-center gap-2.5">
             <StopOutlined className="text-rose-400 text-base shrink-0" />
             <div>
-              <strong className="text-rose-200 text-xs font-semibold uppercase tracking-wider">System is in Emergency Stop</strong>
+              <strong className="text-rose-200 text-xs font-semibold uppercase tracking-wider">Hệ thống đang dừng khẩn cấp</strong>
               <div className="text-rose-300/80 text-[11px] mt-0.5">
-                All auto queues and Playwright tasks are safely paused ({bmOverview?.system?.emergencyReason || 'By an administrator'}).
+                Toàn bộ hàng đợi tự động và task Playwright đã tạm dừng an toàn ({bmOverview?.system?.emergencyReason || 'Bởi quản trị viên'}).
               </div>
             </div>
           </div>
@@ -239,7 +239,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             onClick={handleResumeSystem}
             className="bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold shrink-0 rounded-lg"
           >
-            Resume now
+            Chạy lại ngay
           </Button>
         </div>
       )}
@@ -249,20 +249,20 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-800/60">
           <div
             role="tablist"
-            aria-label="Engagement feature navigation"
+            aria-label="Điều hướng tính năng tương tác"
             className="inline-flex p-1.5 rounded-2xl bg-slate-900/85 border border-slate-800/90 backdrop-blur-xl shadow-lg shadow-black/25 gap-1.5 overflow-x-auto max-w-full scrollbar-none"
           >
             {[
               {
                 key: 'buff-like',
-                label: 'New',
+                label: 'Tạo mới',
                 icon: PlusCircleOutlined,
                 iconColor: 'text-cyan-400',
                 count: 0,
               },
               {
                 key: 'buff-running',
-                label: 'Live progress',
+                label: 'Tiến độ trực tiếp',
                 icon: ThunderboltFilled,
                 iconColor: 'text-amber-400',
                 count: (autoBuffProgress.status === 'RUNNING' || isBatchRunning || queueItems.some((i) => i.status === 'RUNNING')) ? 1 : 0,
@@ -270,21 +270,21 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
               },
               {
                 key: 'buff-queue',
-                label: 'Queue',
+                label: 'Hàng đợi',
                 icon: ClockCircleOutlined,
                 iconColor: 'text-sky-400',
                 count: queueItems.filter((i) => i.status === 'QUEUED' || i.status === 'RUNNING').length,
               },
               {
                 key: 'buff-history',
-                label: 'History',
+                label: 'Lịch sử',
                 icon: HistoryOutlined,
                 iconColor: 'text-indigo-400',
                 count: 0,
               },
               {
                 key: 'buff-hunter',
-                label: 'Post Hunter',
+                label: 'Săn bài',
                 icon: AimOutlined,
                 iconColor: 'text-rose-400',
                 count: monitors.length,
@@ -349,11 +349,11 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
 
           {/* Right side: Via/Page counts (click to check Vias) + emergency stop while running */}
           <div className="flex items-center gap-2 pr-1 shrink-0">
-            <Tooltip title="Click to check the cookie status of your Vias">
+            <Tooltip title="Bấm để kiểm tra trạng thái cookie của các Via">
               <Button size="small" loading={checkingViaHealth} onClick={handleRunViaHealthCheck} className="text-xs">
                 <span className={`inline-block h-1.5 w-1.5 rounded-full ${bmOverview?.deadVias > 0 ? 'bg-rose-400' : 'bg-emerald-400'}`} />
                 <span className="text-slate-300">{bmOverview?.liveVias ?? fbAccounts.length} Via</span>
-                {bmOverview?.deadVias > 0 && <span className="text-rose-400">· {bmOverview.deadVias} errors</span>}
+                {bmOverview?.deadVias > 0 && <span className="text-rose-400">· {bmOverview.deadVias} lỗi</span>}
                 <span className="text-slate-500">·</span>
                 <span className="text-slate-300">{scannedPages.length} Page</span>
               </Button>
@@ -373,7 +373,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
         items={[
           {
             key: 'buff-like',
-            label: 'Likes & comments',
+            label: 'Like & bình luận',
             children: (
               <CreateBuffTab controller={controller} />
             ),
@@ -383,7 +383,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             label: (
               <span className="flex items-center gap-1.5">
                 <PlayCircleOutlined className="text-blue-400" />
-                <span>Live progress</span>
+                <span>Tiến độ trực tiếp</span>
                 {(autoBuffProgress.status === 'RUNNING' || isBatchRunning || queueItems.some((i) => i.status === 'RUNNING')) && (
                   <span className="relative flex h-2 w-2 ml-0.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
@@ -433,7 +433,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             label: (
               <span className="flex items-center gap-1.5">
                 <ThunderboltOutlined className="text-amber-400" />
-                <span>Auto queue</span>
+                <span>Hàng đợi tự động</span>
                 {queueItems.filter((i) => i.status === 'QUEUED' || i.status === 'RUNNING').length > 0 && (
                   <span className="px-1.5 py-0.2 rounded-md text-[10px] bg-amber-500/20 text-amber-300 font-mono font-bold border border-amber-500/40">
                     {queueItems.filter((i) => i.status === 'QUEUED' || i.status === 'RUNNING').length}
@@ -481,7 +481,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
             label: (
               <span className="flex items-center gap-1.5">
                 <CheckCircleFilled className="text-emerald-400" />
-                <span>Engagement history ({buffLogs.length})</span>
+                <span>Lịch sử tương tác ({buffLogs.length})</span>
               </span>
             ),
             children: (
@@ -500,14 +500,14 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
                   setSelectedReaction(log.reactionType);
                   setActiveTabKey('buff-like');
                   window.scrollTo({ top: 0, behavior: 'smooth' });
-                  message.info('Link reloaded into the form. Pages that already liked will be skipped automatically.');
+                  message.info('Đã nạp lại link vào form. Page đã like sẽ tự được bỏ qua.');
                 }}
               />
             ),
           },
           {
             key: 'buff-hunter',
-            label: `Post Hunter (${monitors.length})`,
+            label: `Săn bài (${monitors.length})`,
             children: (
               <Suspense fallback={<TableSkeleton rows={4} columns={3} />}>
                 <PostHunterTab
@@ -538,9 +538,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           },
           {
             key: 'via-management',
-            label: 'Vias & Fanpages',
+            label: 'Via & Fanpage',
             children: (
-              <Suspense fallback={<PageSkeleton title="Loading Vias & Fanpages..." />}>
+              <Suspense fallback={<PageSkeleton title="Đang tải Via & Fanpage..." />}>
                 <ViaManagementPage
                   accounts={accounts as any[]}
                   loading={loadingAccounts}
@@ -557,9 +557,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           },
           {
             key: 'system-settings',
-            label: 'Config & Telegram',
+            label: 'Cấu hình & Telegram',
             children: (
-              <Suspense fallback={<PageSkeleton title="Loading system config..." />}>
+              <Suspense fallback={<PageSkeleton title="Đang tải cấu hình hệ thống..." />}>
                 <SystemSettingsPage
                   systemSettings={systemSettings}
                   setSystemSettings={setSystemSettings}
@@ -576,9 +576,9 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           },
           {
             key: 'license-management',
-            label: 'Rental & License',
+            label: 'Cho thuê & Bản quyền',
             children: (
-              <Suspense fallback={<PageSkeleton title="Loading license management..." />}>
+              <Suspense fallback={<PageSkeleton title="Đang tải quản lý bản quyền..." />}>
                 <LicenseManagementPage />
               </Suspense>
             ),
@@ -596,7 +596,7 @@ export default function BuffEngagement(props: BuffEngagementProps = {}) {
           setSelectedReaction(log.reactionType);
           setSelectedLogDetail(null);
           setActiveTabKey('buff-like');
-          message.info('Post reloaded into the form to continue.');
+          message.info('Đã nạp lại bài vào form để chạy tiếp.');
         }}
       />
 

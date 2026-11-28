@@ -35,21 +35,21 @@ export default function LikeCapacityCard({ bmOverview }: { bmOverview: any }) {
   return (
     <div className="app-surface p-4 sm:p-5 space-y-3">
       <div className="flex items-baseline justify-between gap-3">
-        <div className="text-sm font-semibold text-slate-100">Like capacity</div>
+        <div className="text-sm font-semibold text-slate-100">Sức chứa like</div>
         <Tooltip
-          title={`Estimate = usable Pages × each Via's 7-day success rate${
-            maxPerPost > 0 ? `, capped at ${maxPerPost} Pages/post per Settings` : ''
-          }. Pages that already liked the post are subtracted at run time.`}
+          title={`Ước tính = số Page dùng được × tỉ lệ thành công 7 ngày của từng Via${
+            maxPerPost > 0 ? `, tối đa ${maxPerPost} Page/bài theo Cài đặt` : ''
+          }. Page đã like bài sẽ được trừ ra khi chạy.`}
         >
-          <span className="text-xs text-slate-500 underline decoration-dotted cursor-help">How it's calculated</span>
+          <span className="text-xs text-slate-500 underline decoration-dotted cursor-help">Cách tính</span>
         </Tooltip>
       </div>
 
       <div>
         <div className="text-2xl font-semibold text-slate-100 leading-none">~{perPost}</div>
         <div className="text-xs text-slate-500 mt-1.5">
-          est. likes/post · {liveUsable} usable Pages
-          {maxPerPost > 0 && estimateTotal > maxPerPost ? ` · capped at ${maxPerPost}` : ''}
+          like/bài (ước tính) · {liveUsable} Page dùng được
+          {maxPerPost > 0 && estimateTotal > maxPerPost ? ` · tối đa ${maxPerPost}` : ''}
         </div>
       </div>
 
@@ -62,23 +62,23 @@ export default function LikeCapacityCard({ bmOverview }: { bmOverview: any }) {
               {r.live ? (
                 <span className="font-semibold text-slate-100 tabular-nums">~{r.estimate}</span>
               ) : (
-                <span className="text-rose-300">Cookie expired</span>
+                <span className="text-rose-300">Cookie hết hạn</span>
               )}
             </div>
             {r.live && (
               <div className="pl-3.5 mt-0.5 text-[11px] text-slate-500 tabular-nums">
                 {r.usable} Page
-                {r.quarantinedPages ? ` · ${r.quarantinedPages} quarantined` : ''}
+                {r.quarantinedPages ? ` · ${r.quarantinedPages} đang cách ly` : ''}
                 {' · '}
                 <Tooltip
                   title={
                     r.rate === null
-                      ? 'Not enough 7-day data yet, assuming 100%'
+                      ? 'Chưa đủ dữ liệu 7 ngày, tạm tính 100%'
                       : `${r.recentSuccess}/${r.recentTried} successful in 7 days`
                   }
                 >
                   <span className={r.rate !== null && r.rate < 0.7 ? 'text-amber-300' : ''}>
-                    {r.rate === null ? 'no data yet' : `${Math.round(r.rate * 100)}% success`}
+                    {r.rate === null ? 'chưa có dữ liệu' : `${Math.round(r.rate * 100)}% thành công`}
                   </span>
                 </Tooltip>
               </div>

@@ -148,23 +148,23 @@ export const REACTION_CONFIG: Record<
   { label: string; emoji: string; color: string; desc: string }
 > = {
   RANDOM_POSITIVE: {
-    label: 'Natural (Like + Love + Care)',
+    label: 'Tự nhiên (Like + Love + Care)',
     emoji: '✨',
     color: 'cyan',
-    desc: 'The system rotates Like, Love and Care as naturally as possible',
+    desc: 'Hệ thống xoay vòng Like, Love và Care tự nhiên nhất có thể',
   },
-  LIKE: { label: 'Like', emoji: '👍', color: 'blue', desc: '100% Like button' },
-  LOVE: { label: 'Love', emoji: '❤️', color: 'rose', desc: '100% red heart' },
-  CARE: { label: 'Care', emoji: '🥰', color: 'amber', desc: '100% hugging heart' },
-  HAHA: { label: 'Haha', emoji: '😆', color: 'gold', desc: '100% laughing' },
-  WOW: { label: 'Wow', emoji: '😮', color: 'purple', desc: '100% surprised' },
-  SAD: { label: 'Sad', emoji: '😢', color: 'blue', desc: '100% sad face' },
-  ANGRY: { label: 'Angry', emoji: '😡', color: 'red', desc: '100% angry' },
+  LIKE: { label: 'Like', emoji: '👍', color: 'blue', desc: '100% nút Like' },
+  LOVE: { label: 'Love', emoji: '❤️', color: 'rose', desc: '100% tim đỏ' },
+  CARE: { label: 'Care', emoji: '🥰', color: 'amber', desc: '100% tim ôm' },
+  HAHA: { label: 'Haha', emoji: '😆', color: 'gold', desc: '100% cười' },
+  WOW: { label: 'Wow', emoji: '😮', color: 'purple', desc: '100% ngạc nhiên' },
+  SAD: { label: 'Sad', emoji: '😢', color: 'blue', desc: '100% buồn' },
+  ANGRY: { label: 'Angry', emoji: '😡', color: 'red', desc: '100% phẫn nộ' },
   RANDOM_ALL: {
-    label: 'Random (all)',
+    label: 'Ngẫu nhiên (tất cả)',
     emoji: '🎲',
     color: 'geekblue',
-    desc: 'Random across all 7 reactions',
+    desc: 'Ngẫu nhiên trong cả 7 cảm xúc',
   },
 };
 
@@ -218,13 +218,13 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
         } else {
           setQuickBatchUrls((prev) => (prev ? `${prev}\n${text.trim()}` : text.trim()));
         }
-        message.success('Facebook link pasted from the clipboard!');
+        message.success('Đã dán link Facebook từ clipboard!');
       } else if (text) {
         if (quickAddMode === 'SINGLE') setQuickTargetUrl(text.trim());
         else setQuickBatchUrls((prev) => (prev ? `${prev}\n${text.trim()}` : text.trim()));
       }
     } catch {
-      message.info('Please press Ctrl+V (or Cmd+V) to paste the link');
+      message.info('Vui lòng nhấn Ctrl+V (hoặc Cmd+V) để dán link');
     }
   };
 
@@ -233,7 +233,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
     if (quickAddMode === 'SINGLE') {
       const trimmedUrl = quickTargetUrl.trim();
       if (!trimmedUrl) {
-        message.warning('Please enter a Facebook post link!');
+        message.warning('Vui lòng nhập link bài Facebook!');
         return;
       }
       setIsSubmittingQuickAdd(true);
@@ -250,17 +250,17 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
         if (res.data?.success) {
           message.success(
             res.data.alreadyQueued
-              ? 'This post is already in the queue'
-              : 'Post added to the processing queue!'
+              ? 'Bài này đã có trong hàng đợi'
+              : 'Đã thêm bài vào hàng đợi xử lý!'
           );
           setIsQuickAddModalOpen(false);
           setQuickTargetUrl('');
           onRefresh();
         } else {
-          message.error(res.data?.error || 'Could not add to the queue');
+          message.error(res.data?.error || 'Không thêm được vào hàng đợi');
         }
       } catch (err: any) {
-        message.error(err.response?.data?.error || err.message || 'Server connection error');
+        message.error(err.response?.data?.error || err.message || 'Lỗi kết nối server');
       } finally {
         setIsSubmittingQuickAdd(false);
       }
@@ -271,7 +271,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
         .filter((l) => l.startsWith('http://') || l.startsWith('https://'));
 
       if (lines.length === 0) {
-        message.warning('Please enter at least 1 valid Facebook link (starting with http/https)!');
+        message.warning('Vui lòng nhập ít nhất 1 link Facebook hợp lệ (bắt đầu bằng http/https)!');
         return;
       }
 
@@ -290,17 +290,17 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           const addedCount = res.data.added?.length || lines.length;
           const skippedCount = res.data.skipped?.length || 0;
           message.success(
-            `Added ${addedCount} posts to the queue!` +
-              (skippedCount > 0 ? ` (skipped ${skippedCount} duplicates)` : '')
+            `Đã thêm ${addedCount} bài vào hàng đợi!` +
+              (skippedCount > 0 ? ` (bỏ qua ${skippedCount} bài trùng)` : '')
           );
           setIsQuickAddModalOpen(false);
           setQuickBatchUrls('');
           onRefresh();
         } else {
-          message.error(res.data?.error || 'Error adding the post list');
+          message.error(res.data?.error || 'Lỗi khi thêm danh sách bài');
         }
       } catch (err: any) {
-        message.error(err.response?.data?.error || err.message || 'Server connection error');
+        message.error(err.response?.data?.error || err.message || 'Lỗi kết nối server');
       } finally {
         setIsSubmittingQuickAdd(false);
       }
@@ -388,7 +388,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
 
   const handleCopyLink = (url: string) => {
     navigator.clipboard.writeText(url);
-    message.success('Post link copied!');
+    message.success('Đã sao chép link bài!');
   };
 
   const formatScheduleTime = (runAfterStr?: string) => {
@@ -400,7 +400,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
     if (diffSec <= 0) {
       return (
         <span className="text-emerald-400 font-semibold flex items-center gap-1">
-          Ready to run
+          Sẵn sàng chạy
         </span>
       );
     }
@@ -422,7 +422,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
   // Queue table columns
   const columns: ColumnsType<QueueTask> = [
     {
-      title: 'Status',
+      title: 'Trạng thái',
       key: 'status',
       width: 140,
       render: (_, task) => {
@@ -431,7 +431,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             <div className="space-y-1">
               <Tag className="font-medium text-xs py-0.5 px-2 rounded-md m-0 bg-blue-500/10 border-blue-500/30 text-blue-300">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse mr-1.5 align-middle" />
-                Running
+                Đang chạy
               </Tag>
               {task.progress && (
                 <div className="text-[11px] font-mono text-cyan-300">
@@ -447,7 +447,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             <div className="space-y-1">
               <Tag className="font-medium text-xs py-0.5 px-2 rounded-md m-0 bg-amber-500/10 border-amber-500/30 text-amber-300">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 mr-1.5 align-middle" />
-                {queueIndex >= 0 ? `Queued #${queueIndex + 1}` : 'Waiting'}
+                {queueIndex >= 0 ? `Xếp hàng #${queueIndex + 1}` : 'Đang chờ'}
               </Tag>
               <div className="text-[10px] text-slate-400 font-mono">
                 {formatScheduleTime(task.runAfter)}
@@ -459,7 +459,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           return (
             <Tag className="font-medium text-xs py-0.5 px-2 rounded-md m-0 bg-emerald-500/10 border-emerald-500/30 text-emerald-300">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 align-middle" />
-              Completed
+              Hoàn tất
             </Tag>
           );
         }
@@ -467,7 +467,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           return (
             <Tag className="font-medium text-xs py-0.5 px-2 rounded-md m-0 bg-amber-500/10 border-amber-500/30 text-amber-300">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 mr-1.5 align-middle" />
-              Partially done
+              Xong một phần
             </Tag>
           );
         }
@@ -475,7 +475,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           return (
             <Tag className="font-medium text-xs py-0.5 px-2 rounded-md m-0 bg-slate-500/10 border-slate-500/30 text-slate-300">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-400 mr-1.5 align-middle" />
-              Paused
+              Tạm dừng
             </Tag>
           );
         }
@@ -483,20 +483,20 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           return (
             <Tag className="font-medium text-xs py-0.5 px-2 rounded-md m-0 bg-purple-500/10 border-purple-500/30 text-purple-300">
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-purple-400 mr-1.5 align-middle" />
-              Needs review
+              Cần xem lại
             </Tag>
           );
         }
         return (
           <Tag className="font-medium text-xs py-0.5 px-2 rounded-md m-0 bg-rose-500/10 border-rose-500/30 text-rose-300">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-rose-400 mr-1.5 align-middle" />
-            Failed
+            Thất bại
           </Tag>
         );
       },
     },
     {
-      title: 'Facebook Post & Source',
+      title: 'Bài Facebook & Nguồn',
       dataIndex: 'targetUrl',
       key: 'targetUrl',
       render: (url: string, task) => {
@@ -512,12 +512,12 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                 className="text-[10px] m-0 font-medium border-0 rounded px-1.5 py-0"
               >
                 {isHunter
-                  ? `Post Hunter${task.monitorName ? `: ${task.monitorName}` : ''}`
+                  ? `Săn bài${task.monitorName ? `: ${task.monitorName}` : ''}`
                   : isAutoOwn
-                  ? `Self-posted`
+                  ? `Tự đăng`
                   : isBatch
-                  ? `Bulk add`
-                  : `Manual`}
+                  ? `Thêm hàng loạt`
+                  : `Thủ công`}
               </Tag>
               {task.speedMode && (
                 <Tag
@@ -544,7 +544,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
               >
                 {url}
               </a>
-              <Tooltip title="Copy link">
+              <Tooltip title="Sao chép link">
                 <Button
                   type="text"
                   size="small"
@@ -552,7 +552,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                   onClick={() => handleCopyLink(url)}
                 />
               </Tooltip>
-              <Tooltip title="Open the post on Facebook">
+              <Tooltip title="Mở bài trên Facebook">
                 <Button
                   type="text"
                   size="small"
@@ -566,7 +566,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
       },
     },
     {
-      title: 'Reaction & Page Count',
+      title: 'Cảm xúc & Số Page',
       key: 'config',
       width: 200,
       render: (_, task) => {
@@ -588,16 +588,16 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             </div>
             <div className="flex items-center gap-1.5 flex-wrap">
               <Tag color="blue" className="text-[10px] m-0 font-mono border-0 rounded px-1.5 py-0">
-                {task.targetLikes === 'ALL' ? 'All Pages' : `${task.targetLikes || 30} Pages`}
+                {task.targetLikes === 'ALL' ? 'Tất cả Page' : `${task.targetLikes || 30} Page`}
               </Tag>
               {task.enableComment && (
                 <Tag color="purple" className="text-[10px] m-0 font-mono border-0 rounded px-1.5 py-0">
-                  {commentCount > 0 ? `${commentCount} comments` : 'Comments'}
+                  {commentCount > 0 ? `${commentCount} comments` : 'Bình luận'}
                 </Tag>
               )}
               {task.enableShare && (
                 <Tag color="green" className="text-[10px] m-0 font-mono border-0 rounded px-1.5 py-0">
-                  Share
+                  Chia sẻ
                 </Tag>
               )}
             </div>
@@ -606,7 +606,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
       },
     },
     {
-      title: 'Progress / Result',
+      title: 'Tiến độ / Kết quả',
       key: 'progress',
       width: 180,
       render: (_, task) => {
@@ -636,8 +636,8 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                 const t = getRunTiming(task, now);
                 return t ? (
                   <div className="text-[11px] text-slate-500 tabular-nums">
-                    Running for {formatDuration(t.elapsed)}
-                    {t.remaining !== null && ` · about ${formatDuration(t.remaining)} left`}
+                    Đã chạy {formatDuration(t.elapsed)}
+                    {t.remaining !== null && ` · còn khoảng ${formatDuration(t.remaining)}`}
                   </div>
                 ) : null;
               })()}
@@ -658,11 +658,11 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
               </div>
               {autoRefilled > 0 && (
                 <div className="text-[10px] text-amber-400/90 font-medium">
-                  ⚡ Auto-replaced {autoRefilled} failed Pages
+                  ⚡ Tự thay {autoRefilled} Page lỗi
                 </div>
               )}
               {duration && (
-                <div className="text-[11px] text-slate-500">Duration: {duration}</div>
+                <div className="text-[11px] text-slate-500">Thời lượng: {duration}</div>
               )}
               {task.result?.note && (
                 <div className="text-[10px] text-slate-400 italic truncate max-w-[170px]" title={task.result.note}>
@@ -684,14 +684,14 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
         }
 
         if (task.status === 'STOPPED') {
-          return <span className="text-slate-400 text-xs">Task stopped</span>;
+          return <span className="text-slate-400 text-xs">Task đã dừng</span>;
         }
 
-        return <span className="text-slate-500 text-xs">Waiting for its turn</span>;
+        return <span className="text-slate-500 text-xs">Chờ tới lượt</span>;
       },
     },
     {
-      title: 'Actions',
+      title: 'Thao tác',
       key: 'actions',
       width: 170,
       align: 'right',
@@ -699,24 +699,24 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
         <div className="flex items-center justify-end gap-1.5">
           {/* Details button */}
           <Button size="small" type="text" onClick={() => setDetailModalTask(task)} className="text-xs text-slate-300 px-2">
-            Details
+            Chi tiết
           </Button>
 
           {task.status !== 'QUEUED' && task.status !== 'RUNNING' && onViewHistory && (
-            <Tooltip title="View details in the History tab">
+            <Tooltip title="Xem chi tiết ở tab Lịch sử">
               <Button
                 size="small"
                 icon={<HistoryOutlined />}
                 onClick={() => onViewHistory(task.targetUrl)}
                 className="text-xs px-2 text-cyan-300 border-cyan-800/60 bg-cyan-950/40 hover:bg-cyan-900/50"
               >
-                History
+                Lịch sử
               </Button>
             </Tooltip>
           )}
 
           {task.status === 'QUEUED' && (
-            <Tooltip title="Move to the top and run immediately">
+            <Tooltip title="Đưa lên đầu và chạy ngay">
               <Button
                 size="small"
                 type="primary"
@@ -724,25 +724,25 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                 onClick={() => onRunNow(task.id)}
                 className="text-xs px-2.5 bg-amber-600 hover:bg-amber-500 border-none font-semibold text-white shadow-sm flex items-center gap-1"
               >
-                Run now
+                Chạy ngay
               </Button>
             </Tooltip>
           )}
 
           {(task.status === 'FAILED' || task.status === 'DEAD_LETTER' || task.status === 'STOPPED' || task.status === 'PARTIAL') && (
-            <Tooltip title="Run this post again">
+            <Tooltip title="Chạy lại bài này">
               <Button
                 size="small"
                 onClick={() => onRetry(task.id)}
                 className="text-xs px-2.5 text-amber-300 border-amber-800/60 bg-amber-950/40 hover:bg-amber-900/50"
               >
-                Retry
+                Thử lại
               </Button>
             </Tooltip>
           )}
 
           {(task.status === 'RUNNING' || task.status === 'QUEUED') && onStop && (
-            <Tooltip title={task.stopRequested ? 'Waiting to stop after the current turn' : 'Stop just this post'}>
+            <Tooltip title={task.stopRequested ? 'Chờ dừng sau lượt hiện tại' : 'Chỉ dừng bài này'}>
               <Button
                 size="small"
                 danger
@@ -752,12 +752,12 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                 onClick={() => onStop(task.id)}
                 className="text-xs px-2.5"
               >
-                {task.stopRequested ? 'Stopping...' : 'Stop'}
+                {task.stopRequested ? 'Đang dừng...' : 'Dừng'}
               </Button>
             </Tooltip>
           )}
 
-          <Tooltip title="Remove from queue">
+          <Tooltip title="Xóa khỏi hàng đợi">
             <Button
               type="text"
               size="small"
@@ -779,40 +779,40 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-3 flex-wrap">
-              <h2 className="text-base sm:text-lg font-semibold text-slate-100 m-0">Auto queue</h2>
+              <h2 className="text-base sm:text-lg font-semibold text-slate-100 m-0">Hàng đợi tự động</h2>
               <span
                 className={`inline-flex items-center gap-1.5 text-xs font-medium ${
                   isEmergencyStopped ? 'text-rose-300' : 'text-emerald-300'
                 }`}
               >
                 <span className={`w-1.5 h-1.5 rounded-full ${isEmergencyStopped ? 'bg-rose-400' : 'bg-emerald-400'}`} />
-                {isEmergencyStopped ? 'Paused' : 'Active'}
+                {isEmergencyStopped ? 'Tạm dừng' : 'Đang hoạt động'}
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/25">
-                ⚡ Multi-process: {maxParallelTasks} posts in parallel
+                ⚡ Đa tiến trình: {maxParallelTasks} bài song song
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-1 mb-0 max-w-2xl">
-              The system runs up to {maxParallelTasks} posts at once on independent Vias, split evenly across {scannedPages.length || totalAvailablePages} Pages.
+              Hệ thống chạy tối đa {maxParallelTasks} bài cùng lúc trên các Via độc lập, chia đều trên {scannedPages.length || totalAvailablePages} Page.
             </p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap shrink-0">
             {completedItems.length > 0 && (
               <Button type="text" onClick={onClearCompleted} className="text-slate-400 hover:text-slate-200">
-                Clear finished ({completedItems.length})
+                Dọn bài đã xong ({completedItems.length})
               </Button>
             )}
             {queueItems.length > 0 && onClearAll && (
               <Button type="text" danger onClick={onClearAll} className="hover:bg-rose-950/40">
-                Delete all ({queueItems.length})
+                Xóa tất cả ({queueItems.length})
               </Button>
             )}
             <Button onClick={onRefresh} icon={<ReloadOutlined />}>
-              Refresh
+              Làm mới
             </Button>
             {isEmergencyStopped && onResume && (
-              <Button onClick={onResume} className="border-emerald-500 text-emerald-400">Resume</Button>
+              <Button onClick={onResume} className="border-emerald-500 text-emerald-400">Chạy lại</Button>
             )}
             <Button
               type="primary"
@@ -820,7 +820,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
               onClick={() => setIsQuickAddModalOpen(true)}
               className="font-semibold bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 border-none shadow-sm flex items-center gap-1.5"
             >
-              ⚡ Quick add to queue
+              ⚡ Thêm nhanh vào hàng đợi
             </Button>
             {onCreateNew && (
               <Button
@@ -828,7 +828,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                 onClick={onCreateNew}
                 className="text-slate-300 border-slate-700 hover:border-slate-500 text-xs"
               >
-                Full settings
+                Cài đặt đầy đủ
               </Button>
             )}
           </div>
@@ -848,7 +848,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-slate-400">
-                Running
+                Đang chạy
               </span>
               {runningItems.length > 0 && (
                 <span className="relative flex h-2.5 w-2.5">
@@ -859,7 +859,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             </div>
             <div className="text-2xl font-semibold text-slate-100 mt-1 flex items-baseline gap-2">
               <span>{runningItems.length}</span>
-              <span className="text-xs font-normal text-slate-400">posts running</span>
+              <span className="text-xs font-normal text-slate-400">bài đang chạy</span>
             </div>
           </div>
         </Col>
@@ -875,12 +875,12 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-slate-400">
-                Waiting
+                Đang chờ
               </span>
             </div>
             <div className="text-2xl font-semibold text-slate-100 mt-1 flex items-baseline gap-2">
               <span>{queuedItems.length}</span>
-              <span className="text-xs font-normal text-slate-400">posts in queue</span>
+              <span className="text-xs font-normal text-slate-400">bài trong hàng đợi</span>
             </div>
           </div>
         </Col>
@@ -896,12 +896,12 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-slate-400">
-                Completed
+                Hoàn tất
               </span>
             </div>
             <div className="text-2xl font-semibold text-slate-100 mt-1 flex items-baseline gap-2">
               <span>{completedItems.length}</span>
-              <span className="text-xs font-normal text-slate-400">posts done</span>
+              <span className="text-xs font-normal text-slate-400">bài đã xong</span>
             </div>
           </div>
         </Col>
@@ -917,12 +917,12 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-slate-400">
-                Failed
+                Thất bại
               </span>
             </div>
             <div className="text-2xl font-semibold text-slate-100 mt-1 flex items-baseline gap-2">
               <span>{failedItems.length}</span>
-              <span className="text-xs font-normal text-slate-400">need review</span>
+              <span className="text-xs font-normal text-slate-400">cần xem lại</span>
             </div>
           </div>
         </Col>
@@ -940,10 +940,10 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                   <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
                 </span>
                 <span className="text-sm font-bold text-slate-100">
-                  Live Buffing Progress ({runningItems.length} posts)
+                  Tiến độ buff trực tiếp ({runningItems.length} bài)
                 </span>
               </div>
-              <span className="text-xs font-mono text-cyan-300">Auto-updates every 3s</span>
+              <span className="text-xs font-mono text-cyan-300">Tự cập nhật mỗi 3s</span>
             </div>
           }
         >
@@ -975,7 +975,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                     </div>
                     <div className="flex items-center gap-2">
                       <Button size="small" type="text" onClick={() => setDetailModalTask(task)} className="text-xs text-slate-300">
-                        Details
+                        Chi tiết
                       </Button>
                       <div className="text-xs font-mono text-cyan-300 font-bold shrink-0 text-right tabular-nums">
                         <div>{done} / {total} Page ({pct}%)</div>
@@ -984,7 +984,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                           return t ? (
                             <div className="font-normal text-slate-400">
                               {formatDuration(t.elapsed)}
-                              {t.remaining !== null && ` · ~${formatDuration(t.remaining)} left`}
+                              {t.remaining !== null && ` · còn ~${formatDuration(t.remaining)}`}
                             </div>
                           ) : null;
                         })()}
@@ -1015,7 +1015,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-1">
             <div className="flex items-center gap-2">
               <span className="text-sm font-bold text-slate-100">
-                Posts
+                Bài viết
               </span>
               <Badge
                 count={filteredItems.length}
@@ -1026,7 +1026,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
 
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <Input
-                placeholder="Search post links..."
+                placeholder="Tìm link bài..."
                 prefix={<SearchOutlined className="text-slate-400" />}
                 value={searchKeyword}
                 onChange={(e) => setSearchKeyword(e.target.value)}
@@ -1044,11 +1044,11 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             value={filterStatus}
             onChange={(val) => setFilterStatus(val as FilterStatus)}
             options={[
-              { label: `All (${queueItems.length})`, value: 'ALL' },
-              { label: `Running (${runningItems.length})`, value: 'RUNNING' },
-              { label: `Waiting (${queuedItems.length})`, value: 'QUEUED' },
-              { label: `Completed (${completedItems.length})`, value: 'COMPLETED' },
-              { label: `Failed (${failedItems.length})`, value: 'FAILED' },
+              { label: `Tất cả (${queueItems.length})`, value: 'ALL' },
+              { label: `Đang chạy (${runningItems.length})`, value: 'RUNNING' },
+              { label: `Đang chờ (${queuedItems.length})`, value: 'QUEUED' },
+              { label: `Đã xong (${completedItems.length})`, value: 'COMPLETED' },
+              { label: `Thất bại (${failedItems.length})`, value: 'FAILED' },
             ]}
             className="bg-slate-950 border border-slate-800 text-xs"
           />
@@ -1063,7 +1063,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             pageSize: 10,
             showSizeChanger: true,
             pageSizeOptions: ['10', '20', '50'],
-            showTotal: (total) => `${total} posts in total`,
+            showTotal: (total) => `Tổng ${total} bài`,
           }}
           scroll={{ x: 920 }}
           className="ant-table-dark-custom"
@@ -1071,9 +1071,9 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             emptyText: (
               <div className="py-16 text-center text-slate-400 text-xs space-y-3">
                 <FieldTimeOutlined className="text-3xl text-slate-600 block mb-1" />
-                <div className="font-semibold text-slate-300 text-sm">The queue is empty</div>
+                <div className="font-semibold text-slate-300 text-sm">Hàng đợi trống</div>
                 <p className="max-w-md mx-auto text-slate-500">
-                  No posts in the queue yet. You can quick-add posts right here!
+                  Chưa có bài nào trong hàng đợi. Bạn có thể thêm nhanh ngay tại đây!
                 </p>
                 <div>
                   <Button
@@ -1082,7 +1082,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                     onClick={() => setIsQuickAddModalOpen(true)}
                     className="font-semibold bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 border-none shadow-sm text-xs"
                   >
-                    ⚡ Quick-add posts to the queue
+                    ⚡ Thêm nhanh bài vào hàng đợi
                   </Button>
                 </div>
               </div>
@@ -1096,14 +1096,14 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
         title={
           <div className="flex items-center gap-2 text-base font-bold text-slate-100">
             <UnorderedListOutlined className="text-cyan-400" />
-            <span>Buff Run Details & Fanpage List</span>
+            <span>Chi tiết lượt buff & Danh sách Fanpage</span>
           </div>
         }
         open={Boolean(detailModalTask)}
         onCancel={() => setDetailModalTask(null)}
         footer={[
           <Button key="close" onClick={() => setDetailModalTask(null)} className="text-xs">
-            Close
+            Đóng
           </Button>,
           detailModalTask?.status !== 'QUEUED' && detailModalTask?.status !== 'RUNNING' && onViewHistory && (
             <Button
@@ -1117,7 +1117,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
               }}
               className="bg-cyan-600 hover:bg-cyan-500 text-xs font-semibold"
             >
-              View in History
+              Xem trong Lịch sử
             </Button>
           ),
           detailModalTask?.status === 'QUEUED' && (
@@ -1131,7 +1131,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
               }}
               className="bg-amber-600 hover:bg-amber-500 text-xs"
             >
-              Run now
+              Chạy ngay
             </Button>
           ),
         ]}
@@ -1143,7 +1143,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             {/* Post info */}
             <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-300">Facebook Post Link:</span>
+                <span className="font-bold text-slate-300">Link bài Facebook:</span>
                 <div className="flex items-center gap-2">
                   <Button
                     size="small"
@@ -1151,7 +1151,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                     onClick={() => handleCopyLink(detailModalTask.targetUrl)}
                     className="text-[11px]"
                   >
-                    Copy
+                    Sao chép
                   </Button>
                   <Button
                     size="small"
@@ -1160,7 +1160,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                     onClick={() => window.open(detailModalTask.targetUrl, '_blank')}
                     className="text-[11px] bg-blue-600"
                   >
-                    Open post
+                    Mở bài
                   </Button>
                 </div>
               </div>
@@ -1173,16 +1173,16 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             <Row gutter={[12, 12]}>
               <Col xs={12} sm={6}>
                 <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Status</div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Trạng thái</div>
                   <div className="mt-1 font-bold">
                     {detailModalTask.status === 'RUNNING' ? (
-                      <Tag color="processing" icon={<LoadingOutlined spin />}>Buffing</Tag>
+                      <Tag color="processing" icon={<LoadingOutlined spin />}>Đang buff</Tag>
                     ) : detailModalTask.status === 'QUEUED' ? (
-                      <Tag color="warning">Queued</Tag>
+                      <Tag color="warning">Đã xếp hàng</Tag>
                     ) : detailModalTask.status === 'COMPLETED' ? (
-                      <Tag color="success">Completed</Tag>
+                      <Tag color="success">Hoàn tất</Tag>
                     ) : (
-                      <Tag color="error">Failed</Tag>
+                      <Tag color="error">Thất bại</Tag>
                     )}
                   </div>
                 </div>
@@ -1190,7 +1190,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
 
               <Col xs={12} sm={6}>
                 <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Reaction</div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Cảm xúc</div>
                   <div className="mt-1 font-semibold text-slate-200 flex items-center gap-1">
                     <span>{REACTION_CONFIG[detailModalTask.reactionType || 'RANDOM_POSITIVE']?.emoji}</span>
                     <span className="truncate">
@@ -1202,16 +1202,16 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
 
               <Col xs={12} sm={6}>
                 <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Like Count</div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Số like</div>
                   <div className="mt-1 font-mono font-bold text-blue-400">
-                    {detailModalTask.targetLikes === 'ALL' ? 'All Pages' : `${detailModalTask.targetLikes || 30} Pages`}
+                    {detailModalTask.targetLikes === 'ALL' ? 'Tất cả Page' : `${detailModalTask.targetLikes || 30} Page`}
                   </div>
                 </div>
               </Col>
 
               <Col xs={12} sm={6}>
                 <div className="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800">
-                  <div className="text-[10px] text-slate-400 font-bold uppercase">Scheduled</div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Lịch chạy</div>
                   <div className="mt-1 font-mono text-amber-400 font-semibold truncate">
                     {detailModalTask.runAfter ? new Date(detailModalTask.runAfter).toLocaleTimeString() : '—'}
                   </div>
@@ -1223,15 +1223,14 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             {detailModalTask.result && (
               <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/30 flex items-center justify-between">
                 <div>
-                  <span className="font-bold text-emerald-300">Result:</span>
+                  <span className="font-bold text-emerald-300">Kết quả:</span>
                   <span className="text-slate-300 ml-2">
-                    Success <strong>{detailModalTask.result.success}</strong> / {detailModalTask.result.total} Pages
-                    (Failed: {detailModalTask.result.failed})
+                    Thành công <strong>{detailModalTask.result.success}</strong> / {detailModalTask.result.total} Page (Lỗi: {detailModalTask.result.failed})
                   </span>
                 </div>
                 {detailModalTask.result.durationSec && (
                   <span className="font-mono text-slate-400">
-                    Duration: {formatDuration(detailModalTask.result.durationSec)}
+                    Thời lượng: {formatDuration(detailModalTask.result.durationSec)}
                   </span>
                 )}
               </div>
@@ -1241,10 +1240,10 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-bold text-slate-200">
-                  Per-Fanpage Activity (
-                  {detailModalTask.pageDetails?.length || 0} entries):
+                  Hoạt động từng Fanpage (
+                  {detailModalTask.pageDetails?.length || 0} mục):
                 </span>
-                <span className="text-[11px] text-slate-400">Recorded in real time</span>
+                <span className="text-[11px] text-slate-400">Ghi nhận theo thời gian thực</span>
               </div>
 
               {detailModalTask.pageDetails && detailModalTask.pageDetails.length > 0 ? (
@@ -1253,10 +1252,10 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                     <thead className="bg-slate-900 text-slate-400 text-[11px] uppercase border-b border-slate-800 sticky top-0">
                       <tr>
                         <th className="p-2">#</th>
-                        <th className="p-2">Fanpage Con</th>
-                        <th className="p-2">Reaction</th>
-                        <th className="p-2">Status</th>
-                        <th className="p-2">Time</th>
+                        <th className="p-2">Fanpage con</th>
+                        <th className="p-2">Cảm xúc</th>
+                        <th className="p-2">Trạng thái</th>
+                        <th className="p-2">Thời gian</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
@@ -1272,11 +1271,11 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                           <td className="p-2">
                             {item.status === 'SUCCESS' ? (
                               <Tag color="success" className="text-[10px] m-0 border-0">
-                                ✅ Success
+                                ✅ Thành công
                               </Tag>
                             ) : (
                               <Tag color="error" className="text-[10px] m-0 border-0">
-                                ❌ {item.error || 'Error'}
+                                ❌ {item.error || 'Lỗi'}
                               </Tag>
                             )}
                           </td>
@@ -1289,8 +1288,8 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
               ) : (
                 <div className="p-6 text-center text-slate-500 bg-slate-900/40 rounded-lg border border-slate-800/80">
                   {detailModalTask.status === 'QUEUED'
-                    ? 'The post is in the queue. When it runs, each Fanpage that likes it will show up here live.'
-                    : 'No detailed log for this post yet.'}
+                    ? 'Bài đang trong hàng đợi. Khi chạy, từng Fanpage like bài sẽ hiện trực tiếp ở đây.'
+                    : 'Bài này chưa có log chi tiết.'}
                 </div>
               )}
             </div>
@@ -1306,9 +1305,9 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
               <ThunderboltOutlined className="text-base" />
             </div>
             <div>
-              <div className="text-sm sm:text-base font-bold">Quick-Add Posts To The Queue</div>
+              <div className="text-sm sm:text-base font-bold">Thêm nhanh bài vào hàng đợi</div>
               <div className="text-[11px] font-normal text-slate-400">
-                Automatically schedules & assigns Fanpages to buff when its turn comes
+                Tự lên lịch & phân Fanpage để buff khi tới lượt
               </div>
             </div>
           </div>
@@ -1322,7 +1321,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             disabled={isSubmittingQuickAdd}
             className="text-xs"
           >
-            Close
+            Đóng
           </Button>,
           <Button
             key="submit"
@@ -1332,7 +1331,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             onClick={handleQuickAddSubmit}
             className="font-semibold bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 border-none text-xs"
           >
-            {isSubmittingQuickAdd ? 'Adding...' : '⚡ Add to Queue Now'}
+            {isSubmittingQuickAdd ? 'Đang thêm...' : '⚡ Thêm vào hàng đợi ngay'}
           </Button>,
         ]}
         width={680}
@@ -1345,8 +1344,8 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             value={quickAddMode}
             onChange={(val) => setQuickAddMode(val as 'SINGLE' | 'BATCH')}
             options={[
-              { label: '⚡ One post link', value: 'SINGLE' },
-              { label: '📋 Add many links at once (Batch)', value: 'BATCH' },
+              { label: '⚡ Một link bài', value: 'SINGLE' },
+              { label: '📋 Thêm nhiều link cùng lúc', value: 'BATCH' },
             ]}
             className="bg-slate-950 border border-slate-800 text-xs p-1"
           />
@@ -1356,7 +1355,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-semibold text-slate-200">
-                  Facebook post link:
+                  Link bài Facebook:
                 </label>
                 <Button
                   size="small"
@@ -1364,7 +1363,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                   onClick={handlePasteQuickUrl}
                   className="text-cyan-400 hover:text-cyan-300 text-xs p-0 h-auto"
                 >
-                  📋 Paste from clipboard
+                  📋 Dán từ clipboard
                 </Button>
               </div>
               <Input
@@ -1380,7 +1379,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-semibold text-slate-200">
-                  Facebook links (1 per line):
+                  Link Facebook (mỗi dòng 1 link):
                 </label>
                 <div className="flex items-center gap-2">
                   <Button
@@ -1389,10 +1388,10 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
                     onClick={handlePasteQuickUrl}
                     className="text-cyan-400 hover:text-cyan-300 text-xs p-0 h-auto"
                   >
-                    📋 Paste from clipboard
+                    📋 Dán từ clipboard
                   </Button>
                   <span className="text-[11px] text-cyan-400 font-mono">
-                    {quickBatchUrls.split('\n').filter((l) => l.trim().startsWith('http')).length} valid links
+                    {quickBatchUrls.split('\n').filter((l) => l.trim().startsWith('http')).length} link hợp lệ
                   </span>
                 </div>
               </div>
@@ -1410,21 +1409,21 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-200">
-                Like target per post:
+                Mục tiêu like mỗi bài:
               </label>
               <span className="text-xs font-bold text-amber-400 font-mono">
                 {quickTargetLikes === 'ALL'
-                  ? `All Pages (${scannedPages.length || totalAvailablePages} Pages)`
+                  ? `Tất cả Page (${scannedPages.length || totalAvailablePages} Page)`
                   : `${quickTargetLikes} Like`}
               </span>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               {[
-                { value: 30, label: '30 Likes', hint: 'Starter' },
-                { value: 50, label: '50 Likes', hint: 'Popular' },
-                { value: 100, label: '100 Likes', hint: 'Standard' },
+                { value: 30, label: '30 like', hint: 'Khởi động' },
+                { value: 50, label: '50 like', hint: 'Phổ biến' },
+                { value: 100, label: '100 like', hint: 'Tiêu chuẩn' },
                 { value: 200, label: '200 Like', hint: 'KPI Cao' },
-                { value: 'ALL', label: '👑 All Pages', hint: 'Entire fleet' },
+                { value: 'ALL', label: '👑 Tất cả Page', hint: 'Toàn bộ Page' },
               ].map((opt) => {
                 const isSelected = quickTargetLikes === opt.value;
                 return (
@@ -1448,12 +1447,12 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
 
           {/* Reaction */}
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-200">Reaction:</label>
+            <label className="text-xs font-semibold text-slate-200">Cảm xúc:</label>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
-                { val: 'RANDOM_POSITIVE', label: '✨ Natural', desc: 'Like + Love + Care' },
-                { val: 'LIKE', label: '👍 Like', desc: '100% blue Like' },
-                { val: 'LOVE', label: '❤️ Love', desc: '100% red heart' },
+                { val: 'RANDOM_POSITIVE', label: '✨ Tự nhiên', desc: 'Like + Love + Care' },
+                { val: 'LIKE', label: '👍 Like', desc: '100% Like xanh' },
+                { val: 'LOVE', label: '❤️ Love', desc: '100% tim đỏ' },
                 { val: 'CARE', label: '🥰 Care', desc: '100% Care' },
               ].map((item) => (
                 <button
@@ -1478,18 +1477,18 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             <Col xs={24} sm={12}>
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-200">
-                  Start schedule:
+                  Lịch bắt đầu:
                 </label>
                 <Select
                   value={quickDelayMinutes}
                   onChange={setQuickDelayMinutes}
                   className="w-full"
                   options={[
-                    { label: '⚡ Run as soon as there is a slot (0 min)', value: 0 },
-                    { label: '⏱️ Wait 5 minutes before starting', value: 5 },
-                    { label: '⏱️ Wait 10 minutes before starting', value: 10 },
-                    { label: '⏱️ Wait 15 minutes before starting', value: 15 },
-                    { label: '⏱️ Wait 30 minutes before starting', value: 30 },
+                    { label: '⚡ Chạy ngay khi có chỗ trống (0 phút)', value: 0 },
+                    { label: '⏱️ Chờ 5 phút rồi chạy', value: 5 },
+                    { label: '⏱️ Chờ 10 phút rồi chạy', value: 10 },
+                    { label: '⏱️ Chờ 15 phút rồi chạy', value: 15 },
+                    { label: '⏱️ Chờ 30 phút rồi chạy', value: 30 },
                   ]}
                 />
               </div>
@@ -1498,17 +1497,17 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
             <Col xs={24} sm={12}>
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-200">
-                  Processing speed:
+                  Tốc độ xử lý:
                 </label>
                 <Select
                   value={quickSpeedMode}
                   onChange={setQuickSpeedMode}
                   className="w-full"
                   options={[
-                    { label: '🚀 FAST — High speed (2.0s)', value: 'FAST' },
-                    { label: '⚖️ NORMAL — Fast & stable (Recommended)', value: 'NORMAL' },
-                    { label: '🛡️ SMART — Adaptive (3.0s+)', value: 'SMART' },
-                    { label: '🐢 SAFE — Conservative spacing (5.5s)', value: 'SAFE' },
+                    { label: '🚀 NHANH — Tốc độ cao (2.0s)', value: 'FAST' },
+                    { label: '⚖️ THƯỜNG — Nhanh & ổn định (Khuyên dùng)', value: 'NORMAL' },
+                    { label: '🛡️ THÔNG MINH — Tự điều chỉnh (3.0s+)', value: 'SMART' },
+                    { label: '🐢 AN TOÀN — Giãn cách nhiều (5.5s)', value: 'SAFE' },
                   ]}
                 />
               </div>
@@ -1518,7 +1517,7 @@ export const BuffQueueTab: React.FC<BuffQueueTabProps> = ({
           <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-800 text-[11px] text-slate-400 flex items-center gap-2">
             <span className="text-amber-400 text-sm">💡</span>
             <span>
-              Posts are queued and run automatically. The system auto-replaces any Page that is checkpointed or hidden.
+              Bài được xếp hàng và chạy tự động. Hệ thống tự thay mọi Page bị checkpoint hoặc bị ẩn.
             </span>
           </div>
         </div>

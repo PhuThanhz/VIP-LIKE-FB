@@ -83,13 +83,13 @@ const TYPE_LABELS: Record<string, string> = {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function formatAgo(iso: string | null | undefined, now: number): string {
-  if (!iso) return 'Not scanned';
+  if (!iso) return 'Chưa quét';
   const diff = Math.max(0, now - new Date(iso).getTime());
   const min = Math.floor(diff / 60000);
-  if (min < 1) return 'Just now';
-  if (min < 60) return `${min} min ago`;
+  if (min < 1) return 'Vừa xong';
+  if (min < 60) return `${min} phút trước`;
   const hours = Math.floor(min / 60);
-  if (hours < 24) return `${hours} h ago`;
+  if (hours < 24) return `${hours} giờ trước`;
   return new Date(iso).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
 }
 
@@ -100,8 +100,8 @@ function nextScanAt(mon: HunterMonitor): number {
 
 function formatUntil(ts: number, now: number): string {
   const diff = ts - now;
-  if (diff <= 60000) return 'Scanning soon';
-  return `in ${Math.ceil(diff / 60000)} min`;
+  if (diff <= 60000) return 'Sắp quét';
+  return `sau ${Math.ceil(diff / 60000)} phút`;
 }
 
 function shortUrl(url: string): string {
@@ -115,29 +115,29 @@ function isHunterTask(task: any): boolean {
 
 // Operating status of 1 monitor (priority: paused → baselining → no posts seen → normal)
 function getMonitorHealth(mon: HunterMonitor): { status: 'default' | 'processing' | 'warning' | 'success'; text: string; hint?: string } {
-  if (mon.status !== 'ACTIVE') return { status: 'default', text: 'Paused' };
+  if (mon.status !== 'ACTIVE') return { status: 'default', text: 'Tạm dừng' };
   if (!mon.baselineDone) {
     return mon.lastCheckedAt
-      ? { status: 'warning', text: 'No baseline yet', hint: 'The last scan found no posts. Check the link, or whether the via is a member of the Group.' }
-      : { status: 'processing', text: 'Baselining', hint: 'The first scan only records existing posts and does not buff old ones.' };
+      ? { status: 'warning', text: 'Chưa có mốc', hint: 'Lần quét gần nhất không thấy bài nào. Kiểm tra lại link, hoặc via đã là thành viên Group chưa.' }
+      : { status: 'processing', text: 'Đang lấy mốc', hint: 'Lần quét đầu chỉ ghi nhận bài đang có, không buff bài cũ.' };
   }
   if (mon.lastCheckedAt && (mon.lastPostsFound ?? 1) === 0) {
-    return { status: 'warning', text: 'No posts seen', hint: 'The last scan could not read any posts. The via may have lost access or been logged out.' };
+    return { status: 'warning', text: 'Không thấy bài', hint: 'Lần quét gần nhất không đọc được bài nào. Via có thể đã mất quyền truy cập hoặc bị đăng xuất.' };
   }
-  return { status: 'success', text: 'Monitoring' };
+  return { status: 'success', text: 'Đang theo dõi' };
 }
 
 function renderTaskStatus(task: any) {
   if (task.status === 'RUNNING') {
     const p = task.progress;
-    return <Badge status="processing" text={p?.total ? `Buffing ${p.done}/${p.total}` : 'Buffing'} />;
+    return <Badge status="processing" text={p?.total ? `Đang buff ${p.done}/${p.total}` : 'Đang buff'} />;
   }
-  if (task.status === 'COMPLETED') return <Badge status="success" text="Completed" />;
-  if (task.status === 'FAILED') return <Badge status="error" text="Failed" />;
-  if (task.status === 'CANCELLED' || task.status === 'STOPPED') return <Badge status="default" text="Cancelled" />;
-  if (task.status === 'NEEDS_REVIEW') return <Badge status="warning" text="Needs review" />;
-  if (task.status === 'PARTIAL') return <Badge status="warning" text="Partially done" />;
-  return <Badge status="warning" text="Waiting to buff" />;
+  if (task.status === 'COMPLETED') return <Badge status="success" text="Hoàn tất" />;
+  if (task.status === 'FAILED') return <Badge status="error" text="Thất bại" />;
+  if (task.status === 'CANCELLED' || task.status === 'STOPPED') return <Badge status="default" text="Đã hủy" />;
+  if (task.status === 'NEEDS_REVIEW') return <Badge status="warning" text="Cần xem lại" />;
+  if (task.status === 'PARTIAL') return <Badge status="warning" text="Xong một phần" />;
+  return <Badge status="warning" text="Chờ buff" />;
 }
 
 export default function PostHunterTab({
@@ -238,9 +238,9 @@ export default function PostHunterTab({
       setSendingReport(true);
       const res = await axios.post(`${workerBaseUrl}/api/buff-daily-report/send`);
       if (res.data?.success) {
-        message.success('24h summary report sent to Telegram!');
+        message.success('Đã gửi báo cáo 24h về Telegram!');
       } else {
-        message.error(res.data?.error || 'Could not send the report');
+        message.error(res.data?.error || 'Không gửi được báo cáo');
       }
     } catch (e: any) {
       message.error(e.response?.data?.error || e.message);
@@ -251,7 +251,7 @@ export default function PostHunterTab({
 
   const runTestScan = async () => {
     if (!testUrl.trim()) {
-      message.warning('Paste the Fanpage or Group link to test-scan');
+      message.warning('Dán link Fanpage hoặc Group để quét thử');
       return;
     }
     setTestLoading(true);
@@ -261,7 +261,7 @@ export default function PostHunterTab({
       if (res.data?.success) {
         setTestResult({ posts: res.data.posts || [], scanVia: res.data.scanVia });
       } else {
-        message.error(res.data?.error || 'Test scan failed');
+        message.error(res.data?.error || 'Quét thử thất bại');
       }
     } catch (err: any) {
       message.error(err.response?.data?.error || err.message);
@@ -272,7 +272,7 @@ export default function PostHunterTab({
 
   const columns: ColumnsType<HunterMonitor> = [
     {
-      title: 'Target',
+      title: 'Mục tiêu',
       key: 'target',
       render: (_, mon) => {
         const daysLeft = mon.expiresAt ? Math.ceil((new Date(mon.expiresAt).getTime() - now) / DAY_MS) : null;
@@ -298,7 +298,7 @@ export default function PostHunterTab({
                       : 'bg-slate-800 text-slate-500'
                   }`}
                 >
-                  {daysLeft > 0 ? `VIP ${daysLeft}d` : 'Expired'}
+                  {daysLeft > 0 ? `VIP ${daysLeft} ngày` : 'Hết hạn'}
                 </span>
               )}
             </div>
@@ -308,7 +308,7 @@ export default function PostHunterTab({
       },
     },
     {
-      title: 'Buff plan',
+      title: 'Gói buff',
       key: 'buff',
       width: 170,
       render: (_, mon) => {
@@ -316,7 +316,7 @@ export default function PostHunterTab({
         const amount = cfg.targetLikes === 'ALL' ? `≤${maxPagesPerPost}` : `${cfg.targetLikes || 30}`;
         const detail = [
           REACTION_LABELS[cfg.reactionType] || cfg.reactionType,
-          cfg.delayMinutes ? `wait ${cfg.delayMinutes}m` : null,
+          cfg.delayMinutes ? `chờ ${cfg.delayMinutes} phút` : null,
           cfg.enableComment ? 'comments' : null,
         ]
           .filter(Boolean)
@@ -325,25 +325,25 @@ export default function PostHunterTab({
           <Tooltip title={detail}>
             <div className="whitespace-nowrap">
               <span className="text-[13px] font-semibold text-slate-100">{amount}</span>
-              <span className="text-[11px] text-slate-500 ml-1">likes / post</span>
+              <span className="text-[11px] text-slate-500 ml-1">like / bài</span>
             </div>
           </Tooltip>
         );
       },
     },
     {
-      title: 'Today',
+      title: 'Hôm nay',
       key: 'today',
       width: 130,
       render: (_, mon) => {
         const max = mon.buffConfig?.maxPostsPerDay;
         const done = mon.dailyPostsCount || 0;
-        if (!max) return <span className="text-xs text-slate-300">{done} posts</span>;
+        if (!max) return <span className="text-xs text-slate-300">{done} bài</span>;
         return (
           <div className="pr-3">
             <div className="text-xs text-slate-300 whitespace-nowrap">
               {done}
-              <span className="text-slate-500">/{max} posts</span>
+              <span className="text-slate-500">/{max} bài</span>
             </div>
             <Progress percent={Math.min(100, (done / max) * 100)} showInfo={false} size="small" strokeColor="#22d3ee" className="!m-0" />
           </div>
@@ -351,18 +351,18 @@ export default function PostHunterTab({
       },
     },
     {
-      title: 'Status',
+      title: 'Trạng thái',
       key: 'status',
       width: 150,
       render: (_, mon) => {
         const health = getMonitorHealth(mon);
         const sub =
           mon.status === 'ACTIVE'
-            ? `Next scan: ${formatUntil(nextScanAt(mon), now).toLowerCase()}`
+            ? `Quét tiếp: ${formatUntil(nextScanAt(mon), now).toLowerCase()}`
             : mon.lastCheckedAt
-            ? `Scanned ${formatAgo(mon.lastCheckedAt, now).toLowerCase()}`
+            ? `Đã quét ${formatAgo(mon.lastCheckedAt, now).toLowerCase()}`
             : '';
-        const tip = [health.hint, mon.lastScanVia ? `Scanning via: ${mon.lastScanVia}` : null].filter(Boolean).join('\n');
+        const tip = [health.hint, mon.lastScanVia ? `Quét bằng via: ${mon.lastScanVia}` : null].filter(Boolean).join('\n');
         const body = (
           <div className="whitespace-nowrap">
             <Badge status={health.status} text={<span className="text-xs text-slate-200">{health.text}</span>} />
@@ -373,14 +373,14 @@ export default function PostHunterTab({
       },
     },
     {
-      title: 'Caught',
+      title: 'Đã bắt',
       key: 'caught',
       width: 80,
       align: 'right',
       render: (_, mon) => (
         <div>
           {mon.lastFoundPostUrl ? (
-          <Tooltip title="Open the latest post">
+          <Tooltip title="Mở bài mới nhất">
             <a href={mon.lastFoundPostUrl} target="_blank" rel="noopener noreferrer" className="text-[13px] font-semibold text-slate-100 hover:text-blue-400">
               {mon.totalDetected || 0}
             </a>
@@ -389,8 +389,8 @@ export default function PostHunterTab({
             <span className="text-[13px] font-semibold text-slate-100">{mon.totalDetected || 0}</span>
           )}
           {(mon.skippedLimitCount || 0) > 0 && (
-            <Tooltip title="New posts held back by the daily limit. They are retried after the daily reset.">
-              <div className="text-[10px] text-amber-300 whitespace-nowrap">+{mon.skippedLimitCount} held</div>
+            <Tooltip title="Bài mới bị giữ lại do giới hạn ngày. Sẽ được thử lại khi qua ngày mới.">
+              <div className="text-[10px] text-amber-300 whitespace-nowrap">+{mon.skippedLimitCount} bị giữ</div>
             </Tooltip>
           )}
         </div>
@@ -403,24 +403,24 @@ export default function PostHunterTab({
       align: 'right',
       render: (_, mon) => (
         <Space size={4}>
-          <Tooltip title={mon.status === 'ACTIVE' ? 'Pause' : 'Enable monitoring'}>
+          <Tooltip title={mon.status === 'ACTIVE' ? 'Tạm dừng' : 'Bật theo dõi'}>
             <Switch size="small" checked={mon.status === 'ACTIVE'} loading={togglingId === mon.id} onChange={() => handleToggle(mon.id)} />
           </Tooltip>
-          <Tooltip title="Scan now">
-            <Button size="small" type="text" icon={<ThunderboltOutlined />} loading={scanningId === mon.id} onClick={() => handleScanNow(mon.id)} aria-label="Scan now" />
+          <Tooltip title="Quét ngay">
+            <Button size="small" type="text" icon={<ThunderboltOutlined />} loading={scanningId === mon.id} onClick={() => handleScanNow(mon.id)} aria-label="Quét ngay" />
           </Tooltip>
           <Dropdown
             trigger={['click']}
             menu={{
               items: [
-                { key: 'edit', icon: <SettingOutlined />, label: 'Edit settings', onClick: () => onEdit(mon) },
-                { key: 'open', icon: <ExportOutlined />, label: 'Open target page', onClick: () => window.open(mon.targetUrl, '_blank') },
+                { key: 'edit', icon: <SettingOutlined />, label: 'Sửa cài đặt', onClick: () => onEdit(mon) },
+                { key: 'open', icon: <ExportOutlined />, label: 'Mở trang mục tiêu', onClick: () => window.open(mon.targetUrl, '_blank') },
                 { type: 'divider' },
-                { key: 'delete', icon: <DeleteOutlined />, label: 'Delete monitor', danger: true, onClick: () => onDelete(mon.id) },
+                { key: 'delete', icon: <DeleteOutlined />, label: 'Xóa monitor', danger: true, onClick: () => onDelete(mon.id) },
               ],
             }}
           >
-            <Button size="small" type="text" icon={<MoreOutlined />} aria-label="More actions" />
+            <Button size="small" type="text" icon={<MoreOutlined />} aria-label="Thao tác khác" />
           </Dropdown>
         </Space>
       ),
@@ -428,11 +428,11 @@ export default function PostHunterTab({
   ];
 
   const statItems = [
-    { label: 'Monitoring', value: `${stats.active}/${monitors.length}`, warn: false },
-    { label: 'New posts 24h', value: String(stats.caught24h), warn: false },
-    { label: stats.running > 0 ? `Waiting · ${stats.running} running` : 'Waiting to buff', value: String(stats.waiting), warn: false },
-    { label: 'Next scan', value: stats.soonest === null ? '—' : formatUntil(stats.soonest, now), warn: false },
-    ...(stats.attention > 0 ? [{ label: 'Needs attention', value: String(stats.attention), warn: true }] : []),
+    { label: 'Đang theo dõi', value: `${stats.active}/${monitors.length}`, warn: false },
+    { label: 'Bài mới 24h', value: String(stats.caught24h), warn: false },
+    { label: stats.running > 0 ? `Đang chờ · ${stats.running} đang chạy` : 'Chờ buff', value: String(stats.waiting), warn: false },
+    { label: 'Lần quét tới', value: stats.soonest === null ? '—' : formatUntil(stats.soonest, now), warn: false },
+    ...(stats.attention > 0 ? [{ label: 'Cần chú ý', value: String(stats.attention), warn: true }] : []),
   ];
 
   return (
@@ -442,26 +442,26 @@ export default function PostHunterTab({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
-              <span className="text-[15px] font-semibold text-slate-100">Auto-hunt new posts</span>
+              <span className="text-[15px] font-semibold text-slate-100">Tự săn bài mới</span>
               <Badge
                 status={postHunterPaused ? 'warning' : 'success'}
                 text={
                   <span className={`text-xs ${postHunterPaused ? 'text-amber-300' : 'text-emerald-300'}`}>
-                    {postHunterPaused ? 'Paused' : 'Running'}
+                    {postHunterPaused ? 'Tạm dừng' : 'Đang chạy'}
                   </span>
                 }
               />
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              New posts on a Page/Group get buffed automatically.{' '}
-              <Tooltip title="The first scan only sets a baseline, so old posts aren't buffed. The via's Pages are rotated for even use.">
-                <span className="underline decoration-dotted cursor-help">How it works</span>
+              Bài mới trên Page/Group sẽ được buff tự động.{' '}
+              <Tooltip title="Lần quét đầu chỉ lấy mốc nên bài cũ không bị buff. Các Page của via được xoay vòng để dùng đều.">
+                <span className="underline decoration-dotted cursor-help">Cách hoạt động</span>
               </Tooltip>
             </p>
           </div>
           <Space className="shrink-0" wrap size={8}>
             {onTogglePostHunterPaused && (
-              <Tooltip title={postHunterPaused ? 'Enable Post Hunter' : 'Pause everything'}>
+              <Tooltip title={postHunterPaused ? 'Bật Săn bài' : 'Tạm dừng tất cả'}>
                 <Switch checked={!postHunterPaused} loading={togglingGlobalPause} onChange={handleGlobalPauseSwitch} />
               </Tooltip>
             )}
@@ -469,23 +469,23 @@ export default function PostHunterTab({
               trigger={['click']}
               menu={{
                 items: [
-                  { key: 'refresh', icon: <ReloadOutlined />, label: 'Refresh', onClick: onRefresh },
-                  { key: 'test', icon: <SearchOutlined />, label: 'Test-scan a link', onClick: () => setTestOpen(true) },
-                  { key: 'report', icon: <SendOutlined />, label: 'Send 24h report to Telegram', disabled: sendingReport, onClick: handleSendDailyReport },
+                  { key: 'refresh', icon: <ReloadOutlined />, label: 'Làm mới', onClick: onRefresh },
+                  { key: 'test', icon: <SearchOutlined />, label: 'Quét thử một link', onClick: () => setTestOpen(true) },
+                  { key: 'report', icon: <SendOutlined />, label: 'Gửi báo cáo 24h về Telegram', disabled: sendingReport, onClick: handleSendDailyReport },
                   { type: 'divider' },
                   {
                     key: 'own',
                     icon: <SettingOutlined />,
-                    label: `Auto-buff posts made by the app: ${autoBuffOwnPosts ? 'On' : 'Off'}`,
+                    label: `Tự buff bài do app đăng: ${autoBuffOwnPosts ? 'Bật' : 'Tắt'}`,
                     onClick: onOpenSettings,
                   },
                 ],
               }}
             >
-              <Button icon={<MoreOutlined />} aria-label="More actions" />
+              <Button icon={<MoreOutlined />} aria-label="Thao tác khác" />
             </Dropdown>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => onAdd()}>
-              Add monitor
+              Thêm monitor
             </Button>
           </Space>
         </div>
@@ -502,7 +502,7 @@ export default function PostHunterTab({
 
         {postHunterPaused && (
           <div className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
-            Paused: not scanning for new posts. Manual orders in the Queue still run.
+            Đang tạm dừng: không quét bài mới. Đơn thủ công trong Hàng đợi vẫn chạy.
           </div>
         )}
       </div>
@@ -515,17 +515,17 @@ export default function PostHunterTab({
             value={filter}
             onChange={setFilter}
             options={[
-              { value: 'ALL', label: `All ${monitors.length}` },
-              { value: 'ACTIVE', label: `Running ${stats.active}` },
-              { value: 'PAUSED', label: `Paused ${monitors.length - stats.active}` },
-              ...(stats.attention > 0 ? [{ value: 'ATTENTION' as MonitorFilter, label: `Needs attention ${stats.attention}` }] : []),
+              { value: 'ALL', label: `Tất cả ${monitors.length}` },
+              { value: 'ACTIVE', label: `Đang chạy ${stats.active}` },
+              { value: 'PAUSED', label: `Tạm dừng ${monitors.length - stats.active}` },
+              ...(stats.attention > 0 ? [{ value: 'ATTENTION' as MonitorFilter, label: `Cần chú ý ${stats.attention}` }] : []),
             ]}
           />
           <Input
             allowClear
             size="small"
             prefix={<SearchOutlined className="text-slate-500" />}
-            placeholder="Search monitors"
+            placeholder="Tìm monitor"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="md:w-56"
@@ -549,15 +549,15 @@ export default function PostHunterTab({
                 <div className="py-10">
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={<span className="text-slate-400 text-xs">No monitors yet</span>}
+                    description={<span className="text-slate-400 text-xs">Chưa có monitor nào</span>}
                   >
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => onAdd()}>
-                      Add monitor
+                      Thêm monitor
                     </Button>
                   </Empty>
                 </div>
               ) : (
-                <div className="py-8 text-xs text-slate-400">No matching monitors</div>
+                <div className="py-8 text-xs text-slate-400">Không có monitor phù hợp</div>
               ),
           }}
         />
@@ -566,13 +566,13 @@ export default function PostHunterTab({
       {/* Recently caught posts */}
       <div className="app-surface overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800/80">
-          <div className="text-[13px] font-semibold text-slate-100">Newly caught posts</div>
+          <div className="text-[13px] font-semibold text-slate-100">Bài mới bắt được</div>
           <Button type="link" size="small" className="!p-0 text-xs" onClick={onOpenQueue}>
-            View queue
+            Xem hàng đợi
           </Button>
         </div>
         {recentCatches.length === 0 ? (
-          <div className="px-4 py-8 text-center text-xs text-slate-500">No posts yet.</div>
+          <div className="px-4 py-8 text-center text-xs text-slate-500">Chưa có bài nào.</div>
         ) : (
           <div className="divide-y divide-slate-800/70">
             {recentCatches.map((task) => {
@@ -580,7 +580,7 @@ export default function PostHunterTab({
                 task.monitorName ||
                 monitors.find((m) => m.id === task.monitorId)?.targetName ||
                 (String(task.source || '').startsWith('POST_HUNTER:') ? String(task.source).slice('POST_HUNTER:'.length) : null);
-              const source = task.source === 'AUTO_OWN_POST' ? 'Posted by the app' : monitorName;
+              const source = task.source === 'AUTO_OWN_POST' ? 'Do app đăng' : monitorName;
               return (
                 <div key={task.id} className="px-4 py-2.5 flex items-center gap-4 text-xs">
                   <div className="w-20 shrink-0 text-slate-500">{formatAgo(task.addedAt, now)}</div>
@@ -605,14 +605,14 @@ export default function PostHunterTab({
       <Modal
         open={testOpen}
         onCancel={() => setTestOpen(false)}
-        title="Test-scan a link"
+        title="Quét thử một link"
         footer={null}
         width={720}
         className="dark-modal"
         destroyOnHidden
       >
         <p className="text-xs text-slate-400 mb-3">
-          Reads the latest posts of a Fanpage or Group using a live via. Read-only, no engagement.
+          Đọc các bài mới nhất của Fanpage hoặc Group bằng một via live. Chỉ đọc, không tương tác.
         </p>
         <div className="flex gap-2">
           <Input
@@ -624,17 +624,17 @@ export default function PostHunterTab({
             onPressEnter={runTestScan}
           />
           <Button type="primary" loading={testLoading} onClick={runTestScan}>
-            Test scan
+            Quét thử
           </Button>
         </div>
 
-        {testLoading && <div className="text-xs text-slate-400 mt-3">Opening Facebook with a via, usually takes 15–40 seconds...</div>}
+        {testLoading && <div className="text-xs text-slate-400 mt-3">Đang mở Facebook bằng via, thường mất 15–40 giây...</div>}
 
         {testResult && (
           <div className="mt-4">
             <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
               <span>
-                Found {testResult.posts.length} posts{testResult.scanVia ? ` · scanned with ${testResult.scanVia}` : ''}
+                Tìm thấy {testResult.posts.length} bài{testResult.scanVia ? ` · quét bằng ${testResult.scanVia}` : ''}
               </span>
               {testResult.posts.length > 0 && (
                 <Button
@@ -646,31 +646,31 @@ export default function PostHunterTab({
                     onAdd(testUrl.trim());
                   }}
                 >
-                  Monitor this link
+                  Theo dõi link này
                 </Button>
               )}
             </div>
             {testResult.posts.length === 0 ? (
               <div className="text-xs text-amber-400 py-3">
-                Could not read any posts. Check the link, or whether the via is a member of the Group.
+                Không đọc được bài nào. Kiểm tra lại link, hoặc via đã là thành viên Group chưa.
               </div>
             ) : (
               <div className="rounded-lg border border-slate-800 divide-y divide-slate-800/70 max-h-72 overflow-y-auto">
                 {testResult.posts.map((p: any, idx: number) => (
                   <div key={p.url || idx} className="px-3 py-2 flex items-center gap-3 text-xs">
                     <div className="min-w-0 flex-1">
-                      <div className="text-slate-200 truncate">{(p.title || 'Facebook post').split('\n')[0]}</div>
+                      <div className="text-slate-200 truncate">{(p.title || 'Bài viết Facebook').split('\n')[0]}</div>
                       <a href={p.url} target="_blank" rel="noopener noreferrer" className="block truncate text-[11px] text-blue-400 hover:underline">
                         {shortUrl(p.url)}
                       </a>
                     </div>
                     <div className="shrink-0 w-28">
                       {p.isAlreadyBuffed ? (
-                        <Badge status="success" text={<span className="text-[11px] text-slate-300">Buffed</span>} />
+                        <Badge status="success" text={<span className="text-[11px] text-slate-300">Đã buff</span>} />
                       ) : p.isInQueue ? (
-                        <Badge status="warning" text={<span className="text-[11px] text-slate-300">In queue</span>} />
+                        <Badge status="warning" text={<span className="text-[11px] text-slate-300">Trong hàng đợi</span>} />
                       ) : (
-                        <Badge status="default" text={<span className="text-[11px] text-slate-300">Not buffed</span>} />
+                        <Badge status="default" text={<span className="text-[11px] text-slate-300">Chưa buff</span>} />
                       )}
                     </div>
                     <Button
@@ -680,7 +680,7 @@ export default function PostHunterTab({
                         onQueueUrl(p.url);
                       }}
                     >
-                      Buff this post
+                      Buff bài này
                     </Button>
                   </div>
                 ))}

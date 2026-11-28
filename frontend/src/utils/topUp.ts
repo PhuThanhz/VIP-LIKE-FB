@@ -33,22 +33,22 @@ export async function offerTopUpAfterCookieUpdate(): Promise<void> {
     .join('\n');
 
   Modal.confirm({
-    title: `${posts.length} posts from today are short ${totalMissing} likes`,
-    content: `Now that this Via is back, its Pages can top them up:\n${preview}${posts.length > 5 ? `\n… and ${posts.length - 5} more` : ''}`,
-    okText: `Top up ${totalMissing} likes`,
-    cancelText: 'Not now',
+    title: `${posts.length} bài hôm nay còn thiếu ${totalMissing} like`,
+    content: `Via này đã hoạt động lại, các Page của nó có thể bù like cho:\n${preview}${posts.length > 5 ? `\n… và ${posts.length - 5} bài khác` : ''}`,
+    okText: `Bù ${totalMissing} like`,
+    cancelText: 'Để sau',
     styles: { body: { whiteSpace: 'pre-line' } },
     onOk: async () => {
       try {
         const res = await api.post('/buff-topup/run', { urls: posts.map((p) => p.url) });
         const queued = res.data?.queued || [];
         if (queued.length > 0) {
-          message.success(`Queued top-ups for ${queued.length} posts. Track them in the Queue tab.`);
+          message.success(`Đã xếp hàng bù like cho ${queued.length} bài. Theo dõi ở tab Hàng đợi.`);
         } else {
-          message.info('Nothing to top up any more.');
+          message.info('Không còn bài nào cần bù.');
         }
       } catch (err: any) {
-        message.error(err.response?.data?.error || err.message || 'Could not queue the top-up');
+        message.error(err.response?.data?.error || err.message || 'Không xếp hàng bù like được');
       }
     },
   });

@@ -51,10 +51,10 @@ api.interceptors.response.use(
       window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
     }
     if (!error.response && error.code === 'ERR_NETWORK') {
-      error.message = 'Cannot reach the VIPLIKE backend server (:3100). Check that the backend is running.';
+      error.message = 'Không kết nối được máy chủ backend VIPLIKE (:3100). Hãy kiểm tra backend đã chạy chưa.';
     }
     if (error.code === 'ECONNABORTED') {
-      error.message = 'Request timed out.';
+      error.message = 'Yêu cầu quá thời gian chờ.';
     }
     return Promise.reject(error);
   }

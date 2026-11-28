@@ -179,7 +179,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
         pageName: p.name,
         viaName: p.viaName,
         status: 'WAITING',
-        message: 'Queued, waiting...',
+        message: 'Đã xếp hàng, đang chờ...',
       }));
 
       setRunTiming({ start: Date.now(), end: null });
@@ -214,7 +214,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
       setTargetPostUrl('');
       const runAccountName =
         selectedAccountId === 'ALL_VIAS'
-          ? `All Vias (${fbAccounts.length} Vias)`
+          ? `Tất cả Via (${fbAccounts.length} Via)`
           : (fbAccounts as any[]).find((a) => a.id === selectedAccountId)?.pageName || 'Via Facebook';
       const commentLines = commentListText.split('\n').map((s) => s.trim()).filter(Boolean);
       const viaGroups = groupPagesByVia(
@@ -252,13 +252,13 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
         } else {
           liveDetails.push({
             pageId,
-            pageName: patch.pageName || 'Backup Page',
+            pageName: patch.pageName || 'Page dự phòng',
             viaName: patch.viaName,
             status: patch.status || 'RUNNING',
             likeStatus: patch.likeStatus,
             commentStatus: patch.commentStatus,
             commentText: patch.commentText,
-            message: patch.message || '⚡ Auto top-up from the backup pool to reach the KPI',
+            message: patch.message || '⚡ Tự bù từ nhóm dự phòng để đạt KPI',
             error: patch.error,
           });
         }
@@ -291,12 +291,12 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
         const isGroupExpired = group.pages.some((p) => isDeadViaStatus(p.viaStatus));
         if (autoFailoverLiveVia && isGroupExpired) {
           console.warn(`[AutoFailover] Via [${group.viaName}] cookie expired! Automatically topping up Pages from LIVE Vias...`);
-          publish(`🛡️ [Auto-Failover] Via [${group.viaName}] cookie expired. Switching to Pages from live Vias...`);
+          publish(`🛡️ [Tự dự phòng] Via [${group.viaName}] hết hạn cookie. Đang chuyển sang Page của các Via live...`);
 
           for (const p of group.pages) {
             patchDetail(p.id, {
               status: 'SKIPPED',
-              message: `⚠️ Via [${group.viaName}] cookie expired -> switched to backup Pages from live Vias`,
+              message: `⚠️ Via [${group.viaName}] hết hạn cookie -> đã chuyển sang Page dự phòng của các Via live`,
             });
           }
 
@@ -318,7 +318,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
                 pageName: rp.name,
                 viaName: rp.viaName,
                 status: 'WAITING',
-                message: `⚡ Auto top-up replacing cookie-expired Via [${group.viaName}]`,
+                message: `⚡ Tự bù thay cho Via hết hạn cookie [${group.viaName}]`,
               });
             }
             const failoverGroups = groupPagesByVia(replacementPages, activeCookie, 'Via Live Facebook');
@@ -331,7 +331,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
         }
 
         if (!isFirstOfWorker) {
-          publish(`Switching to Via [${group.viaName}] (3s safety pause)...`);
+          publish(`Đang chuyển sang Via [${group.viaName}] (nghỉ an toàn 3s)...`);
           await new Promise((resolve) => setTimeout(resolve, 3000));
           if (controller.signal.aborted) return;
         }
@@ -397,7 +397,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
                   message: `[${eventViaName}] Opening post and engaging...`,
                 });
                 publish(`[${eventViaName}] ${ev.pageName}`);
-                addLiveLog(`⚡ [${eventViaName}] Engaging as: "${ev.pageName || ev.pageId}"`);
+                addLiveLog(`⚡ [${eventViaName}] Đang tương tác bằng: "${ev.pageName || ev.pageId}"`);
               } else if (ev.type === 'PAGE_FINISH') {
                 finishedPagesCount++;
                 const eventViaName = resolveEventViaName(ev.pageId, ev.viaName);
@@ -413,7 +413,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
                 });
                 publish(undefined);
                 const icon = ev.status === 'SUCCESS' ? '✅' : (ev.status === 'ALREADY_LIKED' ? 'ℹ️' : '❌');
-                addLiveLog(`${icon} [${ev.pageName}] ${ev.message || (ev.status === 'SUCCESS' ? 'Success' : 'Error')}`);
+                addLiveLog(`${icon} [${ev.pageName}] ${ev.message || (ev.status === 'SUCCESS' ? 'Thành công' : 'Lỗi')}`);
 
                 if ((ev.status === 'SUCCESS' || ev.status === 'ALREADY_LIKED') && ev.pageId) {
                   setInteractedPageIds((prev) => {
@@ -427,7 +427,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
                 // HARD CAP AGAINST OVERSHOOT: as soon as the KPI of new successful likes is reached, cut the stream and send the backend a stop command
                 const freshCounts = summarizeBuffDetails(liveDetails);
                 if (freshCounts.success >= targetKpi) {
-                  addLiveLog(`🎯 [KPI Reached] Completed exactly ${freshCounts.success}/${targetKpi} likes! Stopping the campaign immediately so it doesn't overshoot.`);
+                  addLiveLog(`🎯 [Đạt KPI] Đã đủ ${freshCounts.success}/${targetKpi} like! Dừng chiến dịch ngay để không bị vượt.`);
                   controller.abort();
                   // Stop every Via group running in parallel, not just the current one
                   for (const sid of activeSessionIds) {
@@ -436,9 +436,9 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
                   return;
                 }
               } else if (ev.type === 'COOLDOWN_START') {
-                addLiveLog(`🛡️ [Via cooldown] Pausing ${ev.durationSec}s to protect the account.`);
+                addLiveLog(`🛡️ [Via nghỉ] Tạm dừng ${ev.durationSec}s để bảo vệ tài khoản.`);
               } else if (ev.type === 'KPI_REACHED') {
-                addLiveLog(`🎯 [KPI Reached] Completed ${ev.success}/${ev.kpiTarget} likes! Topped up ${ev.autoRefilled || 0} failed Pages.`);
+                addLiveLog(`🎯 [Đạt KPI] Đã xong ${ev.success}/${ev.kpiTarget} like! Đã bù ${ev.autoRefilled || 0} Page lỗi.`);
               }
             },
             controller.signal
@@ -453,14 +453,14 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
 
           if (autoFailoverLiveVia && isCookieDead && !controller.signal.aborted) {
             console.warn(`[AutoFailover] Via [${group.viaName}] hit a cookie error mid-run. Automatically topping up Pages from LIVE Vias...`);
-            publish(`🛡️ [Auto-Failover] Via [${group.viaName}] cookie error! Automatically topping up ${group.pages.length} Pages from live Vias...`);
+            publish(`🛡️ [Tự dự phòng] Via [${group.viaName}] lỗi cookie! Đang tự bù ${group.pages.length} Page từ các Via live...`);
 
             for (const p of group.pages) {
               const current = liveDetails.find((d) => d.pageId === p.id);
               if (current && (current.status === 'WAITING' || current.status === 'RUNNING')) {
                 patchDetail(p.id, {
                   status: 'SKIPPED',
-                  message: `⚠️ Via [${group.viaName}] cookie error -> switched to backup Pages from live Vias`,
+                  message: `⚠️ Via [${group.viaName}] lỗi cookie -> đã chuyển sang Page dự phòng của các Via live`,
                   error: undefined,
                 });
               }
@@ -484,7 +484,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
                   pageName: rp.name,
                   viaName: rp.viaName,
                   status: 'WAITING',
-                  message: `⚡ Auto top-up replacing cookie-expired Via [${group.viaName}]`,
+                  message: `⚡ Tự bù thay cho Via hết hạn cookie [${group.viaName}]`,
                 });
               }
               const failoverGroups = groupPagesByVia(replacementPages, activeCookie, 'Via Live Facebook');
@@ -526,9 +526,9 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
             const isConnDrop = !streamErr.receivedAny || /ngắt|kết nối|network|abort|timeout|connection|disconnect|dropped/i.test(streamErr.message);
             const statusToSet = isAborted || isConnDrop ? 'SKIPPED' : 'ERROR';
             const reason = isAborted
-              ? 'Stopped'
+              ? 'Đã dừng'
               : isConnDrop
-              ? 'Not run: stream connection interrupted (forwarded, or click Resume)'
+              ? 'Chưa chạy: kết nối luồng bị ngắt (đã chuyển tiếp, hoặc bấm Chạy tiếp)'
               : streamErr.message;
             for (const p of group.pages) {
               const current = liveDetails.find((d) => d.pageId === p.id);
@@ -574,7 +574,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
         // Pages still "waiting" when the run ended (e.g. KPI reached or Via stopped early) → mark Skipped instead of leaving "Queued, waiting..." in history
         const loggedDetails = details.map((d) =>
           d.status === 'WAITING' || d.status === 'RUNNING'
-            ? { ...d, status: 'SKIPPED' as const, message: 'Not reached (the run ended first)' }
+            ? { ...d, status: 'SKIPPED' as const, message: 'Chưa tới lượt (lượt chạy đã kết thúc trước)' }
             : d
         );
         const newLog: BuffLogEntry = {
@@ -619,14 +619,14 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
       });
 
       if (stopped) {
-        message.info(`Stopped. ${counts.success} successful; the remaining Pages were skipped. Saved to history.`);
+        message.info(`Đã dừng. ${counts.success} thành công; các Page còn lại được bỏ qua. Đã lưu vào lịch sử.`);
       } else if (hasConnInterrupted) {
-        message.warning(`The stream connection was interrupted at ${counts.success} likes. The remainder was moved to the Queue / you can click Resume.`);
+        message.warning(`Kết nối luồng bị ngắt ở ${counts.success} like. Phần còn lại đã chuyển vào Hàng đợi / bạn có thể bấm Chạy tiếp.`);
       } else {
         playVictoryChime();
         notification.success({
-          message: '🎉 BUFF CAMPAIGN COMPLETE!',
-          description: `Engaged successfully ${counts.success}/${details.length} times (${Math.round((counts.success / Math.max(1, details.length)) * 100)}%). The detailed report was sent to your Telegram!`,
+          message: '🎉 CHIẾN DỊCH BUFF HOÀN TẤT!',
+          description: `Tương tác thành công ${counts.success}/${details.length} lượt (${Math.round((counts.success / Math.max(1, details.length)) * 100)}%). Báo cáo chi tiết đã gửi về Telegram!`,
           duration: 9,
           placement: 'topRight',
         });
@@ -635,7 +635,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
     onError: (err: any) => {
       buffAbortRef.current = null;
       setAutoBuffProgress((prev) => ({ ...prev, status: 'ERROR', currentRunningPageName: undefined }));
-      message.error(`System error: ${err.response?.data?.error || err.message}`);
+      message.error(`Lỗi hệ thống: ${err.response?.data?.error || err.message}`);
     },
   });
 
@@ -646,7 +646,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
       axios.post(`${WORKER_BASE_URL}/api/buff-live/stop`, { sessionId: sid }).catch(() => {});
     }
     axios.post(`${WORKER_BASE_URL}/api/buff-live/stop`).catch(() => {});
-    message.info('Stopping: the worker will stop after the current Page.');
+    message.info('Đang dừng: worker sẽ dừng sau Page hiện tại.');
   };
 
   const [isResumingRemaining, setIsResumingRemaining] = useState(false);
@@ -670,7 +670,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
 
     const targetUrl = customLog?.targetUrl || runningTargetInfo?.url || targetPostUrl;
     if (!targetUrl) {
-      message.warning('No post link found to resume!');
+      message.warning('Không tìm thấy link bài để chạy tiếp!');
       return;
     }
 
@@ -718,7 +718,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
     const likesToBuff = Math.max(1, Number(resumeMissingLikes) || 1);
     try {
       setIsResumingRemaining(true);
-      message.loading({ content: `Adding ${likesToBuff} likes to the Queue...`, key: 'resume-rem' });
+      message.loading({ content: `Đang thêm ${likesToBuff} like vào Hàng đợi...`, key: 'resume-rem' });
       await api.post('/buff-queue/add', {
         targetUrl: resumeTargetUrl,
         targetLikes: likesToBuff,
@@ -726,7 +726,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
         delayMinutes: 0,
         source: 'MANUAL',
       });
-      message.success({ content: `Added ${likesToBuff} likes to the Queue! The run is starting.`, key: 'resume-rem' });
+      message.success({ content: `Đã thêm ${likesToBuff} like vào Hàng đợi! Đang bắt đầu chạy.`, key: 'resume-rem' });
       setResumeModalOpen(false);
       // Reset the form straight to IDLE so the UI reconnects and shows the Queue's Live Worker
       setAutoBuffProgress({
@@ -744,8 +744,8 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
       fetchBuffQueue();
       queryClient.invalidateQueries();
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || err.message || 'Unknown error';
-      message.error({ content: `Activation error: ${errorMsg}`, key: 'resume-rem', duration: 6 });
+      const errorMsg = err.response?.data?.error || err.message || 'Lỗi không xác định';
+      message.error({ content: `Lỗi kích hoạt: ${errorMsg}`, key: 'resume-rem', duration: 6 });
     } finally {
       setIsResumingRemaining(false);
     }
@@ -770,7 +770,7 @@ export function useSingleRunner(deps: UseSingleRunnerDeps) {
     setRunTiming({ start: null, end: null });
     initialFinishedRestoreDoneRef.current = true;
     setActiveTabKey('buff-like');
-    message.success('Progress table cleared. You can set up a new campaign!');
+    message.success('Đã xóa bảng tiến độ. Bạn có thể tạo chiến dịch mới!');
   };
 
   return {

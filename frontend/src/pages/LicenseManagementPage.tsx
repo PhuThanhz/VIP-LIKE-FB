@@ -82,7 +82,7 @@ export const LicenseManagementPage: React.FC = () => {
   const [licenseInput, setLicenseInput] = useState('');
   const [createForm] = Form.useForm();
 
-  const [hardwareHwid, setHardwareHwid] = useState<string>('Reading machine ID...');
+  const [hardwareHwid, setHardwareHwid] = useState<string>('Đang đọc mã máy...');
   const [activeLicenseTab, setActiveLicenseTab] = useState<'CLIENT' | 'ADMIN'>('CLIENT');
   const admin = isAdmin(useCurrentUser());
   const [adminSearch, setAdminSearch] = useState('');
@@ -137,7 +137,7 @@ export const LicenseManagementPage: React.FC = () => {
   // Activate a License Key on this machine
   const handleActivate = async () => {
     if (!licenseInput.trim()) {
-      message.warning('Please enter a License Key to activate');
+      message.warning('Vui lòng nhập License Key để kích hoạt');
       return;
     }
     try {
@@ -147,12 +147,12 @@ export const LicenseManagementPage: React.FC = () => {
         hardwareHwid,
       });
       if (res.data?.success) {
-        message.success('🎉 VIP LIKE license activated!');
+        message.success('🎉 Đã kích hoạt bản quyền VIP LIKE!');
         setLicenseInput('');
         refreshAll();
       }
     } catch (err: any) {
-      message.error(err.response?.data?.error || 'Activation failed. Check the key.');
+      message.error(err.response?.data?.error || 'Kích hoạt thất bại. Kiểm tra lại key.');
     } finally {
       setActivating(false);
     }
@@ -167,10 +167,10 @@ export const LicenseManagementPage: React.FC = () => {
         createForm.resetFields();
         const newKey: string | undefined = res.data.license?.licenseKey;
         Modal.success({
-          title: `Key created for ${values.customerName}`,
+          title: `Đã tạo key cho ${values.customerName}`,
           content: newKey ? (
             <div className="space-y-2">
-              <div className="text-xs text-slate-400">Send this key to the customer to activate:</div>
+              <div className="text-xs text-slate-400">Gửi key này cho khách để kích hoạt:</div>
               <Text copyable={{ text: newKey }} className="font-mono text-cyan-300">
                 {newKey}
               </Text>
@@ -180,7 +180,7 @@ export const LicenseManagementPage: React.FC = () => {
         fetchAdminLicenses();
       }
     } catch (err: any) {
-      message.error(err.response?.data?.error || 'Error creating License Key');
+      message.error(err.response?.data?.error || 'Lỗi tạo License Key');
     }
   };
 
@@ -204,23 +204,23 @@ export const LicenseManagementPage: React.FC = () => {
   };
 
   const handleExtendDays = (id: number) =>
-    updateLicenseStatus({ id, status: 'ACTIVE', addDays: 30 }, 'Extended the renter by +30 days!', 'Extension failed');
+    updateLicenseStatus({ id, status: 'ACTIVE', addDays: 30 }, 'Đã gia hạn thêm 30 ngày!', 'Gia hạn thất bại');
 
   const handleToggleLock = (id: number, currentStatus: string) => {
     const nextStatus = currentStatus === 'LOCKED' ? 'ACTIVE' : 'LOCKED';
     return updateLicenseStatus(
       { id, status: nextStatus },
-      nextStatus === 'LOCKED' ? 'This rental key is now LOCKED!' : 'UNLOCKED successfully!',
-      'Error updating status'
+      nextStatus === 'LOCKED' ? 'Key thuê này đã bị KHÓA!' : 'Đã MỞ KHÓA!',
+      'Lỗi cập nhật trạng thái'
     );
   };
 
   const copyToClipboard = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      message.success(`Copied ${label}!`);
+      message.success(`Đã sao chép ${label}!`);
     } catch {
-      message.error('Could not copy; please select the text and copy it manually.');
+      message.error('Không sao chép được; vui lòng bôi đen và sao chép thủ công.');
     }
   };
 
@@ -235,7 +235,7 @@ export const LicenseManagementPage: React.FC = () => {
 
   const adminColumns = [
     {
-      title: 'Customer / Renter',
+      title: 'Khách / Người thuê',
       key: 'customer',
       render: (_: any, record: AdminLicenseItem) => (
         <div>
@@ -243,23 +243,23 @@ export const LicenseManagementPage: React.FC = () => {
             {record.customerName}
           </Text>
           {record.customerContact && (
-            <Text className="text-xs text-slate-400">Contact: {record.customerContact}</Text>
+            <Text className="text-xs text-slate-400">Liên hệ: {record.customerContact}</Text>
           )}
           {record.notes && (
-            <Text className="text-[11px] text-slate-500 block italic">Note: {record.notes}</Text>
+            <Text className="text-[11px] text-slate-500 block italic">Ghi chú: {record.notes}</Text>
           )}
         </div>
       ),
     },
     {
-      title: 'License Key (send to customer)',
+      title: 'License Key (gửi cho khách)',
       key: 'licenseKey',
       render: (_: any, record: AdminLicenseItem) => (
         <div className="flex items-center gap-2">
           <Tag color="cyan" className="font-mono text-xs px-2 py-0.5 m-0 border-cyan-800">
             {record.licenseKey}
           </Tag>
-          <Tooltip title="Copy the key to send to the customer">
+          <Tooltip title="Sao chép key để gửi cho khách">
             <Button
               type="text"
               size="small"
@@ -272,30 +272,30 @@ export const LicenseManagementPage: React.FC = () => {
       ),
     },
     {
-      title: 'Plan & Limits',
+      title: 'Gói & Giới hạn',
       key: 'package',
       render: (_: any, record: AdminLicenseItem) => {
         const pkgMap: Record<string, { label: string; color: string }> = {
           TRIAL_3DAYS: { label: '3-day trial', color: 'orange' },
-          '1_MONTH': { label: '1 Month', color: 'blue' },
-          '3_MONTHS': { label: '3 Months', color: 'purple' },
-          '6_MONTHS': { label: '6 Months', color: 'magenta' },
-          '1_YEAR': { label: '1 Year', color: 'gold' },
-          LIFETIME: { label: 'Lifetime', color: 'success' },
+          '1_MONTH': { label: '1 tháng', color: 'blue' },
+          '3_MONTHS': { label: '3 tháng', color: 'purple' },
+          '6_MONTHS': { label: '6 tháng', color: 'magenta' },
+          '1_YEAR': { label: '1 năm', color: 'gold' },
+          LIFETIME: { label: 'Vĩnh viễn', color: 'success' },
         };
         const p = pkgMap[record.packageType] || { label: record.packageType, color: 'default' };
         return (
           <div>
             <Tag color={p.color}>{p.label}</Tag>
             <div className="text-xs text-slate-400 mt-1">
-              Max: <span className="text-white font-medium">{record.maxVias} Via</span>
+              Tối đa: <span className="text-white font-medium">{record.maxVias} Via</span>
             </div>
           </div>
         );
       },
     },
     {
-      title: 'Expiry',
+      title: 'Hạn dùng',
       key: 'expiresAt',
       sorter: (a: AdminLicenseItem, b: AdminLicenseItem) =>
         new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime(),
@@ -304,7 +304,7 @@ export const LicenseManagementPage: React.FC = () => {
         return (
           <div>
             <div className={`text-xs font-semibold ${daysLeftColor(daysLeft)}`}>
-              {daysLeft <= 0 ? 'EXPIRED' : `${daysLeft} days left`}
+              {daysLeft <= 0 ? 'EXPIRED' : `Còn ${daysLeft} ngày`}
             </div>
             <div className="text-[11px] text-slate-500">{new Date(record.expiresAt).toLocaleDateString('vi-VN')}</div>
           </div>
@@ -312,58 +312,58 @@ export const LicenseManagementPage: React.FC = () => {
       },
     },
     {
-      title: 'Customer Machine ID (HWID)',
+      title: 'Mã máy của khách (HWID)',
       key: 'hardwareHwid',
       render: (_: any, record: AdminLicenseItem) => (
         record.hardwareHwid ? (
-          <Tooltip title={`${record.hardwareHwid} (click to copy)`}>
+          <Tooltip title={`${record.hardwareHwid} (bấm để sao chép)`}>
             <Tag
               color="geekblue"
               className="font-mono text-[11px] cursor-pointer"
-              onClick={() => copyToClipboard(record.hardwareHwid!, 'Machine ID (HWID)')}
+              onClick={() => copyToClipboard(record.hardwareHwid!, 'Mã máy (HWID)')}
             >
               🔒 {record.hardwareHwid.length > 14 ? `${record.hardwareHwid.substring(0, 14)}…` : record.hardwareHwid}
             </Tag>
           </Tooltip>
         ) : (
           <Tag color="default" className="text-[11px]">
-            Not activated on a machine
+            Chưa kích hoạt trên máy nào
           </Tag>
         )
       ),
     },
     {
-      title: 'Status',
+      title: 'Trạng thái',
       key: 'status',
       filters: [
-        { text: 'Active', value: 'ACTIVE' },
-        { text: 'Expired', value: 'EXPIRED' },
-        { text: 'Locked', value: 'LOCKED' },
+        { text: 'Đang hoạt động', value: 'ACTIVE' },
+        { text: 'Hết hạn', value: 'EXPIRED' },
+        { text: 'Đã khóa', value: 'LOCKED' },
       ],
       onFilter: (value: any, record: AdminLicenseItem) => {
         if (record.status === 'LOCKED') return value === 'LOCKED';
         return getDaysLeft(record.expiresAt) <= 0 ? value === 'EXPIRED' : value === 'ACTIVE';
       },
       render: (_: any, record: AdminLicenseItem) => {
-        if (record.status === 'LOCKED') return <Tag color="error">LOCKED</Tag>;
+        if (record.status === 'LOCKED') return <Tag color="error">ĐÃ KHÓA</Tag>;
         const isExpired = new Date(record.expiresAt) < new Date();
-        if (isExpired) return <Tag color="warning">EXPIRED</Tag>;
-        return <Tag color="success">ACTIVE</Tag>;
+        if (isExpired) return <Tag color="warning">HẾT HẠN</Tag>;
+        return <Tag color="success">HOẠT ĐỘNG</Tag>;
       },
     },
     {
-      title: 'Admin Actions',
+      title: 'Thao tác admin',
       key: 'action',
       render: (_: any, record: AdminLicenseItem) => (
         <Space size="small">
-          <Tooltip title="Extend the customer by +30 days">
+          <Tooltip title="Gia hạn cho khách thêm 30 ngày">
             <Button
               size="small"
               className="bg-emerald-950/60 text-emerald-400 border-emerald-800 hover:bg-emerald-900"
               icon={<ClockCircleOutlined />}
               onClick={() => handleExtendDays(record.id)}
             >
-              +30 days
+              +30 ngày
             </Button>
           </Tooltip>
           {record.status === 'LOCKED' ? (
@@ -373,19 +373,19 @@ export const LicenseManagementPage: React.FC = () => {
               icon={<UnlockOutlined />}
               onClick={() => handleToggleLock(record.id, record.status)}
             >
-              Unlock
+              Mở khóa
             </Button>
           ) : (
             <Popconfirm
-              title={`Lock ${record.customerName}'s key?`}
-              description="The customer won't be able to use the tool until it is unlocked."
-              okText="Lock"
+              title={`Khóa key của ${record.customerName}?`}
+              description="Khách sẽ không dùng được tool cho tới khi được mở khóa."
+              okText="Khóa"
               okButtonProps={{ danger: true }}
-              cancelText="Cancel"
+              cancelText="Hủy"
               onConfirm={() => handleToggleLock(record.id, record.status)}
             >
               <Button size="small" danger icon={<LockOutlined />}>
-                Lock Key
+                Khóa key
               </Button>
             </Popconfirm>
           )}
@@ -407,7 +407,7 @@ export const LicenseManagementPage: React.FC = () => {
                 label: (
                   <div className="flex items-center gap-2 px-2 py-0.5 font-semibold">
                     <SafetyCertificateOutlined className="text-emerald-400" />
-                    <span>This device</span>
+                    <span>Máy này</span>
                   </div>
                 ),
                 value: 'CLIENT',
@@ -416,7 +416,7 @@ export const LicenseManagementPage: React.FC = () => {
                 label: (
                   <div className="flex items-center gap-2 px-2 py-0.5 font-semibold">
                     <CrownOutlined className="text-amber-400" />
-                    <span>Renters ({adminLicenses.length})</span>
+                    <span>Người thuê ({adminLicenses.length})</span>
                   </div>
                 ),
                 value: 'ADMIN',
@@ -436,7 +436,7 @@ export const LicenseManagementPage: React.FC = () => {
               onClick={() => setIsCreateModalOpen(true)}
               className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 font-medium shadow-lg shadow-cyan-500/20"
             >
-              Issue new key
+              Cấp key mới
             </Button>
           )}
           <Button
@@ -445,7 +445,7 @@ export const LicenseManagementPage: React.FC = () => {
             onClick={refreshAll}
             className="border-slate-700 bg-slate-800/80 text-slate-300 hover:text-white"
           >
-            Refresh
+            Làm mới
           </Button>
         </div>
       </div>
@@ -459,24 +459,24 @@ export const LicenseManagementPage: React.FC = () => {
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 font-black text-sm flex items-center justify-center border border-cyan-500/30 shrink-0">1</div>
                 <div>
-                  <div className="font-bold text-slate-200">1. Get the Machine ID (HWID)</div>
-                  <div className="text-[11px] text-slate-400">Click the copy icon on the HWID below to send it to the tool provider</div>
+                  <div className="font-bold text-slate-200">1. Lấy mã máy (HWID)</div>
+                  <div className="text-[11px] text-slate-400">Bấm biểu tượng sao chép ở HWID bên dưới để gửi cho bên cung cấp tool</div>
                 </div>
               </div>
               <div className="hidden md:block text-slate-600 font-bold text-base">➔</div>
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 font-black text-sm flex items-center justify-center border border-purple-500/30 shrink-0">2</div>
                 <div>
-                  <div className="font-bold text-slate-200">2. Receive the License Key</div>
-                  <div className="text-[11px] text-slate-400">The tool provider sends back a license key for your rental plan</div>
+                  <div className="font-bold text-slate-200">2. Nhận License Key</div>
+                  <div className="text-[11px] text-slate-400">Bên cung cấp tool gửi lại license key theo gói thuê của bạn</div>
                 </div>
               </div>
               <div className="hidden md:block text-slate-600 font-bold text-base">➔</div>
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 font-black text-sm flex items-center justify-center border border-emerald-500/30 shrink-0">3</div>
                 <div>
-                  <div className="font-bold text-slate-200">3. Paste the Key & Activate</div>
-                  <div className="text-[11px] text-slate-400">Click "Activate License Now" to unlock every feature</div>
+                  <div className="font-bold text-slate-200">3. Dán key & Kích hoạt</div>
+                  <div className="text-[11px] text-slate-400">Bấm "Kích hoạt bản quyền ngay" để mở mọi tính năng</div>
                 </div>
               </div>
             </div>
@@ -489,7 +489,7 @@ export const LicenseManagementPage: React.FC = () => {
                 title={
                   <div className="flex items-center gap-2 text-white">
                     <SafetyCertificateOutlined className="text-emerald-400 text-lg" />
-                    <span>License Status On This Device</span>
+                    <span>Trạng thái bản quyền trên máy này</span>
                   </div>
                 }
               >
@@ -499,7 +499,7 @@ export const LicenseManagementPage: React.FC = () => {
                       <div>
                         <div className="flex items-center gap-2">
                           <Tag color={isLicenseActive ? 'success' : 'error'} className="px-2 py-0.5 font-semibold">
-                            {isLicenseActive ? 'VALID & ACTIVATED' : currentLicense.isExpired ? 'EXPIRED' : currentLicense.status}
+                            {isLicenseActive ? 'HỢP LỆ & ĐÃ KÍCH HOẠT' : currentLicense.isExpired ? 'EXPIRED' : currentLicense.status}
                           </Tag>
                           <Tag color="cyan">{currentLicense.packageType}</Tag>
                         </div>
@@ -512,35 +512,35 @@ export const LicenseManagementPage: React.FC = () => {
                       </div>
 
                       <div className="text-right">
-                        <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Rental Term</div>
+                        <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Thời hạn thuê</div>
                         <div className={`text-2xl font-bold mt-1 ${daysLeftColor(currentLicense.daysRemaining)}`}>
-                          {currentLicense.daysRemaining} <span className="text-sm font-normal text-slate-300">days</span>
+                          {currentLicense.daysRemaining} <span className="text-sm font-normal text-slate-300">ngày</span>
                         </div>
                         <Text className="text-[11px] text-slate-400">
-                          Expires: {new Date(currentLicense.expiresAt).toLocaleDateString('vi-VN')}
+                          Hết hạn: {new Date(currentLicense.expiresAt).toLocaleDateString('vi-VN')}
                         </Text>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/80">
-                        <Text className="text-slate-400 text-xs block">Account Limit</Text>
+                        <Text className="text-slate-400 text-xs block">Giới hạn tài khoản</Text>
                         <Text className="text-white font-bold text-base">{currentLicense.maxVias} Via</Text>
                       </div>
                       <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/80">
-                        <Text className="text-slate-400 text-xs block">Machine ID (HWID)</Text>
+                        <Text className="text-slate-400 text-xs block">Mã máy (HWID)</Text>
                         <Text className="text-cyan-300 font-mono text-xs block truncate">{hardwareHwid}</Text>
                       </div>
                       <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800/80">
-                        <Text className="text-slate-400 text-xs block">Anti-fraud</Text>
-                        <Text className="text-emerald-400 font-medium text-xs">🔒 1 Machine / 1 Key Lock</Text>
+                        <Text className="text-slate-400 text-xs block">Chống gian lận</Text>
+                        <Text className="text-emerald-400 font-medium text-xs">🔒 Khóa 1 máy / 1 key</Text>
                       </div>
                     </div>
                   </div>
                 ) : (
                   <Alert
-                    message="No active license"
-                    description="This device has no activated license or the key has expired. Enter the key you were given to unlock every nurturing and engagement feature."
+                    message="Chưa có bản quyền"
+                    description="Máy này chưa kích hoạt bản quyền hoặc key đã hết hạn. Nhập key bạn được cấp để mở mọi tính năng nuôi và tương tác."
                     type="warning"
                     showIcon
                     className="bg-amber-950/20 border-amber-900/50 text-slate-300"
@@ -556,23 +556,23 @@ export const LicenseManagementPage: React.FC = () => {
                 title={
                   <div className="flex items-center gap-2 text-white">
                     <KeyOutlined className="text-cyan-400 text-lg" />
-                    <span>Activate / Enter a New License Key</span>
+                    <span>Kích hoạt / Nhập License Key mới</span>
                   </div>
                 }
               >
                 <div className="space-y-4">
                   <div>
-                    <Text className="text-slate-300 text-xs block mb-1 font-medium">This Machine's ID (HWID):</Text>
+                    <Text className="text-slate-300 text-xs block mb-1 font-medium">Mã máy này (HWID):</Text>
                     <div className="flex items-center gap-2">
                       <Input
                         readOnly
                         value={hardwareHwid}
                         className="bg-slate-900 border-slate-700 text-cyan-300 font-mono text-xs"
                       />
-                      <Tooltip title="Copy the machine ID to send to the Admin for a key">
+                      <Tooltip title="Sao chép mã máy gửi Admin để lấy key">
                         <Button
                           icon={<CopyOutlined />}
-                          onClick={() => copyToClipboard(hardwareHwid, 'Machine ID (HWID)')}
+                          onClick={() => copyToClipboard(hardwareHwid, 'Mã máy (HWID)')}
                           className="border-slate-700 bg-slate-800 text-slate-300"
                         />
                       </Tooltip>
@@ -580,7 +580,7 @@ export const LicenseManagementPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <Text className="text-slate-300 text-xs block mb-1 font-medium">Enter the License Key you were given:</Text>
+                    <Text className="text-slate-300 text-xs block mb-1 font-medium">Nhập License Key bạn được cấp:</Text>
                     <Input
                       size="large"
                       placeholder="VIPLIKE-XXXX-XXXX-XXXX"
@@ -602,7 +602,7 @@ export const LicenseManagementPage: React.FC = () => {
                     onClick={handleActivate}
                     className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 font-semibold shadow-lg shadow-emerald-500/20"
                   >
-                    Activate License Now
+                    Kích hoạt bản quyền ngay
                   </Button>
                 </div>
               </Card>
@@ -619,11 +619,11 @@ export const LicenseManagementPage: React.FC = () => {
             <div className="flex items-center justify-between w-full">
               <div className="flex items-center gap-2 text-white">
                 <UserOutlined className="text-cyan-400 text-lg" />
-                <span>Tool Renter Ledger ({adminLicenses.length} Customers)</span>
+                <span>Sổ người thuê tool ({adminLicenses.length} khách)</span>
               </div>
               <Input.Search
                 allowClear
-                placeholder="Search customer name, key, HWID..."
+                placeholder="Tìm tên khách, key, HWID..."
                 value={adminSearch}
                 onChange={(e) => setAdminSearch(e.target.value)}
                 className="max-w-xs"
@@ -636,7 +636,7 @@ export const LicenseManagementPage: React.FC = () => {
             columns={adminColumns}
             rowKey="id"
             pagination={{ pageSize: 10, hideOnSinglePage: true }}
-            locale={{ emptyText: adminSearch ? 'No matching renters found' : 'No renters yet' }}
+            locale={{ emptyText: adminSearch ? 'Không tìm thấy người thuê phù hợp' : 'Chưa có người thuê nào' }}
             className="ant-table-dark-custom"
             scroll={{ x: 1000 }}
           />
@@ -648,7 +648,7 @@ export const LicenseManagementPage: React.FC = () => {
         title={
           <div className="flex items-center gap-2 text-white text-base">
             <CrownOutlined className="text-amber-400" />
-            <span>Issue a New Rental Key to a Customer</span>
+            <span>Cấp key thuê mới cho khách</span>
           </div>
         }
         open={isCreateModalOpen}
@@ -670,8 +670,8 @@ export const LicenseManagementPage: React.FC = () => {
         >
           <Form.Item
             name="customerName"
-            label={<span className="text-slate-300">Customer / Renter Name</span>}
-            rules={[{ required: true, message: 'Please enter the renter name' }]}
+            label={<span className="text-slate-300">Tên khách / người thuê</span>}
+            rules={[{ required: true, message: 'Vui lòng nhập tên người thuê' }]}
           >
             <Input placeholder="e.g. Anh Dũng Media - Marketing Team 01" className="bg-slate-900 border-slate-700 text-white" />
           </Form.Item>
@@ -680,7 +680,7 @@ export const LicenseManagementPage: React.FC = () => {
             <Col span={12}>
               <Form.Item
                 name="customerContact"
-                label={<span className="text-slate-300">Phone / Zalo / Telegram</span>}
+                label={<span className="text-slate-300">SĐT / Zalo / Telegram</span>}
               >
                 <Input placeholder="VD: 0909123456" className="bg-slate-900 border-slate-700 text-white" />
               </Form.Item>
@@ -688,17 +688,17 @@ export const LicenseManagementPage: React.FC = () => {
             <Col span={12}>
               <Form.Item
                 name="packageType"
-                label={<span className="text-slate-300">Rental Plan</span>}
+                label={<span className="text-slate-300">Gói thuê</span>}
               >
                 <Select
                   className="bg-slate-900 border-slate-700 text-white"
                   options={[
                     { label: '3-day trial', value: 'TRIAL_3DAYS' },
-                    { label: '1-Month plan (30 days)', value: '1_MONTH' },
-                    { label: '3-Month plan (90 days)', value: '3_MONTHS' },
-                    { label: '6-Month plan (180 days)', value: '6_MONTHS' },
-                    { label: '1-Year plan (365 days)', value: '1_YEAR' },
-                    { label: 'Lifetime', value: 'LIFETIME' },
+                    { label: 'Gói 1 tháng (30 ngày)', value: '1_MONTH' },
+                    { label: 'Gói 3 tháng (90 ngày)', value: '3_MONTHS' },
+                    { label: 'Gói 6 tháng (180 ngày)', value: '6_MONTHS' },
+                    { label: 'Gói 1 năm (365 ngày)', value: '1_YEAR' },
+                    { label: 'Vĩnh viễn', value: 'LIFETIME' },
                   ]}
                   onChange={(val) => {
                     const daysMap: Record<string, number> = {
@@ -720,7 +720,7 @@ export const LicenseManagementPage: React.FC = () => {
             <Col span={12}>
               <Form.Item
                 name="days"
-                label={<span className="text-slate-300">Rental Days</span>}
+                label={<span className="text-slate-300">Số ngày thuê</span>}
                 rules={[{ required: true }]}
               >
                 <InputNumber min={1} max={3650} className="w-full bg-slate-900 border-slate-700 text-white" />
@@ -729,7 +729,7 @@ export const LicenseManagementPage: React.FC = () => {
             <Col span={12}>
               <Form.Item
                 name="maxVias"
-                label={<span className="text-slate-300">Via Limit</span>}
+                label={<span className="text-slate-300">Giới hạn Via</span>}
                 rules={[{ required: true }]}
               >
                 <InputNumber min={5} max={10000} className="w-full bg-slate-900 border-slate-700 text-white" />
@@ -739,25 +739,25 @@ export const LicenseManagementPage: React.FC = () => {
 
           <Form.Item
             name="notes"
-            label={<span className="text-slate-300">Order Notes</span>}
+            label={<span className="text-slate-300">Ghi chú đơn</span>}
           >
             <Input.TextArea
               rows={2}
-              placeholder="e.g. Customer paid 500k, November monthly plan"
+              placeholder="VD: Khách đã chuyển 500k, gói tháng 11"
               className="bg-slate-900 border-slate-700 text-white"
             />
           </Form.Item>
 
           <div className="flex justify-end gap-2 pt-2">
             <Button onClick={() => setIsCreateModalOpen(false)} className="border-slate-700 text-slate-300">
-              Cancel
+              Hủy
             </Button>
             <Button
               type="primary"
               htmlType="submit"
               className="bg-gradient-to-r from-cyan-500 to-blue-600 font-semibold"
             >
-              Create Key & Save
+              Tạo key & Lưu
             </Button>
           </div>
         </Form>

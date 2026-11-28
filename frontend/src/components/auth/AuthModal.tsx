@@ -77,13 +77,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setLoading(true);
       const res = await api.post('/auth/register', values);
       if (res.data?.success) {
-        message.success(`Account @${values.username} created successfully!`);
+        message.success(`Đã tạo tài khoản @${values.username}!`);
         createUserForm.resetFields();
       } else {
-        message.error(res.data?.error || 'Failed to create account.');
+        message.error(res.data?.error || 'Tạo tài khoản thất bại.');
       }
     } catch (err: any) {
-      message.error(err.response?.data?.error || 'Error creating account.');
+      message.error(err.response?.data?.error || 'Lỗi khi tạo tài khoản.');
     } finally {
       setLoading(false);
     }
@@ -97,14 +97,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         hardwareHwid: hwid,
       });
       if (res.data?.success) {
-        message.success('VIPLIKE license activated successfully!');
+        message.success('Kích hoạt bản quyền VIPLIKE thành công!');
         licenseForm.resetFields();
         onClose();
       } else {
-        message.error(res.data?.error || 'Invalid or expired key.');
+        message.error(res.data?.error || 'Key không hợp lệ hoặc đã hết hạn.');
       }
     } catch (err: any) {
-      message.error(err.response?.data?.error || 'Invalid or expired key.');
+      message.error(err.response?.data?.error || 'Key không hợp lệ hoặc đã hết hạn.');
     } finally {
       setLoading(false);
     }
@@ -112,15 +112,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const hwidBox = (
     <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 text-left text-xs space-y-1">
-      <div className="text-slate-400">Machine ID (HWID):</div>
-      <div className="font-mono text-cyan-300 truncate">{hwid || 'Detecting HWID...'}</div>
+      <div className="text-slate-400">Mã máy (HWID):</div>
+      <div className="font-mono text-cyan-300 truncate">{hwid || 'Đang lấy HWID...'}</div>
     </div>
   );
 
   const tabs = [
     {
       key: 'profile',
-      label: 'Account',
+      label: 'Tài khoản',
       children: (
         <div className="py-2 text-center space-y-4">
           <Avatar
@@ -137,7 +137,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
 
           <Tag color={admin ? 'gold' : 'blue'} className="px-2 py-0.5 font-semibold">
-            {admin ? 'ADMINISTRATOR' : 'TOOL RENTER'}
+            {admin ? 'ADMINISTRATOR' : 'NGƯỜI THUÊ TOOL'}
           </Tag>
 
           {hwidBox}
@@ -155,21 +155,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             }}
             className="rounded-xl font-medium"
           >
-            Log Out
+            Đăng xuất
           </Button>
         </div>
       ),
     },
     {
       key: 'license',
-      label: 'Activate Key',
+      label: 'Kích hoạt key',
       children: (
         <Form form={licenseForm} layout="vertical" onFinish={handleActivateLicense} className="pt-2">
           <div className="mb-3">{hwidBox}</div>
           <Form.Item
             name="licenseKey"
-            label={<span className="text-slate-300">Your License Key</span>}
-            rules={[{ required: true, message: 'Please enter a License Key' }]}
+            label={<span className="text-slate-300">License Key của bạn</span>}
+            rules={[{ required: true, message: 'Vui lòng nhập License Key' }]}
           >
             <Input
               size="large"
@@ -186,7 +186,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             loading={loading}
             className="bg-gradient-to-r from-amber-500 to-yellow-600 rounded-xl mt-2 h-11 text-black font-bold"
           >
-            Activate License Now
+            Kích hoạt bản quyền ngay
           </Button>
         </Form>
       ),
@@ -269,32 +269,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       ? [
           {
             key: 'create-user',
-            label: 'Create Account',
+            label: 'Tạo tài khoản',
             children: (
               <Form form={createUserForm} layout="vertical" onFinish={handleCreateUser} className="pt-2">
                 <Form.Item
                   name="username"
-                  label={<span className="text-slate-300">Username</span>}
-                  rules={[{ required: true, message: 'Please enter a username' }]}
+                  label={<span className="text-slate-300">Tên đăng nhập</span>}
+                  rules={[{ required: true, message: 'Vui lòng nhập tên đăng nhập' }]}
                 >
                   <Input size="large" prefix={<UserOutlined className="text-slate-500" />} placeholder="VD: user123" className={INPUT_CLASS} />
                 </Form.Item>
                 <Form.Item
                   name="email"
                   label={<span className="text-slate-300">Email</span>}
-                  rules={[{ type: 'email', message: 'Invalid email' }]}
+                  rules={[{ type: 'email', message: 'Email không hợp lệ' }]}
                 >
                   <Input size="large" prefix={<MailOutlined className="text-slate-500" />} placeholder="email@example.com" className={INPUT_CLASS} />
                 </Form.Item>
-                <Form.Item name="fullName" label={<span className="text-slate-300">Full Name</span>}>
-                  <Input size="large" prefix={<IdcardOutlined className="text-slate-500" />} placeholder="Full name..." className={INPUT_CLASS} />
+                <Form.Item name="fullName" label={<span className="text-slate-300">Họ tên</span>}>
+                  <Input size="large" prefix={<IdcardOutlined className="text-slate-500" />} placeholder="Họ tên..." className={INPUT_CLASS} />
                 </Form.Item>
                 <Form.Item
                   name="password"
-                  label={<span className="text-slate-300">Password</span>}
-                  rules={[{ required: true, min: 8, message: 'Password must be at least 8 characters' }]}
+                  label={<span className="text-slate-300">Mật khẩu</span>}
+                  rules={[{ required: true, min: 8, message: 'Mật khẩu phải có ít nhất 8 ký tự' }]}
                 >
-                  <Input.Password size="large" prefix={<LockOutlined className="text-slate-500" />} placeholder="Password for the new account..." className={INPUT_CLASS} />
+                  <Input.Password size="large" prefix={<LockOutlined className="text-slate-500" />} placeholder="Mật khẩu cho tài khoản mới..." className={INPUT_CLASS} />
                 </Form.Item>
                 <Button
                   type="primary"
@@ -304,7 +304,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   loading={loading}
                   className="bg-gradient-to-r from-emerald-500 to-teal-600 font-semibold rounded-xl mt-2 h-11"
                 >
-                  Create Account
+                  Tạo tài khoản
                 </Button>
               </Form>
             ),

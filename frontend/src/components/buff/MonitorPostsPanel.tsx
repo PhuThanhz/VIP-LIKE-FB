@@ -45,29 +45,29 @@ function shortUrl(url: string): string {
 function describe(entry: MonitorPostEntry): { badge: 'default' | 'processing' | 'success' | 'error' | 'warning'; text: string; detail?: string } {
   const t = entry.task;
   if (t) {
-    if (t.status === 'RUNNING') return { badge: 'processing', text: t.progress?.total ? `Buffing ${t.progress.done}/${t.progress.total}` : 'Buffing' };
+    if (t.status === 'RUNNING') return { badge: 'processing', text: t.progress?.total ? `Đang buff ${t.progress.done}/${t.progress.total}` : 'Đang buff' };
     if (t.status === 'QUEUED') {
       const wait = t.runAfter ? new Date(t.runAfter).getTime() - Date.now() : 0;
-      return { badge: 'warning', text: 'Waiting to buff', detail: wait > 60000 ? `starts in ${Math.ceil(wait / 60000)} min` : undefined };
+      return { badge: 'warning', text: 'Chờ buff', detail: wait > 60000 ? `bắt đầu sau ${Math.ceil(wait / 60000)} phút` : undefined };
     }
-    if (t.status === 'COMPLETED') return { badge: 'success', text: 'Buffed', detail: t.result ? `${t.result.success}/${t.result.total} likes` : undefined };
-    if (t.status === 'PARTIAL') return { badge: 'warning', text: 'Partially done', detail: t.result ? `${t.result.success}/${t.result.total} likes` : undefined };
-    if (t.status === 'FAILED') return { badge: 'error', text: 'Failed', detail: t.error || undefined };
-    if (t.status === 'NEEDS_REVIEW') return { badge: 'warning', text: 'Needs review', detail: t.error || undefined };
-    if (t.status === 'CANCELLED' || t.status === 'STOPPED') return { badge: 'default', text: 'Cancelled' };
+    if (t.status === 'COMPLETED') return { badge: 'success', text: 'Đã buff', detail: t.result ? `${t.result.success}/${t.result.total} likes` : undefined };
+    if (t.status === 'PARTIAL') return { badge: 'warning', text: 'Xong một phần', detail: t.result ? `${t.result.success}/${t.result.total} likes` : undefined };
+    if (t.status === 'FAILED') return { badge: 'error', text: 'Thất bại', detail: t.error || undefined };
+    if (t.status === 'NEEDS_REVIEW') return { badge: 'warning', text: 'Cần xem lại', detail: t.error || undefined };
+    if (t.status === 'CANCELLED' || t.status === 'STOPPED') return { badge: 'default', text: 'Đã hủy' };
   }
-  if (entry.buffed) return { badge: 'success', text: 'Buffed', detail: `${entry.buffed.totalSuccess} likes · ${formatTime(entry.buffed.lastBuffedAt)}` };
+  if (entry.buffed) return { badge: 'success', text: 'Đã buff', detail: `${entry.buffed.totalSuccess} like · ${formatTime(entry.buffed.lastBuffedAt)}` };
   switch (entry.status) {
     case 'BASELINE':
-      return { badge: 'default', text: 'Old post (baseline)', detail: 'Existed before monitoring started' };
+      return { badge: 'default', text: 'Bài cũ (mốc ban đầu)', detail: 'Đã có trước khi bắt đầu theo dõi' };
     case 'PINNED':
-      return { badge: 'default', text: 'Pinned, skipped' };
+      return { badge: 'default', text: 'Bài ghim, bỏ qua' };
     case 'SKIPPED_LIMIT':
-      return { badge: 'warning', text: 'Held by daily limit', detail: 'Retried automatically after the daily reset' };
+      return { badge: 'warning', text: 'Bị giữ do giới hạn ngày', detail: 'Tự thử lại khi qua ngày mới' };
     case 'ALREADY_BUFFED':
-      return { badge: 'success', text: 'Buffed earlier' };
+      return { badge: 'success', text: 'Đã buff trước đó' };
     case 'QUEUED':
-      return { badge: 'default', text: 'Task removed from queue', detail: 'The queue was cleared before the result was saved' };
+      return { badge: 'default', text: 'Task đã bị xóa khỏi hàng đợi', detail: 'Hàng đợi bị dọn trước khi lưu kết quả' };
     default:
       return { badge: 'default', text: entry.status };
   }
@@ -94,7 +94,7 @@ export default function MonitorPostsPanel({ workerBaseUrl, monitorId, onQueueUrl
         setPosts(res.data.posts || []);
         setError(null);
       } else {
-        setError(res.data?.error || 'Could not load posts');
+        setError(res.data?.error || 'Không tải được danh sách bài');
       }
     } catch (err: any) {
       setError(err.response?.data?.error || err.message);
@@ -129,20 +129,20 @@ export default function MonitorPostsPanel({ workerBaseUrl, monitorId, onQueueUrl
           value={filter}
           onChange={setFilter}
           options={[
-            { value: 'ALL', label: `All ${counts.ALL}` },
-            { value: 'CAUGHT', label: `Caught ${counts.CAUGHT}` },
-            ...(counts.SKIPPED > 0 ? [{ value: 'SKIPPED' as PostFilter, label: `Held by limit ${counts.SKIPPED}` }] : []),
-            { value: 'IGNORED', label: `Old / skipped ${counts.IGNORED}` },
+            { value: 'ALL', label: `Tất cả ${counts.ALL}` },
+            { value: 'CAUGHT', label: `Đã bắt ${counts.CAUGHT}` },
+            ...(counts.SKIPPED > 0 ? [{ value: 'SKIPPED' as PostFilter, label: `Bị giữ ${counts.SKIPPED}` }] : []),
+            { value: 'IGNORED', label: `Bài cũ / bỏ qua ${counts.IGNORED}` },
           ]}
         />
-        <Button size="small" type="text" icon={<ReloadOutlined />} loading={loading} onClick={load} aria-label="Reload posts" />
+        <Button size="small" type="text" icon={<ReloadOutlined />} loading={loading} onClick={load} aria-label="Tải lại danh sách bài" />
       </div>
       {posts.length === 0 ? (
         <div className="py-4 text-center text-xs text-slate-500">
-          No scanned posts recorded yet. Posts appear here after the next scan.
+          Chưa có bài nào được ghi nhận. Bài sẽ hiện ở đây sau lần quét tới.
         </div>
       ) : visible.length === 0 ? (
-        <div className="py-4 text-center text-xs text-slate-500">No posts in this filter.</div>
+        <div className="py-4 text-center text-xs text-slate-500">Không có bài nào trong bộ lọc này.</div>
       ) : (
         <div className="rounded-lg border border-slate-800 divide-y divide-slate-800/70 max-h-80 overflow-y-auto">
           {visible.map((entry) => {
@@ -151,11 +151,11 @@ export default function MonitorPostsPanel({ workerBaseUrl, monitorId, onQueueUrl
             const showBuff = canBuff && !entry.buffed && (entry.status === 'SKIPPED_LIMIT' || entry.status === 'BASELINE' || entry.task);
             return (
               <div key={entry.normalizedUrl} className="px-3 py-2 flex items-center gap-3 text-xs">
-                <div className="w-24 shrink-0 text-slate-500" title={`Last seen ${formatTime(entry.lastSeenAt)}`}>
+                <div className="w-24 shrink-0 text-slate-500" title={`Thấy lần cuối ${formatTime(entry.lastSeenAt)}`}>
                   {formatTime(entry.firstSeenAt)}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-slate-200 truncate">{entry.title || 'Facebook post'}</div>
+                  <div className="text-slate-200 truncate">{entry.title || 'Bài viết Facebook'}</div>
                   <a href={entry.url} target="_blank" rel="noopener noreferrer" className="block truncate text-[11px] text-blue-400 hover:underline">
                     {shortUrl(entry.url)}
                   </a>
@@ -171,7 +171,7 @@ export default function MonitorPostsPanel({ workerBaseUrl, monitorId, onQueueUrl
                 <div className="w-24 shrink-0 text-right">
                   {showBuff && (
                     <Button size="small" onClick={() => onQueueUrl(entry.url)}>
-                      Buff now
+                      Buff ngay
                     </Button>
                   )}
                 </div>

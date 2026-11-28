@@ -109,24 +109,24 @@ export default function HistoryTab({
   // Export the engagement history report to CSV (UTF-8 BOM for Excel)
   const handleExportLogsToCsv = () => {
     if (filteredBuffLogs.length === 0) {
-      message.warning('No rows match the filter to export!');
+      message.warning('Không có dòng nào khớp bộ lọc để xuất!');
       return;
     }
     const headers = [
-      'Time',
-      'Campaign Type',
-      'Post Link',
-      'Account / Via',
-      'Reaction',
-      'Total Pages',
-      'Success',
-      'Already Liked',
-      'Failed',
-      'Page Details',
+      'Thời gian',
+      'Loại chiến dịch',
+      'Link bài viết',
+      'Tài khoản / Via',
+      'Cảm xúc',
+      'Tổng số Page',
+      'Thành công',
+      'Đã like trước',
+      'Thất bại',
+      'Chi tiết Page',
     ];
     const rows = filteredBuffLogs.map((log) => {
       const time = new Date(log.createdAt).toLocaleString('vi-VN');
-      const type = log.type === 'QUEUE' ? 'Queue' : log.type === 'BATCH' ? 'Batch' : 'Single';
+      const type = log.type === 'QUEUE' ? 'Hàng đợi' : log.type === 'BATCH' ? 'Hàng loạt' : 'Đơn lẻ';
       const url = `"${(log.targetUrl || '').replace(/"/g, '""')}"`;
       const acc = `"${(log.accountName || '').replace(/"/g, '""')}"`;
       const reaction = log.reactionType || 'LIKE';
@@ -149,7 +149,7 @@ export default function HistoryTab({
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    message.success(`Exported ${filteredBuffLogs.length} rows to CSV!`);
+    message.success(`Đã xuất ${filteredBuffLogs.length} dòng ra CSV!`);
   };
 
 
@@ -159,13 +159,13 @@ export default function HistoryTab({
                 <Row gutter={[12, 12]}>
                   <Col xs={12} sm={6}>
                     <div className="p-3.5 app-surface text-center">
-                      <div className="text-[11px] font-bold text-slate-400 uppercase">Total runs</div>
+                      <div className="text-[11px] font-bold text-slate-400 uppercase">Tổng lượt chạy</div>
                       <div className="text-2xl font-semibold text-slate-100 mt-1">{buffLogs.length}</div>
                     </div>
                   </Col>
                   <Col xs={12} sm={6}>
                     <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 text-center">
-                      <div className="text-[11px] font-bold text-emerald-400 uppercase">Successful likes</div>
+                      <div className="text-[11px] font-bold text-emerald-400 uppercase">Like thành công</div>
                       <div className="text-2xl font-semibold text-emerald-300 mt-1">
                         {buffLogs.reduce((acc, l) => acc + getLogCounts(l).success, 0)}
                       </div>
@@ -173,7 +173,7 @@ export default function HistoryTab({
                   </Col>
                   <Col xs={12} sm={6}>
                     <div className="p-3.5 rounded-xl bg-blue-950/30 border border-blue-500/30 text-center">
-                      <div className="text-[11px] font-bold text-blue-400 uppercase">Already liked</div>
+                      <div className="text-[11px] font-bold text-blue-400 uppercase">Đã like trước</div>
                       <div className="text-2xl font-semibold text-blue-300 mt-1">
                         {buffLogs.reduce((acc, l) => acc + getLogCounts(l).alreadyLiked, 0)}
                       </div>
@@ -181,7 +181,7 @@ export default function HistoryTab({
                   </Col>
                   <Col xs={12} sm={6}>
                     <div className="p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/30 text-center">
-                      <div className="text-[11px] font-bold text-rose-400 uppercase">Errors / Failed</div>
+                      <div className="text-[11px] font-bold text-rose-400 uppercase">Lỗi / Thất bại</div>
                       <div className="text-2xl font-semibold text-rose-300 mt-1">
                         {buffLogs.reduce((acc, l) => acc + getLogCounts(l).failed, 0)}
                       </div>
@@ -195,7 +195,7 @@ export default function HistoryTab({
                     <div className="flex flex-wrap items-center gap-2">
                       <Input
                         prefix={<SearchOutlined className="text-slate-400" />}
-                        placeholder="Search by post link, Via or Page name..."
+                        placeholder="Tìm theo link bài, Via hoặc tên Page..."
                         value={logSearchQuery}
                         onChange={(e) => setLogSearchQuery(e.target.value)}
                         className="flex-1 min-w-[240px]"
@@ -204,11 +204,11 @@ export default function HistoryTab({
                       {logSearchQuery && (
                         <div className="w-full flex items-center justify-between p-2 rounded-lg bg-cyan-950/40 border border-cyan-800/60 text-xs text-slate-300">
                           <div className="flex items-center gap-2 truncate">
-                            <span className="text-cyan-400 font-semibold">🔍 Filtering by post:</span>
+                            <span className="text-cyan-400 font-semibold">🔍 Đang lọc theo bài:</span>
                             <span className="font-mono text-cyan-300 truncate max-w-md">{logSearchQuery}</span>
                           </div>
                           <Button size="small" type="link" onClick={() => setLogSearchQuery('')} className="text-xs text-cyan-400 p-0 font-semibold shrink-0">
-                            View all history (clear filter)
+                            Xem toàn bộ lịch sử (bỏ lọc)
                           </Button>
                         </div>
                       )}
@@ -218,28 +218,28 @@ export default function HistoryTab({
                             icon={<ReloadOutlined spin={buffLogsLoading} />}
                             onClick={() => {
                               reloadBuffLogs(false);
-                              message.success('History refreshed');
+                              message.success('Đã làm mới lịch sử');
                             }}
                           >
-                            Refresh
+                            Làm mới
                           </Button>
                           <Button onClick={handleExportLogsToCsv} disabled={filteredBuffLogs.length === 0}>
-                            {hasActiveLogFilter ? `Export CSV (${filteredBuffLogs.length})` : 'Export CSV'}
+                            {hasActiveLogFilter ? `Xuất CSV (${filteredBuffLogs.length})` : 'Xuất CSV'}
                           </Button>
                           <Button
                             danger
                           onClick={() => {
                             modal.confirm({
-                              title: 'Delete all buff history?',
-                              content: 'This will delete all saved logs. Are you sure?',
-                              okText: 'Delete all',
-                              cancelText: 'Cancel',
+                              title: 'Xóa toàn bộ lịch sử buff?',
+                              content: 'Thao tác này sẽ xóa mọi log đã lưu. Bạn chắc chứ?',
+                              okText: 'Xóa tất cả',
+                              cancelText: 'Hủy',
                               okButtonProps: { danger: true },
                               onOk: async () => {
                                 try {
                                   await api.delete('/buff-logs');
                                   setBuffLogs([]);
-                                  message.success('All buff history deleted!');
+                                  message.success('Đã xóa toàn bộ lịch sử buff!');
                                 } catch (err: any) {
                                   message.error(err.response?.data?.error || err.message);
                                 }
@@ -248,7 +248,7 @@ export default function HistoryTab({
                           }}
                           type="text"
                         >
-                          Delete history
+                          Xóa lịch sử
                         </Button>
                         </>
                       )}
@@ -260,10 +260,10 @@ export default function HistoryTab({
                         onChange={setLogFilterTime}
                         className="w-36"
                         options={[
-                          { value: 'ALL', label: 'All time' },
-                          { value: 'TODAY', label: 'Today' },
-                          { value: '7D', label: 'Last 7 days' },
-                          { value: '30D', label: 'Last 30 days' },
+                          { value: 'ALL', label: 'Mọi lúc' },
+                          { value: 'TODAY', label: 'Hôm nay' },
+                          { value: '7D', label: '7 ngày qua' },
+                          { value: '30D', label: '30 ngày qua' },
                         ]}
                       />
                       <Select
@@ -271,10 +271,10 @@ export default function HistoryTab({
                         onChange={setLogFilterType}
                         className="w-36"
                         options={[
-                          { value: 'ALL', label: 'All types' },
-                          { value: 'QUEUE', label: 'Queue' },
-                          { value: 'SINGLE', label: 'Single' },
-                          { value: 'BATCH', label: 'Batch' },
+                          { value: 'ALL', label: 'Mọi loại' },
+                          { value: 'QUEUE', label: 'Hàng đợi' },
+                          { value: 'SINGLE', label: 'Đơn lẻ' },
+                          { value: 'BATCH', label: 'Hàng loạt' },
                         ]}
                       />
                       <Select
@@ -284,7 +284,7 @@ export default function HistoryTab({
                         showSearch
                         optionFilterProp="label"
                         options={[
-                          { value: 'ALL', label: 'All Vias' },
+                          { value: 'ALL', label: 'Tất cả Via' },
                           ...logViaOptions.map((v) => ({ value: v, label: v })),
                         ]}
                       />
@@ -293,10 +293,10 @@ export default function HistoryTab({
                         onChange={setLogFilterResult}
                         className="w-40"
                         options={[
-                          { value: 'ALL', label: 'All results' },
-                          { value: 'CLEAN', label: 'All successful' },
-                          { value: 'UNVERIFIED', label: 'Has unverified' },
-                          { value: 'FAILED', label: 'Has errors' },
+                          { value: 'ALL', label: 'Mọi kết quả' },
+                          { value: 'CLEAN', label: 'Thành công hết' },
+                          { value: 'UNVERIFIED', label: 'Có chưa xác minh' },
+                          { value: 'FAILED', label: 'Có lỗi' },
                         ]}
                       />
                       <Select
@@ -304,7 +304,7 @@ export default function HistoryTab({
                         onChange={(v) => setLogFilterReaction(v)}
                         className="w-36"
                         options={[
-                          { value: 'ALL', label: 'All reactions' },
+                          { value: 'ALL', label: 'Mọi cảm xúc' },
                           ...REACTIONS.map((r) => ({
                             value: r.key,
                             label: `${r.emoji} ${r.shortLabel}`,
@@ -315,11 +315,11 @@ export default function HistoryTab({
                       <div className="ml-auto flex items-center gap-3 text-xs text-slate-400">
                         {hasActiveLogFilter && (
                           <Button type="link" size="small" onClick={resetLogFilters} className="px-0 text-xs">
-                            Clear filters
+                            Bỏ lọc
                           </Button>
                         )}
                         <span className="tabular-nums">
-                          {filteredBuffLogs.length} / {buffLogs.length} runs
+                          {filteredBuffLogs.length} / {buffLogs.length} lượt
                         </span>
                       </div>
                     </div>
@@ -334,9 +334,9 @@ export default function HistoryTab({
                     <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-3xl shadow-inner text-cyan-400">
                       <HistoryOutlined />
                     </div>
-                    <div className="text-base font-bold text-slate-100">No engagement history yet</div>
+                    <div className="text-base font-bold text-slate-100">Chưa có lịch sử tương tác</div>
                     <div className="text-xs text-slate-400 max-w-md mx-auto mt-2 leading-relaxed">
-                      Whenever you run a live or background engagement campaign, its log and result report will show up here so you can track and reconcile them easily.
+                      Mỗi khi bạn chạy chiến dịch tương tác trực tiếp hoặc chạy nền, log và báo cáo kết quả sẽ hiện ở đây để bạn dễ theo dõi và đối soát.
                     </div>
                     <Button
                       type="primary"
@@ -344,7 +344,7 @@ export default function HistoryTab({
                       onClick={onGoCreate}
                       className="mt-4 rounded-xl font-bold bg-cyan-600 hover:bg-cyan-500 border-none"
                     >
-                      Start your first campaign
+                      Bắt đầu chiến dịch đầu tiên
                     </Button>
                   </Card>
                 ) : (
@@ -352,12 +352,12 @@ export default function HistoryTab({
                     <Table<BuffLogEntry>
                       dataSource={filteredBuffLogs}
                       rowKey="id"
-                      pagination={{ pageSize: 10, showTotal: (t) => `${t} buff runs in total` }}
+                      pagination={{ pageSize: 10, showTotal: (t) => `Tổng ${t} lượt buff` }}
                       scroll={{ x: 1000 }}
                       className="ant-table-dark-custom"
                       columns={[
                         {
-                          title: 'Time',
+                          title: 'Thời gian',
                           dataIndex: 'createdAt',
                           key: 'createdAt',
                           width: 160,
@@ -371,18 +371,18 @@ export default function HistoryTab({
                               <div className="text-xs text-slate-500 mt-1 tabular-nums whitespace-nowrap flex items-center gap-1.5">
                                 <span>{new Date(val).toLocaleDateString('vi-VN')}</span>
                                 {log.type === 'QUEUE' ? (
-                                  <Tag color="cyan" className="m-0 border-0 text-[10px] px-1.5 py-0 leading-tight">Queue</Tag>
+                                  <Tag color="cyan" className="m-0 border-0 text-[10px] px-1.5 py-0 leading-tight">Hàng đợi</Tag>
                                 ) : log.type === 'BATCH' ? (
-                                  <Tag color="purple" className="m-0 border-0 text-[10px] px-1.5 py-0 leading-tight">Batch</Tag>
+                                  <Tag color="purple" className="m-0 border-0 text-[10px] px-1.5 py-0 leading-tight">Hàng loạt</Tag>
                                 ) : (
-                                  <Tag color="blue" className="m-0 border-0 text-[10px] px-1.5 py-0 leading-tight">Single</Tag>
+                                  <Tag color="blue" className="m-0 border-0 text-[10px] px-1.5 py-0 leading-tight">Đơn lẻ</Tag>
                                 )}
                               </div>
                             </div>
                           ),
                         },
                         {
-                          title: 'Post',
+                          title: 'Bài viết',
                           key: 'targetUrl',
                           render: (_, log) => (
                             <div className="min-w-0 leading-tight">
@@ -404,7 +404,7 @@ export default function HistoryTab({
                           ),
                         },
                         {
-                          title: 'Reaction',
+                          title: 'Cảm xúc',
                           dataIndex: 'reactionType',
                           key: 'reactionType',
                           width: 120,
@@ -419,21 +419,21 @@ export default function HistoryTab({
                           },
                         },
                         {
-                          title: 'Result',
+                          title: 'Kết quả',
                           key: 'counts',
                           width: 200,
                           render: (_, log) => {
                             const counts = getLogCounts(log);
                             const extras = [
                               counts.comments > 0 && { text: `${counts.comments} comments`, cls: 'text-slate-400' },
-                              counts.alreadyLiked > 0 && { text: `${counts.alreadyLiked} already liked`, cls: 'text-slate-400' },
+                              counts.alreadyLiked > 0 && { text: `${counts.alreadyLiked} đã like trước`, cls: 'text-slate-400' },
                               counts.unverified > 0 && { text: `${counts.unverified} unverified`, cls: 'text-amber-400' },
                               counts.failed > 0 && { text: `${counts.failed} errors`, cls: 'text-rose-400' },
                             ].filter(Boolean) as { text: string; cls: string }[];
                             return (
                               <div className="leading-tight">
                                 <div className="text-sm text-slate-200">
-                                  <span className="font-semibold text-emerald-400 tabular-nums">{counts.success}</span> successful
+                                  <span className="font-semibold text-emerald-400 tabular-nums">{counts.success}</span> thành công
                                 </div>
                                 {extras.length > 0 && (
                                   <div className="text-xs mt-1">
@@ -484,7 +484,7 @@ export default function HistoryTab({
                                 onClick={() => onBuffAgain(log)}
                                 className="text-xs font-semibold h-7 px-2"
                               >
-                                Buff more
+                                Buff thêm
                               </Button>
                               <Button
                                 size="small"
@@ -493,7 +493,7 @@ export default function HistoryTab({
                                 loading={loadingLogDetailId === log.id}
                                 className="text-xs text-slate-300 h-7 px-1.5"
                               >
-                                Details
+                                Chi tiết
                               </Button>
                               <Dropdown
                                 trigger={['click']}
@@ -501,17 +501,17 @@ export default function HistoryTab({
                                   items: [
                                     {
                                       key: 'open',
-                                      label: 'Open on Facebook',
+                                      label: 'Mở trên Facebook',
                                       icon: <ExportOutlined />,
                                       onClick: () => window.open(log.targetUrl, '_blank'),
                                     },
                                     {
                                       key: 'copy',
-                                      label: 'Copy link',
+                                      label: 'Sao chép link',
                                       icon: <CopyOutlined />,
                                       onClick: () => {
                                         navigator.clipboard.writeText(log.targetUrl);
-                                        message.success('Post link copied!');
+                                        message.success('Đã sao chép link bài!');
                                       },
                                     },
                                   ],

@@ -86,10 +86,10 @@ export default function ManagePagesModal({
             <IdcardOutlined className="text-blue-400 text-xl" />
             <div>
               <div className="font-bold text-base text-slate-100">
-                Page list per account
+                Danh sách Page theo tài khoản
               </div>
               <div className="text-[11px] text-slate-400 font-normal">
-                Fanpage lists are stored per Via, so there are always enough Pages when liking (no dropped pages).
+                Danh sách Fanpage được lưu theo từng Via, nên luôn đủ Page khi like (không bị rơi page).
               </div>
             </div>
           </div>
@@ -99,9 +99,9 @@ export default function ManagePagesModal({
           {/* Picker for the Via account to configure */}
           <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3">
             <div className="text-xs font-bold text-slate-300 mb-2 flex items-center justify-between">
-              <span>Choose the Via account whose i_user list you want to configure:</span>
+              <span>Chọn tài khoản Via cần cấu hình danh sách i_user:</span>
               <span className="text-[11px] text-blue-400 font-medium">
-                (Click a Via to view and manage it)
+                (Bấm vào Via để xem và quản lý)
               </span>
             </div>
             <Segmented
@@ -129,7 +129,7 @@ export default function ManagePagesModal({
                   value: 'CUSTOM',
                   label: (
                     <div className="flex items-center justify-center gap-1.5 py-1">
-                      <span className="text-slate-300">Manual cookie</span>
+                      <span className="text-slate-300">Cookie nhập tay</span>
                       <Tag color={getStoredPagesForVia('custom_manual').length > 0 ? 'cyan' : 'default'} className="!m-0 text-[10px] font-mono">
                         {getStoredPagesForVia('custom_manual').length} Page
                       </Tag>
@@ -146,7 +146,7 @@ export default function ManagePagesModal({
               <CheckCircleFilled className="text-emerald-400 text-base" />
               <div>
                 <div className="text-xs font-bold text-slate-200">
-                  Configuring: <span className="text-blue-400">{modalViaAccount?.pageName || (targetViaForModal === 'CUSTOM' ? 'Manual cookie' : 'Facebook Via')}</span>
+                  Đang cấu hình: <span className="text-blue-400">{modalViaAccount?.pageName || (targetViaForModal === 'CUSTOM' ? 'Cookie nhập tay' : 'Facebook Via')}</span>
                   {modalViaAccount && (
                     <span className="font-mono text-[10px] text-slate-400 ml-2">
                       (c_user: {extractCUser(modalViaAccount.cookieString || modalViaAccount.accessToken) || 'N/A'})
@@ -154,7 +154,7 @@ export default function ManagePagesModal({
                   )}
                 </div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
-                  This Via currently has <b className="font-bold text-emerald-400">{currentModalPages.length} Fanpages</b> saved.
+                  Via này hiện có <b className="font-bold text-emerald-400">{currentModalPages.length} Fanpage</b> đã lưu.
                 </div>
               </div>
             </div>
@@ -164,15 +164,15 @@ export default function ManagePagesModal({
           <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-200 uppercase tracking-wide text-xs">
-                Add i_user (Fanpages) to this Via:
+                Thêm i_user (Fanpage) cho Via này:
               </span>
               <Segmented
                 size="small"
                 value={addMode}
                 onChange={(val) => setAddMode(val as 'BULK' | 'SINGLE')}
                 options={[
-                  { label: 'Bulk paste', value: 'BULK' },
-                  { label: 'One at a time', value: 'SINGLE' },
+                  { label: 'Dán hàng loạt', value: 'BULK' },
+                  { label: 'Từng cái một', value: 'SINGLE' },
                 ]}
                 className="bg-slate-900 border border-slate-800 text-xs"
               />
@@ -181,7 +181,7 @@ export default function ManagePagesModal({
             {addMode === 'BULK' ? (
               <div className="space-y-2">
                 <label className="block text-slate-400">
-                  Paste i_user IDs or Page links (one Page per line, format <code className="text-blue-400 font-mono">ID | Page Name</code>):
+                  Dán ID i_user hoặc link Page (mỗi dòng một Page, định dạng <code className="text-blue-400 font-mono">ID | Tên Page</code>):
                 </label>
                 <Input.TextArea
                   rows={4}
@@ -192,7 +192,7 @@ export default function ManagePagesModal({
                 />
                 <div className="flex items-center justify-between text-[11px] text-slate-400">
                   <span>
-                    Detected: <b className="text-emerald-400 font-bold">{parsedBulkPages.length}</b> valid Fanpages
+                    Nhận diện được: <b className="text-emerald-400 font-bold">{parsedBulkPages.length}</b> Fanpage hợp lệ
                   </span>
                   <Button
                     type="primary"
@@ -209,7 +209,7 @@ export default function ManagePagesModal({
                     }}
                     className="bg-blue-600 hover:bg-blue-500 font-bold rounded-xl border-none"
                   >
-                    Save {parsedBulkPages.length} Pages to this Via
+                    Lưu {parsedBulkPages.length} Page vào Via này
                   </Button>
                 </div>
               </div>
@@ -217,7 +217,7 @@ export default function ManagePagesModal({
               <div className="space-y-3">
                 <Row gutter={10}>
                   <Col span={10}>
-                    <label className="block text-slate-400 mb-1">Fanpage name (optional):</label>
+                    <label className="block text-slate-400 mb-1">Tên Fanpage (không bắt buộc):</label>
                     <Input
                       placeholder="e.g. Làm Sen"
                       value={newPageName}
@@ -226,9 +226,9 @@ export default function ManagePagesModal({
                     />
                   </Col>
                   <Col span={14}>
-                    <label className="block text-slate-400 mb-1">Fanpage ID / i_user (or link):</label>
+                    <label className="block text-slate-400 mb-1">ID Fanpage / i_user (hoặc link):</label>
                     <Input
-                      placeholder="e.g. 61584834510803 or a Facebook link"
+                      placeholder="VD: 61584834510803 hoặc link Facebook"
                       value={newPageIdOrUrl}
                       onChange={(e) => setNewPageIdOrUrl(e.target.value)}
                       className="font-mono rounded-xl text-xs bg-slate-900 border-slate-800 text-slate-100"
@@ -254,7 +254,7 @@ export default function ManagePagesModal({
                     }}
                     className="bg-blue-600 hover:bg-blue-500 font-bold rounded-xl border-none"
                   >
-                    Add this Fanpage
+                    Thêm Fanpage này
                   </Button>
                 </div>
               </div>
@@ -265,7 +265,7 @@ export default function ManagePagesModal({
           <div>
             <div className="flex items-center justify-between mb-2">
               <span className="font-bold text-slate-200">
-                Saved Fanpages ({currentModalPages.length} Pages):
+                Fanpage đã lưu ({currentModalPages.length} Page):
               </span>
               <div className="flex items-center gap-2">
                 {currentModalPages.length > 0 && (
@@ -276,11 +276,11 @@ export default function ManagePagesModal({
                     onClick={handleClearPagesForTargetVia}
                     className="text-[11px] !p-0 !h-auto"
                   >
-                    Clear all to paste again
+                    Xóa hết để dán lại
                   </Button>
                 )}
                 <span className="text-[11px] text-slate-400">
-                  (Saved permanently on this machine)
+                  (Lưu vĩnh viễn trên máy này)
                 </span>
               </div>
             </div>
@@ -288,7 +288,7 @@ export default function ManagePagesModal({
             <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 border border-slate-800 rounded-xl p-2 bg-slate-950/60">
               {currentModalPages.length === 0 ? (
                 <div className="text-center py-6 text-slate-400">
-                  No Fanpages saved for this Via yet. Paste a list above to save!
+                  Via này chưa có Fanpage nào. Dán danh sách ở trên để lưu!
                 </div>
               ) : (
                 currentModalPages.map((page, idx) => (
@@ -316,7 +316,7 @@ export default function ManagePagesModal({
                         icon={<DeleteOutlined />}
                         onClick={() => handleDeletePageForTargetVia(page.id)}
                         className="text-rose-400 hover:text-rose-300 hover:bg-rose-950/40"
-                        title="Remove this Fanpage from the Via"
+                        title="Gỡ Fanpage này khỏi Via"
                       />
                     </div>
                   </div>
