@@ -832,7 +832,9 @@ export function useBuffEngagementController(props: BuffEngagementProps = {}) {
         message.success({
           content: res.data.baseline
             ? `First scan: recorded ${res.data.postsFound} existing posts as the baseline. From now on only posts published after this point are buffed.`
-            : `Scan complete: found ${res.data.postsFound} posts, queued ${res.data.newPostsEnqueued} new ones!`,
+            : `Scan complete: found ${res.data.postsFound} posts, queued ${res.data.newPostsEnqueued} new ones${
+                res.data.skippedByLimit ? `, ${res.data.skippedByLimit} held back by the daily limit` : ''
+              }.`,
           key: 'scanMon',
           duration: 4,
         });

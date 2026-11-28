@@ -2739,6 +2739,8 @@ function addBuffQueueTask(taskPayload) {
     id: `task_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
     idempotencyKey: taskPayload.idempotencyKey || null,
     source: taskPayload.source || 'MANUAL',
+    monitorId: taskPayload.monitorId || null,
+    monitorName: taskPayload.monitorName || null,
     targetUrl: taskPayload.targetUrl,
     normalizedUrl: normUrl,
     targetLikes: parseTargetLikes(taskPayload.targetLikes),
@@ -2749,6 +2751,8 @@ function addBuffQueueTask(taskPayload) {
     comments: Array.isArray(taskPayload.comments) ? taskPayload.comments : [],
     delayMinutes: delayMin,
     speedMode: taskPayload.speedMode || 'SMART',
+    dripFeedMode: Boolean(taskPayload.dripFeedMode),
+    dripDurationMinutes: Number(taskPayload.dripDurationMinutes) || 20,
     addedAt: new Date().toISOString(),
     runAfter: new Date(Date.now() + delayMin * 60 * 1000).toISOString(),
     status: 'QUEUED',
@@ -3743,7 +3747,12 @@ app.get('/api/buff-monitors', (req, res) => {
     const history = loadBuffHistory();
     return res.json({
       success: true,
-      monitors: data.monitors || [],
+      // postLog/seenPostUrls are heavy and polled often: send only counts here, full log via /posts
+      monitors: (data.monitors || []).map(({ postLog, seenPostUrls, ...m }) => ({
+        ...m,
+        postLogCount: Array.isArray(postLog) ? postLog.length : 0,
+        skippedLimitCount: Array.isArray(postLog) ? postLog.filter((e) => e.status === 'SKIPPED_LIMIT').length : 0,
+      })),
       postHunterPaused: isPostHunterPaused(),
       queueCount: (queueData.items || []).filter((it) => it.status === 'QUEUED').length,
       historyCount: Object.keys(history).length,
@@ -3823,7 +3832,7 @@ app.post('/api/buff-monitors', (req, res) => {
         const urlChanged = String(targetUrl).trim() !== data.monitors[idx].targetUrl;
         data.monitors[idx] = {
           ...data.monitors[idx],
-          ...(urlChanged ? { baselineDone: false, seenPostUrls: [] } : {}),
+          ...(urlChanged ? { baselineDone: false, seenPostUrls: [], postLog: [] } : {}),
           targetName: targetName ? String(targetName).trim() : data.monitors[idx].targetName,
           targetUrl: String(targetUrl).trim(),
           expiresAt: req.body.expiresAt !== undefined ? req.body.expiresAt : data.monitors[idx].expiresAt,
@@ -3960,6 +3969,27 @@ app.post('/api/buff-hunter/test-scan', async (req, res) => {
   }
 });
 
+// Per-monitor log of scanned posts (newest first, capped) so the UI can show what was caught and why
+const MONITOR_POST_LOG_LIMIT = 50;
+function logMonitorPost(mon, post, status, extra = {}) {
+  if (!Array.isArray(mon.postLog)) mon.postLog = [];
+  const normUrl = post.normalizedUrl || normalizeFbPostUrl(post.url);
+  const nowIso = new Date().toISOString();
+  const idx = mon.postLog.findIndex((e) => e.normalizedUrl === normUrl);
+  const prev = idx !== -1 ? mon.postLog.splice(idx, 1)[0] : null;
+  mon.postLog.unshift({
+    url: post.url,
+    normalizedUrl: normUrl,
+    title: String(post.title || prev?.title || '').split('\n')[0].slice(0, 200),
+    firstSeenAt: prev?.firstSeenAt || nowIso,
+    lastSeenAt: nowIso,
+    status,
+    taskId: extra.taskId || prev?.taskId || null,
+    note: extra.note || null,
+  });
+  if (mon.postLog.length > MONITOR_POST_LOG_LIMIT) mon.postLog.length = MONITOR_POST_LOG_LIMIT;
+}
+
 // Scan the target and queue new posts
 async function scanMonitorTarget(monitorId, options = {}) {
   const data = loadBuffMonitors();
@@ -4015,7 +4045,8 @@ async function scanMonitorTarget(monitorId, options = {}) {
 
   if (!mon.baselineDone) {
     mon.baselineDone = true;
-    mon.seenPostUrls = Array.from(new Set([...mon.seenPostUrls, ...posts.map((p) => p.normalizedUrl)]));
+    mon.seenPostUrls = Array.from(new Set([...mon.seenPostUrls, ...posts.map((p) => p.normalizedUrl || normalizeFbPostUrl(p.url))]));
+    for (const p of [...posts].reverse()) logMonitorPost(mon, p, 'BASELINE', { note: 'Existing post at first scan' });
     saveBuffMonitors(data);
     return {
       baseline: true,
@@ -4028,22 +4059,30 @@ async function scanMonitorTarget(monitorId, options = {}) {
   const newPosts = [];
   for (const post of posts) {
     const normUrl = post.normalizedUrl || normalizeFbPostUrl(post.url);
+    if (mon.seenPostUrls.includes(normUrl)) continue;
     if (post.isPinned) {
       // Old pinned post: remember it in seenPostUrls so it's never buffed by mistake
-      if (!mon.seenPostUrls.includes(normUrl)) mon.seenPostUrls.push(normUrl);
+      mon.seenPostUrls.push(normUrl);
+      logMonitorPost(mon, post, 'PINNED', { note: 'Pinned post, not buffed' });
       continue;
     }
-    if (!mon.seenPostUrls.includes(normUrl) && !history[normUrl]) {
-      newPosts.push(post);
+    if (history[normUrl]) {
       mon.seenPostUrls.push(normUrl);
+      logMonitorPost(mon, post, 'ALREADY_BUFFED', { taskId: history[normUrl].lastTaskId || null, note: 'Already buffed before' });
+      continue;
     }
+    newPosts.push(post);
   }
 
   let newPostsEnqueued = 0;
+  let skippedByLimit = 0;
   for (const newPost of newPosts) {
-    if (mon.dailyPostsCount >= maxDaily) {
-      console.log(`[PostHunter] ⚠️ Monitor ${mon.targetName} hit its limit of ${maxDaily} posts/day today. Skipping new post for now: ${newPost.url}`);
-      break;
+    const normUrl = newPost.normalizedUrl || normalizeFbPostUrl(newPost.url);
+    if ((mon.dailyPostsCount || 0) >= maxDaily) {
+      // Do NOT mark as seen: it is retried on the next scan once the daily counter resets
+      skippedByLimit++;
+      logMonitorPost(mon, newPost, 'SKIPPED_LIMIT', { note: `Daily limit ${maxDaily} posts reached` });
+      continue;
     }
 
     // Compute a naturally randomized like count (Random Likes Variance)
@@ -4057,6 +4096,8 @@ async function scanMonitorTarget(monitorId, options = {}) {
 
     const queuePayload = {
       source: `POST_HUNTER:${mon.targetName || mon.id}`,
+      monitorId: mon.id,
+      monitorName: mon.targetName || null,
       targetUrl: newPost.url,
       targetLikes: finalTargetLikes,
       reactionType: mon.buffConfig?.reactionType || 'RANDOM_POSITIVE',
@@ -4072,20 +4113,35 @@ async function scanMonitorTarget(monitorId, options = {}) {
     };
 
     const addRes = addBuffQueueTask(queuePayload);
-    if (addRes.task) {
-      newPostsEnqueued++;
-      mon.dailyPostsCount = (mon.dailyPostsCount || 0) + 1;
-      mon.totalDetected = (mon.totalDetected || 0) + 1;
-      mon.lastFoundPostUrl = newPost.url;
-
-      notifyPostHunted({
-        targetName: mon.targetName,
-        targetUrl: mon.targetUrl,
-        postUrl: newPost.url,
-        delayMinutes: queuePayload.delayMinutes,
-        targetLikes: queuePayload.targetLikes,
-      }).catch(() => {});
+    if (addRes.skipped) {
+      mon.seenPostUrls.push(normUrl);
+      logMonitorPost(mon, newPost, 'ALREADY_BUFFED', { note: 'Already buffed before' });
+      continue;
     }
+    if (!addRes.task) continue;
+
+    mon.seenPostUrls.push(normUrl);
+    if (addRes.alreadyQueued) {
+      logMonitorPost(mon, newPost, 'QUEUED', { taskId: addRes.task.id, note: 'Already in the queue' });
+      continue;
+    }
+
+    newPostsEnqueued++;
+    mon.dailyPostsCount = (mon.dailyPostsCount || 0) + 1;
+    mon.totalDetected = (mon.totalDetected || 0) + 1;
+    mon.lastFoundPostUrl = newPost.url;
+    logMonitorPost(mon, newPost, 'QUEUED', { taskId: addRes.task.id });
+
+    notifyPostHunted({
+      targetName: mon.targetName,
+      targetUrl: mon.targetUrl,
+      postUrl: newPost.url,
+      delayMinutes: queuePayload.delayMinutes,
+      targetLikes: queuePayload.targetLikes,
+    }).catch(() => {});
+  }
+  if (skippedByLimit > 0) {
+    console.log(`[PostHunter] ⚠️ Monitor ${mon.targetName} hit its limit of ${maxDaily} posts/day. ${skippedByLimit} new post(s) will be retried after the daily reset.`);
   }
 
   saveBuffMonitors(data);
@@ -4094,9 +4150,45 @@ async function scanMonitorTarget(monitorId, options = {}) {
     baseline: false,
     postsFound,
     newPostsEnqueued,
+    skippedByLimit,
     posts,
   };
 }
+
+// API: scanned-post log of 1 monitor, merged with the live queue task and buff history
+app.get('/api/buff-monitors/:id/posts', (req, res) => {
+  try {
+    const mon = (loadBuffMonitors().monitors || []).find((m) => m.id === req.params.id);
+    if (!mon) return res.status(404).json({ success: false, error: 'Monitor not found' });
+    const queueItems = loadBuffQueue().items || [];
+    const history = loadBuffHistory();
+    const posts = (mon.postLog || []).map((entry) => {
+      const task =
+        (entry.taskId && queueItems.find((it) => it.id === entry.taskId)) ||
+        queueItems.find((it) => it.normalizedUrl === entry.normalizedUrl && (it.status === 'QUEUED' || it.status === 'RUNNING')) ||
+        null;
+      const hist = history[entry.normalizedUrl] || null;
+      return {
+        ...entry,
+        task: task
+          ? {
+              id: task.id,
+              status: task.status,
+              runAfter: task.runAfter || null,
+              progress: task.progress || null,
+              result: task.result || null,
+              targetLikes: task.targetLikes,
+              error: task.error || task.lastError || null,
+            }
+          : null,
+        buffed: hist ? { totalSuccess: hist.totalSuccess || 0, lastBuffedAt: hist.lastBuffedAt || null } : null,
+      };
+    });
+    return res.json({ success: true, monitorId: mon.id, posts });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // API: manually scan 1 monitor right now
 app.post('/api/buff-monitors/:id/scan-now', async (req, res) => {

@@ -13,6 +13,7 @@ import {
   ThunderboltOutlined,
   SendOutlined,
 } from '@ant-design/icons';
+import MonitorPostsPanel from './MonitorPostsPanel';
 
 export interface HunterMonitor {
   id: string;
@@ -41,6 +42,8 @@ export interface HunterMonitor {
   baselineDone?: boolean;
   lastPostsFound?: number;
   lastScanVia?: string | null;
+  postLogCount?: number;
+  skippedLimitCount?: number;
 }
 
 interface PostHunterTabProps {
@@ -374,16 +377,24 @@ export default function PostHunterTab({
       key: 'caught',
       width: 80,
       align: 'right',
-      render: (_, mon) =>
-        mon.lastFoundPostUrl ? (
+      render: (_, mon) => (
+        <div>
+          {mon.lastFoundPostUrl ? (
           <Tooltip title="Open the latest post">
             <a href={mon.lastFoundPostUrl} target="_blank" rel="noopener noreferrer" className="text-[13px] font-semibold text-slate-100 hover:text-blue-400">
               {mon.totalDetected || 0}
             </a>
           </Tooltip>
-        ) : (
-          <span className="text-[13px] font-semibold text-slate-100">{mon.totalDetected || 0}</span>
-        ),
+          ) : (
+            <span className="text-[13px] font-semibold text-slate-100">{mon.totalDetected || 0}</span>
+          )}
+          {(mon.skippedLimitCount || 0) > 0 && (
+            <Tooltip title="New posts held back by the daily limit. They are retried after the daily reset.">
+              <div className="text-[10px] text-amber-300 whitespace-nowrap">+{mon.skippedLimitCount} held</div>
+            </Tooltip>
+          )}
+        </div>
+      ),
     },
     {
       title: '',
@@ -527,6 +538,10 @@ export default function PostHunterTab({
           dataSource={filteredMonitors}
           tableLayout="fixed"
           scroll={{ x: 860 }}
+          expandable={{
+            expandRowByClick: false,
+            expandedRowRender: (mon) => <MonitorPostsPanel workerBaseUrl={workerBaseUrl} monitorId={mon.id} onQueueUrl={onQueueUrl} />,
+          }}
           pagination={filteredMonitors.length > 10 ? { pageSize: 10, showTotal: (t) => `${t} monitors` } : false}
           locale={{
             emptyText:
@@ -561,8 +576,11 @@ export default function PostHunterTab({
         ) : (
           <div className="divide-y divide-slate-800/70">
             {recentCatches.map((task) => {
-              const source =
-                task.source === 'AUTO_OWN_POST' ? 'Posted by the app' : task.monitorName && task.monitorName !== 'Post Hunter' ? task.monitorName : null;
+              const monitorName =
+                task.monitorName ||
+                monitors.find((m) => m.id === task.monitorId)?.targetName ||
+                (String(task.source || '').startsWith('POST_HUNTER:') ? String(task.source).slice('POST_HUNTER:'.length) : null);
+              const source = task.source === 'AUTO_OWN_POST' ? 'Posted by the app' : monitorName;
               return (
                 <div key={task.id} className="px-4 py-2.5 flex items-center gap-4 text-xs">
                   <div className="w-20 shrink-0 text-slate-500">{formatAgo(task.addedAt, now)}</div>
